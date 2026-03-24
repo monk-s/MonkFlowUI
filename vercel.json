@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://monkflow-api.up.railway.app/api/:path*"
+      "destination": "https://postgres-production-76fd.up.railway.app/api/:path*"
     }
   ]
 }
