@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monk Flow — AI Workflow Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/lucide.min.css" />
+  <link rel="icon" type="image/svg+xml" href="logo.svg" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- LANDING PAGE -->
+  <div id="landing-container" class="hidden"></div>
+
+  <!-- AUTH SCREENS -->
+  <div id="auth-container" class="hidden">
+    <div id="auth-login"></div>
+    <div id="auth-signup" class="hidden"></div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="app-container" class="app-layout hidden">
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar"></aside>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <header id="topbar" class="topbar"></header>
+      <main id="main-content" class="main-content"></main>
+    </div>
+  </div>
+
+  <!-- Modal Overlay -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div id="modal-content" class="modal-box"></div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

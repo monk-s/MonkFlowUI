@@ -1,0 +1,168 @@
+const env = require('../config/env');
+
+let resendClient = null;
+
+function getResendClient() {
+  if (!resendClient && env.resendApiKey) {
+    const { Resend } = require('resend');
+    resendClient = new Resend(env.resendApiKey);
+  }
+  return resendClient;
+}
+
+async function sendEmail({ to, subject, html }) {
+  const client = getResendClient();
+
+  if (!client) {
+    console.log(`[DEV EMAIL] To: ${to} | Subject: ${subject}`);
+    console.log(`[DEV EMAIL] Body: ${html.substring(0, 200)}...`);
+    return { id: 'dev-' + Date.now() };
+  }
+
+  const result = await client.emails.send({
+    from: env.emailFrom,
+    to,
+    subject,
+    html,
+  });
+
+  return result;
+}
+
+// ── Templates ──────────────────────────────────────────
+
+async function sendWelcome(email, firstName) {
+  return sendEmail({
+    to: email,
+    subject: 'Welcome to MonkFlow',
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #00cc6a;">Welcome to MonkFlow, ${firstName}!</h1>
+        <p>Your account has been created. You can now:</p>
+        <ul>
+          <li>Create and automate workflows</li>
+          <li>Deploy AI agents</li>
+          <li>Manage appointments</li>
+          <li>Invite your team</li>
+        </ul>
+        <p><a href="${env.frontendUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Go to Dashboard</a></p>
+      </div>
+    `,
+  });
+}
+
+async function sendPasswordReset(email, firstName, resetToken) {
+  const resetUrl = `${env.frontendUrl}?reset=${resetToken}`;
+  return sendEmail({
+    to: email,
+    subject: 'Reset Your MonkFlow Password',
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #00cc6a;">Password Reset</h1>
+        <p>Hi ${firstName}, we received a request to reset your password.</p>
+        <p><a href="${resetUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Reset Password</a></p>
+        <p style="color: #666; font-size: 14px;">This link expires in 1 hour. If you didn't request this, ignore this email.</p>
+      </div>
+    `,
+  });
+}
+
+async function sendAppointmentConfirmation(email, bookerName, appointment) {
+  return sendEmail({
+    to: email,
+    subject: `Appointment Confirmed — ${appointment.date}`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #00cc6a;">Appointment Confirmed</h1>
+        <p>Hi ${bookerName}, your appointment has been confirmed.</p>
+        <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
+          <p><strong>Date:</strong> ${appointment.date}</p>
+          <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
+          <p><strong>Type:</strong> ${appointment.meeting_type}</p>
+        </div>
+        <p style="color: #666; font-size: 14px;">You'll receive a reminder before your appointment.</p>
+      </div>
+    `,
+  });
+}
+
+async function sendAppointmentNotification(userId, appointment) {
+  const userModel = require('../models/user.model');
+  const user = await userModel.findById(userId);
+  if (!user) return;
+
+  return sendEmail({
+    to: user.email,
+    subject: `New Appointment: ${appointment.booker_name}`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #00cc6a;">New Appointment Booked</h1>
+        <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
+          <p><strong>Client:</strong> ${appointment.booker_name} (${appointment.booker_email})</p>
+          <p><strong>Date:</strong> ${appointment.date}</p>
+          <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
+          <p><strong>Type:</strong> ${appointment.meeting_type}</p>
+          ${appointment.notes ? `<p><strong>Notes:</strong> ${appointment.notes}</p>` : ''}
+        </div>
+        <p><a href="${env.frontendUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Dashboard</a></p>
+      </div>
+    `,
+  });
+}
+
+async function sendTeamInvite(email, name, inviteToken) {
+  const inviteUrl = `${env.frontendUrl}?invite=${inviteToken}`;
+  return sendEmail({
+    to: email,
+    subject: 'You\'ve been invited to MonkFlow',
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #00cc6a;">Team Invitation</h1>
+        <p>Hi${name ? ` ${name}` : ''}, you've been invited to join a MonkFlow team.</p>
+        <p><a href="${inviteUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
+      </div>
+    `,
+  });
+}
+
+async function sendWorkflowFailureAlert(email, firstName, workflowName, errorMessage) {
+  return sendEmail({
+    to: email,
+    subject: `Workflow Failed: ${workflowName}`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #ff4444;">Workflow Failure Alert</h1>
+        <p>Hi ${firstName}, your workflow "${workflowName}" has failed.</p>
+        <div style="background: #fff0f0; padding: 16px; border-radius: 8px; margin: 16px 0; border-left: 4px solid #ff4444;">
+          <p><strong>Error:</strong> ${errorMessage}</p>
+        </div>
+        <p><a href="${env.frontendUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Workflow</a></p>
+      </div>
+    `,
+  });
+}
+
+async function sendContactFormReceipt(email, name, subject) {
+  return sendEmail({
+    to: email,
+    subject: `We received your message: ${subject}`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #00cc6a;">Message Received</h1>
+        <p>Hi ${name}, thanks for reaching out! We've received your message about "${subject}" and will get back to you within 24 hours.</p>
+        <p>— The MonkFlow Team</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = {
+  sendEmail,
+  sendWelcome,
+  sendPasswordReset,
+  sendAppointmentConfirmation,
+  sendAppointmentNotification,
+  sendTeamInvite,
+  sendWorkflowFailureAlert,
+  sendContactFormReceipt,
+};

@@ -1,0 +1,30 @@
+require('dotenv').config();
+
+const env = {
+  nodeEnv: process.env.NODE_ENV || 'development',
+  port: parseInt(process.env.PORT, 10) || 8080,
+  databaseUrl: process.env.DATABASE_URL,
+  jwtSecret: process.env.JWT_SECRET,
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '15m',
+  refreshTokenExpiresDays: parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS, 10) || 30,
+  corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  emailProvider: process.env.EMAIL_PROVIDER || '',
+  resendApiKey: process.env.RESEND_API_KEY || '',
+  emailFrom: process.env.EMAIL_FROM || 'noreply@monkflow.io',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+  isDev: (process.env.NODE_ENV || 'development') === 'development',
+  isProd: process.env.NODE_ENV === 'production',
+};
+
+// Validate required vars in production
+if (env.isProd) {
+  const required = ['DATABASE_URL', 'JWT_SECRET'];
+  for (const key of required) {
+    if (!process.env[key]) {
+      throw new Error(`Missing required environment variable: ${key}`);
+    }
+  }
+}
+
+module.exports = env;

@@ -1,0 +1,36 @@
+{
+  "name": "monkflow-api",
+  "version": "1.0.0",
+  "description": "MonkFlow backend API",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "migrate": "node migrations/migrate.js",
+    "seed": "node seeds/seed.js",
+    "test": "jest --forceExit --detectOpenHandles"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "expr-eval": "^2.0.2",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "node-cron": "^3.0.3",
+    "pg": "^8.12.0",
+    "pino": "^8.17.2",
+    "resend": "^2.1.0",
+    "uuid": "^9.0.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.3"
+  }
+}
