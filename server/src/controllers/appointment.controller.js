@@ -55,9 +55,7 @@ const book = catchAsync(async (req, res) => {
       meeting_type: data.meetingType,
     });
     if (calendarEvent?.id) {
-      // Store the calendar event ID for future updates/cancellations
-      await query('UPDATE appointments SET metadata = jsonb_set(COALESCE(metadata, \'{}\'::jsonb), \'{googleCalendarEventId}\', $1::jsonb) WHERE id = $2',
-        [JSON.stringify(calendarEvent.id), appointment.id]);
+      console.log(`[Appointment] Google Calendar event ID: ${calendarEvent.id}`);
     }
   } catch (err) {
     console.error('Failed to create Google Calendar event:', err.message);
