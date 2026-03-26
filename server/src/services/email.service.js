@@ -19,14 +19,19 @@ async function sendEmail({ to, subject, html }) {
     return { id: 'dev-' + Date.now() };
   }
 
-  const result = await client.emails.send({
-    from: env.emailFrom,
-    to,
-    subject,
-    html,
-  });
-
-  return result;
+  try {
+    const result = await client.emails.send({
+      from: env.emailFrom,
+      to,
+      subject,
+      html,
+    });
+    console.log(`[Email] Sent to ${to}: id=${result?.data?.id || result?.id || JSON.stringify(result)}`);
+    return result;
+  } catch (emailErr) {
+    console.error(`[Email] FAILED to send to ${to}: ${emailErr.message}`, emailErr.statusCode || '', JSON.stringify(emailErr.response?.body || emailErr.message));
+    throw emailErr;
+  }
 }
 
 // ── Templates ──────────────────────────────────────────

@@ -91,11 +91,11 @@ async function createCalendarEvent(appointment) {
     ].filter(Boolean).join('\n'),
     start: {
       dateTime: startDateTime,
-      timeZone: 'America/Los_Angeles',
+      timeZone: appointment.timezone || 'America/Chicago',
     },
     end: {
       dateTime: endDateTime,
-      timeZone: 'America/Los_Angeles',
+      timeZone: appointment.timezone || 'America/Chicago',
     },
     // Note: Service accounts can't add attendees without Domain-Wide Delegation.
     // Attendee info is included in the description instead.

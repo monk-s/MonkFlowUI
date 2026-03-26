@@ -3003,7 +3003,8 @@ function showSchedulingModal() {
         <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#00cc6a;cursor:pointer;font-size:12px;margin-left:8px;">Change</button>
       </div>
       ${slotsHtml}
-      ${selectedSlot ? `<div style="margin-top:20px;text-align:center;">
+      <div style="text-align:center;margin-top:8px;font-size:11px;color:rgba(255,255,255,0.35);">All times shown in Central Time (CT)</div>
+      ${selectedSlot ? `<div style="margin-top:12px;text-align:center;">
         <button class="btn btn-primary" onclick="window._schedGoStep3()" style="min-width:160px;">Continue</button>
       </div>` : ''}
     `);
@@ -3022,7 +3023,7 @@ function showSchedulingModal() {
       <div style="background:rgba(0,204,106,0.08);border:1px solid rgba(0,204,106,0.2);border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
         <div style="font-size:20px;">&#128197;</div>
         <div>
-          <div style="font-size:13px;font-weight:600;color:rgba(255,255,255,0.9);">${formattedDate} &middot; ${selectedSlot.start} - ${selectedSlot.end}</div>
+          <div style="font-size:13px;font-weight:600;color:rgba(255,255,255,0.9);">${formattedDate} &middot; ${selectedSlot.start} - ${selectedSlot.end} CT</div>
           <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#00cc6a;cursor:pointer;font-size:11px;padding:0;">Change date &amp; time</button>
         </div>
       </div>
@@ -3141,6 +3142,7 @@ function showSchedulingModal() {
           company: company || undefined,
           notes: notes || undefined,
           meetingType: meetingType,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago',
         }),
       });
       const data = await res.json();
@@ -3161,7 +3163,7 @@ function showSchedulingModal() {
             </div>
             <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
               <span style="color:rgba(255,255,255,0.5);font-size:13px;">Time</span>
-              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">${selectedSlot.start} - ${selectedSlot.end}</span>
+              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">${selectedSlot.start} - ${selectedSlot.end} CT</span>
             </div>
             <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
               <span style="color:rgba(255,255,255,0.5);font-size:13px;">Type</span>

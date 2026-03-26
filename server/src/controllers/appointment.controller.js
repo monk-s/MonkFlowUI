@@ -37,10 +37,14 @@ const book = catchAsync(async (req, res) => {
   // Send confirmation emails
   try {
     const emailService = require('../services/email.service');
-    await emailService.sendAppointmentConfirmation(data.bookerEmail, data.bookerName, appointment);
-    await emailService.sendAppointmentNotification(data.userId, appointment);
+    console.log(`[Appointment] Sending confirmation email to ${data.bookerEmail}...`);
+    const confResult = await emailService.sendAppointmentConfirmation(data.bookerEmail, data.bookerName, appointment);
+    console.log(`[Appointment] Confirmation email result:`, JSON.stringify(confResult));
+    console.log(`[Appointment] Sending notification email for user ${data.userId}...`);
+    const notifResult = await emailService.sendAppointmentNotification(data.userId, appointment);
+    console.log(`[Appointment] Notification email result:`, JSON.stringify(notifResult));
   } catch (err) {
-    console.error('Failed to send appointment emails:', err.message);
+    console.error('Failed to send appointment emails:', err.message, err.statusCode || '', JSON.stringify(err.response?.body || ''));
   }
 
   // Create Google Calendar event (non-blocking)
