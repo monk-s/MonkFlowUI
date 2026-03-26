@@ -38,9 +38,9 @@ const getStats = catchAsync(async (req, res) => {
     query(
       `SELECT
         COUNT(*)::int as total,
-        COUNT(*) FILTER (WHERE status = 'completed')::int as completed,
-        COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
-        COUNT(*) FILTER (WHERE status = 'running')::int as running
+        COUNT(*) FILTER (WHERE we.status = 'completed')::int as completed,
+        COUNT(*) FILTER (WHERE we.status = 'failed')::int as failed,
+        COUNT(*) FILTER (WHERE we.status = 'running')::int as running
        FROM workflow_executions we
        JOIN workflows w ON we.workflow_id = w.id
        WHERE w.user_id = $1 AND we.started_at >= NOW() - INTERVAL '30 days'`,
@@ -73,7 +73,7 @@ const getStats = catchAsync(async (req, res) => {
 
     // Upcoming appointments (next 5)
     query(
-      `SELECT id, date, start_time, end_time, booker_name, booker_email, meeting_type, status
+      `SELECT id, date, start_time, end_time, booker_name, booker_email, meeting_type
        FROM appointments
        WHERE user_id = $1 AND date >= CURRENT_DATE AND status != 'cancelled'
        ORDER BY date ASC, start_time ASC
