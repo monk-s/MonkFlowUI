@@ -2928,17 +2928,19 @@ function showSchedulingModal() {
       const cellDate = new Date(calendarYear, calendarMonth, d);
       const dateStr = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       const isPast = cellDate < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const isWeekend = cellDate.getDay() === 0 || cellDate.getDay() === 6;
+      const isDisabled = isPast || isWeekend;
       const isToday = cellDate.toDateString() === today.toDateString();
       const isSelected = selectedDate === dateStr;
       let style = 'width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;margin:2px auto;cursor:pointer;transition:all 0.15s;border:none;background:transparent;color:rgba(255,255,255,0.85);';
-      if (isPast) {
+      if (isDisabled) {
         style += 'opacity:0.25;cursor:not-allowed;';
       } else if (isSelected) {
         style += 'background:#00cc6a;color:#000;font-weight:700;';
       } else if (isToday) {
         style += 'border:2px solid #00cc6a;font-weight:600;';
       }
-      calendarCells += `<button style="${style}" ${isPast ? 'disabled' : `onclick="window._schedSelectDate('${dateStr}')"`}>${d}</button>`;
+      calendarCells += `<button style="${style}" ${isDisabled ? 'disabled' : `onclick="window._schedSelectDate('${dateStr}')"`}>${d}</button>`;
     }
 
     const canGoPrev = calendarYear > today.getFullYear() || (calendarYear === today.getFullYear() && calendarMonth > today.getMonth());
@@ -3063,7 +3065,7 @@ function showSchedulingModal() {
     fetch(`${API_BASE}/appointments/availability?userId=${OWNER_USER_ID}&date=${date}`)
       .then(res => res.json())
       .then(data => {
-        availableSlots = (data.data || []);
+        availableSlots = (data.data || []).map(s => ({ start: s.startTime || s.start, end: s.endTime || s.end }));
         render();
       })
       .catch(() => {
