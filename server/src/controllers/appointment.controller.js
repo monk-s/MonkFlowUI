@@ -43,6 +43,26 @@ const book = catchAsync(async (req, res) => {
     console.error('Failed to send appointment emails:', err.message);
   }
 
+  // Create Google Calendar event (non-blocking)
+  try {
+    const googleCalendar = require('../services/google-calendar.service');
+    const calendarEvent = await googleCalendar.createCalendarEvent({
+      ...appointment,
+      booker_name: data.bookerName,
+      booker_email: data.bookerEmail,
+      company: data.company,
+      notes: data.notes,
+      meeting_type: data.meetingType,
+    });
+    if (calendarEvent?.id) {
+      // Store the calendar event ID for future updates/cancellations
+      await query('UPDATE appointments SET metadata = jsonb_set(COALESCE(metadata, \'{}\'::jsonb), \'{googleCalendarEventId}\', $1::jsonb) WHERE id = $2',
+        [JSON.stringify(calendarEvent.id), appointment.id]);
+    }
+  } catch (err) {
+    console.error('Failed to create Google Calendar event:', err.message);
+  }
+
   // Create notification for the appointment owner
   await query(
     `INSERT INTO notifications (user_id, type, title, message, icon, link_page)

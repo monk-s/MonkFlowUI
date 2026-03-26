@@ -79,13 +79,24 @@ const execute = catchAsync(async (req, res) => {
   const workflow = await workflowModel.findById(req.params.id);
   if (!workflow || workflow.user_id !== req.user.userId) throw ApiError.notFound('Workflow not found');
 
-  // Execute asynchronously
-  const result = executeWorkflow(workflow, { trigger: 'manual', payload: req.body.payload || {} });
+  // Create execution record synchronously so we can return its ID
+  const execution = await workflowModel.createExecution({
+    workflowId: workflow.id,
+    triggerType: 'manual',
+    triggerPayload: req.body.payload || {},
+  });
+
+  // Execute asynchronously — pass the existing execution record
+  const result = executeWorkflow(workflow, {
+    trigger: 'manual',
+    payload: req.body.payload || {},
+    executionId: execution.id,
+  });
 
   // Don't await — return immediately
   result.catch(err => console.error(`Workflow ${workflow.id} execution error:`, err.message));
 
-  res.json({ message: 'Workflow execution started', workflowId: workflow.id });
+  res.json({ message: 'Workflow execution started', workflowId: workflow.id, executionId: execution.id });
 });
 
 const listExecutions = catchAsync(async (req, res) => {

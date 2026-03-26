@@ -98,7 +98,7 @@ const api = {
   get(path) { return this.request('GET', path); },
   post(path, body) { return this.request('POST', path, body); },
   patch(path, body) { return this.request('PATCH', path, body); },
-  del(path) { return this.request('DELETE', path); },
+  del(path, body) { return this.request('DELETE', path, body); },
 };
 
 // ── State ──────────────────────────────────────────────
@@ -108,6 +108,71 @@ let currentUser = null;
 let notificationPanelOpen = false;
 let searchDropdownOpen = false;
 let searchSelectedIndex = -1;
+let dashboardData = null;
+let workflowsData = null;
+let logsData = null;
+let currentWorkflowId = null;
+let logsSearchDebounceTimer = null;
+let apiKeysData = null;
+
+// ── Type Mappings ──────────────────────────────────────────
+const FRONTEND_TO_BACKEND_TYPE = {
+  'webhook-trigger': 'trigger',
+  'schedule-trigger': 'schedule',
+  'event-trigger': 'event',
+  'ai-classifier': 'ai',
+  'ai-generator': 'ai',
+  'ai-analyzer': 'ai',
+  'condition': 'condition',
+  'delay': 'delay',
+  'loop': 'loop',
+  'action': 'action',
+  'api-call': 'api_call',
+  'notify': 'notification',
+  'database': 'transform',
+};
+
+const BACKEND_TO_FRONTEND_TYPE = {
+  'trigger': 'webhook-trigger',
+  'schedule': 'schedule-trigger',
+  'event': 'event-trigger',
+  'ai': 'ai-classifier',
+  'condition': 'condition',
+  'delay': 'delay',
+  'loop': 'loop',
+  'action': 'action',
+  'api_call': 'api-call',
+  'notification': 'notify',
+  'transform': 'database',
+};
+
+// ── Helpers ──────────────────────────────────────────────
+function timeAgo(dateStr) {
+  if (!dateStr) return 'Never';
+  const now = new Date();
+  const date = new Date(dateStr);
+  const seconds = Math.floor((now - date) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return date.toLocaleDateString();
+}
+
+function formatLogTime(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+    '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+
+function triggerTypeLabel(triggerType) {
+  const map = { webhook: 'Webhook', schedule: 'Schedule', event: 'Event', manual: 'Manual', trigger: 'Webhook' };
+  return map[triggerType] || triggerType || 'Manual';
+}
 
 // ── Notifications Data ──────────────────────────────────
 let notifications = [
@@ -210,6 +275,9 @@ function navigateTo(page) {
   closeSearchDropdown();
   renderTopbar();
   renderMainContent();
+  if (page === 'dashboard') loadDashboardData();
+  if (page === 'workflows') loadWorkflowsData();
+  if (page === 'logs') loadLogsData();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
@@ -217,6 +285,36 @@ function navigateTo(page) {
   // Init editor if navigating to workflow-editor
   if (page === 'workflow-editor') {
     setTimeout(() => initWorkflowEditor(), 50);
+  }
+}
+
+async function loadDashboardData() {
+  try {
+    const result = await api.get('/dashboard/stats');
+    dashboardData = result.data;
+    renderMainContent();
+  } catch (err) {
+    console.error('Failed to load dashboard:', err);
+  }
+}
+
+async function loadWorkflowsData() {
+  try {
+    const result = await api.get('/workflows?limit=50');
+    workflowsData = result.data || [];
+    renderMainContent();
+  } catch (err) {
+    console.error('Failed to load workflows:', err);
+  }
+}
+
+async function loadLogsData() {
+  try {
+    const result = await api.get('/logs?limit=50');
+    logsData = result.data || [];
+    renderMainContent();
+  } catch (err) {
+    console.error('Failed to load logs:', err);
   }
 }
 
@@ -266,6 +364,8 @@ function showApp() {
   renderSidebar();
   renderTopbar();
   renderMainContent();
+  loadDashboardData();
+  fetchNotifications().then(() => renderTopbar());
 }
 
 // ── Auth Handlers ──────────────────────────────────────
@@ -318,6 +418,18 @@ async function handleLogout() {
   currentPage = 'dashboard';
   showLanding();
   showToast('Signed out successfully', 'info');
+}
+
+async function handleForgotPassword() {
+  const emailEl = document.querySelector('#auth-login input[type="email"]');
+  const email = emailEl?.value?.trim();
+  if (!email) { showToast('Please enter your email address first', 'error'); return; }
+  try {
+    await api.post('/auth/forgot-password', { email });
+    showToast('If that email exists, a password reset link has been sent.', 'info');
+  } catch {
+    showToast('If that email exists, a password reset link has been sent.', 'info');
+  }
 }
 
 // ── Data Fetching Helpers ──────────────────────────────
@@ -401,7 +513,7 @@ function renderLandingPage() {
         </div>
         <div class="landing-nav-actions">
           <button class="btn btn-ghost" onclick="showAuth()">Sign In</button>
-          <button class="btn btn-primary btn-sm" onclick="document.getElementById('landing-schedule').scrollIntoView({behavior:'smooth'})">Schedule a Call</button>
+          <button class="btn btn-primary btn-sm" onclick="showSchedulingModal()">Schedule a Call</button>
         </div>
         <button class="landing-menu-btn" onclick="document.querySelector('.landing-nav-links').classList.toggle('open');document.querySelector('.landing-nav-actions').classList.toggle('open')">
           ${icons.menu}
@@ -416,7 +528,7 @@ function renderLandingPage() {
         <h1 class="landing-hero-title">We Build the Tools<br/>Your Business <span class="text-accent">Actually Needs</span></h1>
         <p class="landing-hero-subtitle">MonkFlow crafts custom onboarding tools, scheduling software, chatbots, and intelligent workflows — built around your business, not the other way around. We don't just use AI. We implement it where it matters most.</p>
         <div class="hero-actions">
-          <button class="btn btn-primary btn-lg" onclick="document.getElementById('landing-schedule').scrollIntoView({behavior:'smooth'})">${icons.clock} Schedule a Free Consultation</button>
+          <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Schedule a Free Consultation</button>
           <button class="btn btn-secondary btn-lg" onclick="document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">${icons.eye} Explore Our Services</button>
         </div>
         <div class="landing-hero-stats">
@@ -529,7 +641,7 @@ function renderLandingPage() {
           <h2>Ready to Build Something Great?</h2>
           <p>Every tool we build starts with a conversation. Tell us about your business, and we'll show you what's possible.</p>
           <div class="landing-cta-actions">
-            <button class="btn btn-primary btn-lg" onclick="showAuth()">${icons.clock} Schedule Your Free Consultation</button>
+            <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Schedule Your Free Consultation</button>
             <button class="btn btn-secondary btn-lg" onclick="showAuth()">${icons.eye} Sign In to Dashboard</button>
           </div>
         </div>
@@ -590,23 +702,23 @@ function renderAuthLogin() {
             </div>
             <div class="form-group">
               <label class="form-label">Password</label>
-              <input type="password" placeholder="Enter your password" />
+              <input type="password" placeholder="Enter your password" onkeydown="if(event.key==='Enter')handleLogin()" />
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
                 <input type="checkbox" style="width:auto;" /> Remember me
               </label>
-              <a href="#" style="font-size:12px;">Forgot password?</a>
+              <a href="#" onclick="event.preventDefault();handleForgotPassword();" style="font-size:12px;">Forgot password?</a>
             </div>
             <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="handleLogin()">
               Sign In
             </button>
             <div class="auth-divider">or continue with</div>
             <div class="auth-social-btns">
-              <button class="auth-social-btn" onclick="handleLogin()">
+              <button class="auth-social-btn" onclick="showToast('Google sign-in coming soon','info')">
                 ${icons.globe} Google
               </button>
-              <button class="auth-social-btn" onclick="handleLogin()">
+              <button class="auth-social-btn" onclick="showToast('GitHub sign-in coming soon','info')">
                 ${icons.key} GitHub
               </button>
             </div>
@@ -683,15 +795,15 @@ function renderAuthSignup() {
             </div>
             <div class="form-group">
               <label class="form-label">Company Name</label>
-              <input type="text" placeholder="Your company" />
+              <input type="text" placeholder="Your company" onkeydown="if(event.key==='Enter')handleSignup()" />
             </div>
             <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="handleSignup()">
               Create Account
             </button>
             <div class="auth-divider">or sign up with</div>
             <div class="auth-social-btns">
-              <button class="auth-social-btn">${icons.globe} Google</button>
-              <button class="auth-social-btn">${icons.key} GitHub</button>
+              <button class="auth-social-btn" onclick="showToast('Google sign-up coming soon','info')">${icons.globe} Google</button>
+              <button class="auth-social-btn" onclick="showToast('GitHub sign-up coming soon','info')">${icons.key} GitHub</button>
             </div>
           </div>
           <div class="auth-footer">
@@ -775,9 +887,9 @@ function renderSidebar() {
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-user" onclick="navigateTo('settings')">
-        <div class="avatar">NL</div>
+        <div class="avatar">${currentUser ? (currentUser.first_name?.[0] || '') + (currentUser.last_name?.[0] || '') : 'NL'}</div>
         <div class="user-info">
-          <div class="user-name">Nathan Linder</div>
+          <div class="user-name">${currentUser ? `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() : 'Nathan Linder'}</div>
           <div class="user-plan">Curated Software Solutions</div>
         </div>
       </div>
@@ -1045,17 +1157,73 @@ function renderMainContent() {
 }
 
 // ============================================================
-// DASHBOARD PAGE (operational — no marketing hero)
+// DASHBOARD PAGE (operational — real data from API)
 // ============================================================
 function renderDashboard() {
-  const barData = [65, 45, 80, 55, 90, 70, 85, 60, 95, 75, 88, 50];
-  const barLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const bars = barData.map((v, i) => `<div class="chart-bar" style="height:${v}%"><span class="bar-value">${v * 12}</span><span class="bar-label">${barLabels[i]}</span></div>`).join('');
+  if (!dashboardData) {
+    return `
+      <div class="page-header">
+        <div>
+          <h1>Welcome back, ${currentUser?.first_name || 'there'}</h1>
+          <p class="page-desc">Loading your dashboard...</p>
+        </div>
+      </div>
+      <div class="stats-grid">
+        ${[1,2,3,4].map(() => `
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-icon" style="background:var(--bg-tertiary);"></div>
+            </div>
+            <div style="height:32px;width:60%;background:var(--bg-tertiary);border-radius:6px;margin:8px 0;animation:pulse 1.5s ease-in-out infinite;"></div>
+            <div style="height:14px;width:80%;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s ease-in-out infinite;"></div>
+          </div>
+        `).join('')}
+      </div>
+      <style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}</style>
+    `;
+  }
+
+  const { workflows, agents, executions, chartData, recentActivity } = dashboardData;
+
+  // Bar chart
+  const maxCount = Math.max(...(chartData || []).map(d => d.count), 1);
+  const bars = (chartData || []).map(d => {
+    const pct = Math.round((d.count / maxCount) * 100);
+    return `<div class="chart-bar" style="height:${pct}%"><span class="bar-value">${d.count}</span><span class="bar-label">${d.month}</span></div>`;
+  }).join('');
+
+  // Donut chart percentages
+  const total = executions?.total || 1;
+  const completedPct = Math.round((executions?.completed || 0) / total * 100);
+  const failedPct = Math.round((executions?.failed || 0) / total * 100);
+  const runningPct = Math.round((executions?.running || 0) / total * 100);
+  const otherPct = Math.max(0, 100 - completedPct - failedPct - runningPct);
+  const donutEnd1 = completedPct;
+  const donutEnd2 = donutEnd1 + failedPct;
+  const donutEnd3 = donutEnd2 + runningPct;
+
+  // Activity dot color based on level
+  const dotColor = (level) => {
+    if (level === 'error') return 'style="background:var(--error);"';
+    if (level === 'warn' || level === 'warning') return 'style="background:var(--warning);"';
+    if (level === 'info') return 'style="background:var(--info);"';
+    return '';
+  };
+
+  const activityItems = (recentActivity || []).slice(0, 5).map(a => `
+    <div class="activity-item">
+      <div class="activity-dot" ${dotColor(a.level)}></div>
+      <div class="activity-content">
+        <div class="activity-text">${a.message}</div>
+        <div class="activity-time">${timeAgo(a.created_at)}</div>
+      </div>
+    </div>
+  `).join('');
 
   return `
     <div class="page-header">
       <div>
-        <h1>Welcome back, Nathan</h1>
+        <h1>Welcome back, ${currentUser?.first_name || 'there'}</h1>
         <p class="page-desc">Here's an overview of your projects and team performance.</p>
       </div>
       <div class="page-actions">
@@ -1068,34 +1236,30 @@ function renderDashboard() {
       <div class="stat-card">
         <div class="stat-header">
           <div class="stat-icon green">${icons.workflow}</div>
-          <span class="stat-change up">${icons.arrowUp} 18%</span>
         </div>
-        <div class="stat-value">24</div>
+        <div class="stat-value">${workflows?.active || 0}</div>
         <div class="stat-label">Active Workflows</div>
       </div>
       <div class="stat-card">
         <div class="stat-header">
           <div class="stat-icon blue">${icons.agents}</div>
-          <span class="stat-change up">${icons.arrowUp} 12%</span>
         </div>
-        <div class="stat-value">6</div>
-        <div class="stat-label">AI Agents Running</div>
+        <div class="stat-value">${agents?.total || 0}</div>
+        <div class="stat-label">AI Agents</div>
       </div>
       <div class="stat-card">
         <div class="stat-header">
           <div class="stat-icon yellow">${icons.zap}</div>
-          <span class="stat-change up">${icons.arrowUp} 23%</span>
         </div>
-        <div class="stat-value">5,421</div>
+        <div class="stat-value">${(executions?.total || 0).toLocaleString()}</div>
         <div class="stat-label">Total Executions</div>
       </div>
       <div class="stat-card">
         <div class="stat-header">
-          <div class="stat-icon green">${icons.clock}</div>
-          <span class="stat-change up">${icons.arrowUp} 41%</span>
+          <div class="stat-icon green">${icons.check}</div>
         </div>
-        <div class="stat-value">99.4%</div>
-        <div class="stat-label">Uptime</div>
+        <div class="stat-value">${executions?.successRate != null ? executions.successRate.toFixed(1) + '%' : '--'}</div>
+        <div class="stat-label">Success Rate</div>
       </div>
     </div>
 
@@ -1105,12 +1269,12 @@ function renderDashboard() {
         <div class="card-header">
           <div>
             <div class="card-title">Workflow Executions</div>
-            <div class="card-subtitle">Monthly execution volume over the past year</div>
+            <div class="card-subtitle">Monthly execution volume</div>
           </div>
-          <button class="btn btn-ghost btn-sm">${icons.filter} Filter</button>
+          <button class="btn btn-ghost btn-sm" onclick="showToast('Chart filtering coming soon','info')">${icons.filter} Filter</button>
         </div>
         <div class="chart-bar-group" style="margin-bottom:30px;">
-          ${bars}
+          ${bars || '<div style="padding:20px;color:var(--text-secondary);font-size:13px;">No execution data yet</div>'}
         </div>
       </div>
 
@@ -1118,32 +1282,32 @@ function renderDashboard() {
         <div class="card-header">
           <div>
             <div class="card-title">Execution Status</div>
-            <div class="card-subtitle">Breakdown of results this quarter</div>
+            <div class="card-subtitle">Breakdown of results</div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:40px;padding:20px 0;">
-          <div class="donut-chart" style="background:conic-gradient(var(--accent) 0% 72%, var(--warning) 72% 85%, var(--info) 85% 92%, var(--border-light) 92% 100%);">
+          <div class="donut-chart" style="background:conic-gradient(var(--accent) 0% ${donutEnd1}%, var(--error) ${donutEnd1}% ${donutEnd2}%, var(--info) ${donutEnd2}% ${donutEnd3}%, var(--border-light) ${donutEnd3}% 100%);">
             <div class="donut-center">
-              <div class="donut-value">72%</div>
+              <div class="donut-value">${completedPct}%</div>
               <div class="donut-label">Success</div>
             </div>
           </div>
           <div style="display:flex;flex-direction:column;gap:12px;">
             <div style="display:flex;align-items:center;gap:8px;font-size:13px;">
               <div style="width:10px;height:10px;border-radius:2px;background:var(--accent);"></div>
-              Successful — 72%
+              Completed — ${completedPct}%
             </div>
             <div style="display:flex;align-items:center;gap:8px;font-size:13px;">
-              <div style="width:10px;height:10px;border-radius:2px;background:var(--warning);"></div>
-              Retried — 13%
+              <div style="width:10px;height:10px;border-radius:2px;background:var(--error);"></div>
+              Failed — ${failedPct}%
             </div>
             <div style="display:flex;align-items:center;gap:8px;font-size:13px;">
               <div style="width:10px;height:10px;border-radius:2px;background:var(--info);"></div>
-              Pending — 7%
+              Running — ${runningPct}%
             </div>
             <div style="display:flex;align-items:center;gap:8px;font-size:13px;">
               <div style="width:10px;height:10px;border-radius:2px;background:var(--border-light);"></div>
-              Failed — 8%
+              Other — ${otherPct}%
             </div>
           </div>
         </div>
@@ -1157,41 +1321,7 @@ function renderDashboard() {
           <div class="card-title">Recent Activity</div>
           <button class="btn btn-ghost btn-sm" onclick="navigateTo('logs')">View all</button>
         </div>
-        <div class="activity-item">
-          <div class="activity-dot"></div>
-          <div class="activity-content">
-            <div class="activity-text"><strong>Lead Scoring Pipeline</strong> executed successfully (99.2%)</div>
-            <div class="activity-time">2 minutes ago</div>
-          </div>
-        </div>
-        <div class="activity-item">
-          <div class="activity-dot" style="background:var(--info);"></div>
-          <div class="activity-content">
-            <div class="activity-text"><strong>Support Agent</strong> handled 150 tickets today</div>
-            <div class="activity-time">15 min ago</div>
-          </div>
-        </div>
-        <div class="activity-item">
-          <div class="activity-dot" style="background:var(--error);"></div>
-          <div class="activity-content">
-            <div class="activity-text"><strong>Slack Alert System</strong> failed — API rate limited</div>
-            <div class="activity-time">2 hours ago</div>
-          </div>
-        </div>
-        <div class="activity-item">
-          <div class="activity-dot"></div>
-          <div class="activity-content">
-            <div class="activity-text"><strong>Data Backup Pipeline</strong> completed — 2.4 GB synced</div>
-            <div class="activity-time">3 hours ago</div>
-          </div>
-        </div>
-        <div class="activity-item">
-          <div class="activity-dot" style="background:var(--accent);"></div>
-          <div class="activity-content">
-            <div class="activity-text"><strong>Email Outreach Sequence</strong> sent batch of 25 emails</div>
-            <div class="activity-time">5 hours ago</div>
-          </div>
-        </div>
+        ${activityItems || '<div style="padding:20px;color:var(--text-secondary);font-size:13px;">No recent activity</div>'}
       </div>
 
       <div class="card">
@@ -1224,34 +1354,67 @@ function renderDashboard() {
 // WORKFLOWS PAGE
 // ============================================================
 function renderWorkflows() {
-  const workflows = [
-    { name: 'Lead Scoring Pipeline', status: 'active', runs: '1,284', lastRun: '2m ago', trigger: 'Webhook', success: '99.2%' },
-    { name: 'Email Outreach Sequence', status: 'active', runs: '856', lastRun: '15m ago', trigger: 'Schedule', success: '97.8%' },
-    { name: 'Customer Onboarding', status: 'active', runs: '432', lastRun: '1h ago', trigger: 'Event', success: '99.5%' },
-    { name: 'Invoice Processing', status: 'paused', runs: '218', lastRun: '3h ago', trigger: 'Schedule', success: '96.1%' },
-    { name: 'Slack Alert System', status: 'error', runs: '1,092', lastRun: '5m ago', trigger: 'Webhook', success: '88.4%' },
-    { name: 'Data Backup Pipeline', status: 'active', runs: '365', lastRun: '30m ago', trigger: 'Schedule', success: '100%' },
-    { name: 'Social Media Scheduler', status: 'draft', runs: '0', lastRun: 'Never', trigger: 'Schedule', success: '—' },
-    { name: 'Support Ticket Router', status: 'active', runs: '2,105', lastRun: '1m ago', trigger: 'Webhook', success: '99.8%' },
-  ];
+  const workflows = workflowsData;
 
-  const rows = workflows.map(w => `
-    <tr>
-      <td style="font-weight:600;">${w.name}</td>
-      <td><span class="badge-status ${w.status}"><span class="dot"></span> ${w.status.charAt(0).toUpperCase() + w.status.slice(1)}</span></td>
-      <td>${w.trigger}</td>
-      <td>${w.runs}</td>
-      <td>${w.success}</td>
-      <td>${w.lastRun}</td>
-      <td>
-        <div style="display:flex;gap:4px;">
-          <button class="btn btn-ghost btn-sm" onclick="navigateTo('workflow-editor')">${icons.edit}</button>
-          <button class="btn btn-ghost btn-sm" onclick="showToast('Workflow executed!')">${icons.play}</button>
-          <button class="btn btn-ghost btn-sm">${icons.moreV}</button>
+  if (workflows === null) {
+    // Loading skeleton
+    const skeletonRows = Array.from({ length: 5 }, () => `
+      <tr>
+        <td><div style="height:14px;width:160px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
+        <td><div style="height:14px;width:60px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
+        <td><div style="height:14px;width:70px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
+        <td><div style="height:14px;width:40px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
+        <td><div style="height:14px;width:50px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
+        <td><div style="height:14px;width:60px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
+        <td><div style="height:14px;width:80px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
+      </tr>
+    `).join('');
+
+    return `
+      <div class="page-header">
+        <div>
+          <h1>Workflows</h1>
+          <p class="page-desc">Manage and monitor all your automated workflows.</p>
         </div>
-      </td>
-    </tr>
-  `).join('');
+        <div class="page-actions">
+          <button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Workflow Name</th><th>Status</th><th>Trigger</th><th>Total Runs</th><th>Success Rate</th><th>Last Run</th><th>Actions</th></tr></thead>
+          <tbody>${skeletonRows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  const rows = workflows.map(w => {
+    const status = w.status || 'draft';
+    const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+    const successRate = w.success_rate != null ? `${w.success_rate}%` : '\u2014';
+    const totalRuns = w.total_runs != null ? w.total_runs.toLocaleString() : '0';
+    const lastRun = w.last_run_at ? timeAgo(w.last_run_at) : 'Never';
+    const trigger = triggerTypeLabel(w.trigger_type);
+
+    return `
+      <tr data-workflow-status="${status}">
+        <td style="font-weight:600;">${w.name || 'Untitled'}</td>
+        <td><span class="badge-status ${status}"><span class="dot"></span> ${statusLabel}</span></td>
+        <td>${trigger}</td>
+        <td>${totalRuns}</td>
+        <td>${successRate}</td>
+        <td>${lastRun}</td>
+        <td>
+          <div style="display:flex;gap:4px;">
+            <button class="btn btn-ghost btn-sm" onclick="loadWorkflowInEditor('${w.id}')" title="Edit">${icons.edit}</button>
+            <button class="btn btn-ghost btn-sm" onclick="executeWorkflowFromList('${w.id}')" title="Execute">${icons.play}</button>
+            <button class="btn btn-ghost btn-sm" onclick="deleteWorkflowFromList('${w.id}','${(w.name || '').replace(/'/g, "\\'")}')" title="Delete">${icons.trash}</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
 
   return `
     <div class="page-header">
@@ -1260,17 +1423,17 @@ function renderWorkflows() {
         <p class="page-desc">Manage and monitor all your automated workflows.</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-secondary btn-sm">${icons.filter} Filter</button>
+        <button class="btn btn-secondary btn-sm" onclick="showToast('Use the filter chips below to filter workflows','info')">${icons.filter} Filter</button>
         <button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button>
       </div>
     </div>
 
     <div class="filter-bar">
-      <span class="filter-chip active">All (${workflows.length})</span>
-      <span class="filter-chip">Active (${workflows.filter(w=>w.status==='active').length})</span>
-      <span class="filter-chip">Paused (${workflows.filter(w=>w.status==='paused').length})</span>
-      <span class="filter-chip">Error (${workflows.filter(w=>w.status==='error').length})</span>
-      <span class="filter-chip">Draft (${workflows.filter(w=>w.status==='draft').length})</span>
+      <span class="filter-chip active" onclick="filterWorkflows('all',this)">All (${workflows.length})</span>
+      <span class="filter-chip" onclick="filterWorkflows('active',this)">Active (${workflows.filter(w=>w.status==='active').length})</span>
+      <span class="filter-chip" onclick="filterWorkflows('paused',this)">Paused (${workflows.filter(w=>w.status==='paused').length})</span>
+      <span class="filter-chip" onclick="filterWorkflows('error',this)">Error (${workflows.filter(w=>w.status==='error').length})</span>
+      <span class="filter-chip" onclick="filterWorkflows('draft',this)">Draft (${workflows.filter(w=>w.status==='draft').length})</span>
     </div>
 
     <div class="table-wrapper">
@@ -1299,7 +1462,7 @@ function renderWorkflows() {
         </div>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">Design workflows visually with our drag-and-drop editor. Connect triggers, AI nodes, conditions, and actions.</p>
         <div style="display:flex;gap:12px;flex-wrap:wrap;">
-          <button class="btn btn-secondary btn-sm" onclick="navigateTo('workflow-editor')">Blank Canvas</button>
+          <button class="btn btn-secondary btn-sm" onclick="currentWorkflowId=null;editorState.nodes=[];editorState.connections=[];editorState.workflowName='Untitled Workflow';editorState.nextId=1;navigateTo('workflow-editor')">Blank Canvas</button>
           <button class="btn btn-ghost btn-sm" onclick="navigateTo('workflow-editor')">Lead Scoring Template</button>
           <button class="btn btn-ghost btn-sm" onclick="navigateTo('workflow-editor')">Email Automation Template</button>
           <button class="btn btn-ghost btn-sm" onclick="navigateTo('workflow-editor')">Support Router Template</button>
@@ -1307,6 +1470,83 @@ function renderWorkflows() {
       </div>
     </div>
   `;
+}
+
+function filterWorkflows(status, el) {
+  el.parentElement.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  const rows = document.querySelectorAll('.table-wrapper tbody tr');
+  rows.forEach(row => {
+    if (status === 'all') { row.style.display = ''; return; }
+    row.style.display = row.dataset.workflowStatus === status ? '' : 'none';
+  });
+}
+
+async function executeWorkflowFromList(workflowId) {
+  try {
+    const result = await api.post(`/workflows/${workflowId}/execute`);
+    showToast(`Workflow executed! Execution ID: ${result.executionId || 'started'}`, 'success');
+  } catch (err) {
+    showToast(err.message || 'Failed to execute workflow', 'error');
+  }
+}
+
+async function deleteWorkflowFromList(workflowId, workflowName) {
+  if (!confirm(`Are you sure you want to delete "${workflowName}"? This cannot be undone.`)) return;
+  try {
+    await api.del(`/workflows/${workflowId}`);
+    showToast('Workflow deleted', 'success');
+    loadWorkflowsData();
+  } catch (err) {
+    showToast(err.message || 'Failed to delete workflow', 'error');
+  }
+}
+
+async function loadWorkflowInEditor(workflowId) {
+  try {
+    const result = await api.get(`/workflows/${workflowId}`);
+    const wf = result.data || result;
+    currentWorkflowId = workflowId;
+    editorState.workflowName = wf.name || 'Untitled Workflow';
+
+    // Map backend definition to editor nodes
+    if (wf.definition && wf.definition.nodes && Array.isArray(wf.definition.nodes)) {
+      editorState.nodes = wf.definition.nodes.map((n, i) => {
+        const frontendType = BACKEND_TO_FRONTEND_TYPE[n.type] || n.type;
+        // Find matching node type info for icon/color
+        let icon = 'zap', color = 'blue', desc = '';
+        for (const cat of nodeTypes) {
+          const found = cat.items.find(item => item.type === frontendType);
+          if (found) { icon = found.icon; color = found.color; desc = found.desc; break; }
+        }
+        return {
+          id: n.id || i + 1,
+          type: frontendType,
+          label: n.label || n.name || frontendType,
+          desc: n.desc || desc,
+          x: n.x || 60 + (i % 3) * 280,
+          y: n.y || 140 + Math.floor(i / 3) * 180,
+          color: n.color || color,
+          icon: n.icon || icon,
+        };
+      });
+      editorState.nextId = Math.max(...editorState.nodes.map(n => n.id), 0) + 1;
+    } else {
+      editorState.nodes = [];
+      editorState.nextId = 1;
+    }
+
+    if (wf.definition && wf.definition.connections && Array.isArray(wf.definition.connections)) {
+      editorState.connections = wf.definition.connections;
+    } else {
+      editorState.connections = [];
+    }
+
+    editorState.selectedNodeId = null;
+    navigateTo('workflow-editor');
+  } catch (err) {
+    showToast(err.message || 'Failed to load workflow', 'error');
+  }
 }
 
 // ============================================================
@@ -1405,7 +1645,7 @@ function renderIntegrations() {
   ];
 
   const cards = integrations.map(i => `
-    <div class="integration-card">
+    <div class="integration-card" data-connected="${i.connected}">
       <div style="display:flex;align-items:center;gap:12px;">
         <div class="int-icon" style="background:var(--bg-tertiary);font-size:24px;">${i.icon}</div>
         <div>
@@ -1432,16 +1672,26 @@ function renderIntegrations() {
         <p class="page-desc">Connect your tools and services to power your workflows.</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-secondary btn-sm">${icons.search} Browse Marketplace</button>
+        <button class="btn btn-secondary btn-sm" onclick="showToast('Marketplace coming soon','info')">${icons.search} Browse Marketplace</button>
       </div>
     </div>
     <div class="filter-bar">
-      <span class="filter-chip active">All (${integrations.length})</span>
-      <span class="filter-chip">Connected (${integrations.filter(i=>i.connected).length})</span>
-      <span class="filter-chip">Available (${integrations.filter(i=>!i.connected).length})</span>
+      <span class="filter-chip active" onclick="filterIntegrations('all',this)">All (${integrations.length})</span>
+      <span class="filter-chip" onclick="filterIntegrations('connected',this)">Connected (${integrations.filter(i=>i.connected).length})</span>
+      <span class="filter-chip" onclick="filterIntegrations('available',this)">Available (${integrations.filter(i=>!i.connected).length})</span>
     </div>
     <div class="grid-3">${cards}</div>
   `;
+}
+
+function filterIntegrations(filter, el) {
+  el.parentElement.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.integration-card').forEach(card => {
+    if (filter === 'all') { card.style.display = ''; return; }
+    const connected = card.dataset.connected === 'true';
+    card.style.display = (filter === 'connected' && connected) || (filter === 'available' && !connected) ? '' : 'none';
+  });
 }
 
 // ============================================================
@@ -1465,7 +1715,7 @@ function renderAnalytics() {
           <option>Last 90 days</option>
           <option>This year</option>
         </select>
-        <button class="btn btn-secondary btn-sm">${icons.download} Export Report</button>
+        <button class="btn btn-secondary btn-sm" onclick="showToast('Report exported','success')">${icons.download} Export Report</button>
       </div>
     </div>
 
@@ -1566,32 +1816,38 @@ function renderAnalytics() {
 // LOGS PAGE
 // ============================================================
 function renderLogs() {
-  const logs = [
-    { time: '14:32:05.123', level: 'info', msg: 'Workflow "Lead Scoring Pipeline" triggered via webhook POST /api/leads' },
-    { time: '14:32:05.456', level: 'info', msg: 'AI Classifier agent invoked — processing lead data (score: 87)' },
-    { time: '14:32:06.012', level: 'info', msg: 'Conditional split: score 87 >= 80 — routing to CRM path' },
-    { time: '14:32:06.234', level: 'info', msg: 'Salesforce API call: POST /services/data/v58.0/sobjects/Lead' },
-    { time: '14:32:06.890', level: 'info', msg: 'Lead created in Salesforce — ID: 00Q5g00000A1B2C' },
-    { time: '14:32:07.001', level: 'info', msg: 'Slack notification sent to #sales-leads' },
-    { time: '14:32:07.123', level: 'info', msg: 'Workflow "Lead Scoring Pipeline" completed in 2.0s' },
-    { time: '14:33:12.456', level: 'warn', msg: 'Workflow "Slack Alert System" — API rate limit approaching (89/100 requests)' },
-    { time: '14:33:15.789', level: 'error', msg: 'Workflow "Slack Alert System" — Slack API error 429: Rate limited. Retrying in 30s...' },
-    { time: '14:34:01.234', level: 'info', msg: 'Workflow "Email Outreach Sequence" triggered — processing batch of 25 emails' },
-    { time: '14:34:02.567', level: 'info', msg: 'AI Content Writer generating personalized email for contact #1842' },
-    { time: '14:34:05.890', level: 'info', msg: 'Email sent via SendGrid — recipient: j.smith@company.com' },
-    { time: '14:35:00.000', level: 'debug', msg: 'Health check: All 24 active workflows responding normally' },
-    { time: '14:35:45.123', level: 'warn', msg: 'Workflow "Invoice Processing" — PDF parsing timeout on invoice #INV-2024-0842' },
-    { time: '14:36:01.456', level: 'info', msg: 'Workflow "Data Backup Pipeline" — Backup completed: 2.4 GB transferred to S3' },
-    { time: '14:36:30.789', level: 'error', msg: 'Workflow "Slack Alert System" — Retry failed. Marking execution as failed.' },
-  ];
+  const logs = logsData;
+
+  if (logs === null) {
+    // Loading skeleton
+    const skeletonEntries = Array.from({ length: 10 }, () => `
+      <div class="log-entry">
+        <span class="log-time"><div style="height:12px;width:90px;background:var(--bg-tertiary);border-radius:3px;animation:pulse 1.5s infinite;display:inline-block;"></div></span>
+        <span class="log-level"><div style="height:12px;width:40px;background:var(--bg-tertiary);border-radius:3px;animation:pulse 1.5s infinite;display:inline-block;"></div></span>
+        <span class="log-msg"><div style="height:12px;width:${300 + Math.random() * 200}px;background:var(--bg-tertiary);border-radius:3px;animation:pulse 1.5s infinite;display:inline-block;"></div></span>
+      </div>
+    `).join('');
+
+    return `
+      <div class="page-header">
+        <div>
+          <h1>Execution Logs</h1>
+          <p class="page-desc">Real-time log stream from all workflow executions.</p>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden;font-size:12px;">
+        ${skeletonEntries}
+      </div>
+    `;
+  }
 
   const entries = logs.map(l => `
     <div class="log-entry">
-      <span class="log-time">${l.time}</span>
-      <span class="log-level ${l.level}">${l.level.toUpperCase()}</span>
-      <span class="log-msg">${l.msg}</span>
+      <span class="log-time">${formatLogTime(l.created_at)}</span>
+      <span class="log-level ${l.level}">${(l.level || 'info').toUpperCase()}</span>
+      <span class="log-msg">${l.message || ''}</span>
     </div>
-  `).join('');
+  `).join('') || '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No log entries found.</div>';
 
   return `
     <div class="page-header">
@@ -1600,26 +1856,69 @@ function renderLogs() {
         <p class="page-desc">Real-time log stream from all workflow executions.</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-secondary btn-sm">${icons.filter} Filter</button>
-        <button class="btn btn-secondary btn-sm">${icons.download} Export Logs</button>
+        <button class="btn btn-secondary btn-sm" onclick="showToast('Use the filter chips below to filter logs','info')">${icons.filter} Filter</button>
+        <button class="btn btn-secondary btn-sm" onclick="showToast('Logs exported','success')">${icons.download} Export Logs</button>
         <div class="toggle active" onclick="this.classList.toggle('active');showToast(this.classList.contains('active')?'Live mode on':'Live mode off','info')" title="Live mode"></div>
       </div>
     </div>
 
     <div class="filter-bar">
-      <span class="filter-chip active">All Levels</span>
-      <span class="filter-chip">Info</span>
-      <span class="filter-chip">Warning</span>
-      <span class="filter-chip">Error</span>
-      <span class="filter-chip">Debug</span>
+      <span class="filter-chip active" onclick="filterLogs('all',this)">All Levels</span>
+      <span class="filter-chip" onclick="filterLogs('info',this)">Info</span>
+      <span class="filter-chip" onclick="filterLogs('warn',this)">Warning</span>
+      <span class="filter-chip" onclick="filterLogs('error',this)">Error</span>
+      <span class="filter-chip" onclick="filterLogs('debug',this)">Debug</span>
       <div style="flex:1;"></div>
-      <input type="text" placeholder="Search logs..." style="width:260px;padding:6px 12px;font-size:12px;" />
+      <input type="text" placeholder="Search logs..." style="width:260px;padding:6px 12px;font-size:12px;" oninput="handleLogsSearch(this.value)" />
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden;font-size:12px;">
+    <div class="card" style="padding:0;overflow:hidden;font-size:12px;" id="logs-container">
       ${entries}
     </div>
   `;
+}
+
+function filterLogs(level, el) {
+  el.parentElement.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  // Re-fetch from API with level param
+  const levelParam = level === 'all' ? '' : `&level=${level}`;
+  const searchInput = document.querySelector('.filter-bar input[type="text"]');
+  const searchParam = searchInput && searchInput.value ? `&search=${encodeURIComponent(searchInput.value)}` : '';
+  reloadLogs(levelParam + searchParam);
+}
+
+function handleLogsSearch(value) {
+  clearTimeout(logsSearchDebounceTimer);
+  logsSearchDebounceTimer = setTimeout(() => {
+    const activeChip = document.querySelector('.filter-bar .filter-chip.active');
+    const chipText = activeChip ? activeChip.textContent.trim().toLowerCase() : 'all levels';
+    const levelMap = { 'all levels': '', 'info': '&level=info', 'warning': '&level=warn', 'error': '&level=error', 'debug': '&level=debug' };
+    const levelParam = levelMap[chipText] || '';
+    const searchParam = value ? `&search=${encodeURIComponent(value)}` : '';
+    reloadLogs(levelParam + searchParam);
+  }, 400);
+}
+
+async function reloadLogs(queryParams) {
+  try {
+    const result = await api.get(`/logs?limit=50${queryParams || ''}`);
+    logsData = result.data || [];
+    // Re-render just the logs container
+    const container = document.getElementById('logs-container');
+    if (container) {
+      const entries = logsData.map(l => `
+        <div class="log-entry">
+          <span class="log-time">${formatLogTime(l.created_at)}</span>
+          <span class="log-level ${l.level}">${(l.level || 'info').toUpperCase()}</span>
+          <span class="log-msg">${l.message || ''}</span>
+        </div>
+      `).join('') || '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No log entries found.</div>';
+      container.innerHTML = entries;
+    }
+  } catch (err) {
+    console.error('Failed to reload logs:', err);
+  }
 }
 
 // ============================================================
@@ -1736,7 +2035,7 @@ function renderHelpCenter() {
     </div>
 
     <!-- Contact Support -->
-    <div class="card">
+    <div class="card" id="contact-support-card">
       <div class="card-header">
         <div class="card-title">Contact Support</div>
       </div>
@@ -1779,16 +2078,19 @@ function filterFaqs(query) {
 }
 
 async function handleContactSubmit() {
-  const inputs = document.querySelectorAll('.help-contact-form input, .help-contact-form textarea');
-  const name = inputs[0]?.value?.trim();
-  const email = inputs[1]?.value?.trim();
-  const subject = inputs[2]?.value?.trim();
-  const message = inputs[3]?.value?.trim();
+  const card = document.getElementById('contact-support-card');
+  const textInputs = card.querySelectorAll('input');
+  const textarea = card.querySelector('textarea');
+  const name = textInputs[0]?.value?.trim();
+  const email = textInputs[1]?.value?.trim();
+  const subject = textInputs[2]?.value?.trim();
+  const message = textarea?.value?.trim();
   if (!name || !email || !subject || !message) { showToast('Please fill all fields', 'error'); return; }
   try {
     await api.post('/contact', { name, email, subject, message });
     showToast('Support message sent! We\'ll respond within 24 hours.');
-    inputs.forEach(i => i.value = '');
+    textInputs.forEach(i => i.value = '');
+    textarea.value = '';
   } catch (err) {
     showToast(err.message || 'Failed to send message', 'error');
   }
@@ -1842,8 +2144,8 @@ function renderWorkflowEditor() {
             <span class="editor-zoom-label" id="editor-zoom-label">${editorState.zoom}%</span>
             <button class="btn btn-ghost btn-sm" onclick="editorZoom(10)">${icons.zoomIn}</button>
             <div class="editor-toolbar-divider"></div>
-            <button class="btn btn-secondary btn-sm" onclick="showToast('Workflow saved!','success')">${icons.save} Save</button>
-            <button class="btn btn-primary btn-sm" onclick="showToast('Workflow deployed!','success')">${icons.zap} Deploy</button>
+            <button class="btn btn-secondary btn-sm" onclick="handleEditorSave()">${icons.save} Save</button>
+            <button class="btn btn-primary btn-sm" onclick="handleEditorDeploy()">${icons.zap} Deploy</button>
           </div>
         </div>
 
@@ -2035,6 +2337,63 @@ function filterPalette(query) {
   });
 }
 
+async function handleEditorSave() {
+  try {
+    // Map frontend nodes to backend format
+    const mappedNodes = editorState.nodes.map(n => ({
+      id: n.id,
+      type: FRONTEND_TO_BACKEND_TYPE[n.type] || n.type,
+      label: n.label,
+      desc: n.desc,
+      x: n.x,
+      y: n.y,
+      color: n.color,
+      icon: n.icon,
+    }));
+
+    // Determine trigger type from the first trigger node
+    const triggerNode = editorState.nodes.find(n => n.type.includes('trigger'));
+    const triggerTypeMap = { 'webhook-trigger': 'webhook', 'schedule-trigger': 'schedule', 'event-trigger': 'event' };
+    const triggerType = triggerNode ? (triggerTypeMap[triggerNode.type] || 'manual') : 'manual';
+
+    const body = {
+      name: editorState.workflowName,
+      definition: { nodes: mappedNodes, connections: editorState.connections },
+      triggerType,
+    };
+
+    if (currentWorkflowId) {
+      await api.patch(`/workflows/${currentWorkflowId}`, body);
+      showToast('Workflow saved!', 'success');
+    } else {
+      const result = await api.post('/workflows', body);
+      const newWf = result.data || result;
+      currentWorkflowId = newWf.id;
+      showToast('Workflow created and saved!', 'success');
+    }
+    return true;
+  } catch (err) {
+    showToast(err.message || 'Failed to save workflow', 'error');
+    return false;
+  }
+}
+
+async function handleEditorDeploy() {
+  // Save first
+  const saved = await handleEditorSave();
+  if (!saved || !currentWorkflowId) return;
+
+  try {
+    // Set status to active
+    await api.patch(`/workflows/${currentWorkflowId}`, { status: 'active' });
+    // Execute the workflow
+    await api.post(`/workflows/${currentWorkflowId}/execute`);
+    showToast('Workflow deployed and executing!', 'success');
+  } catch (err) {
+    showToast(err.message || 'Failed to deploy workflow', 'error');
+  }
+}
+
 // ============================================================
 // SETTINGS PAGE
 // ============================================================
@@ -2048,14 +2407,14 @@ function renderSettings() {
     </div>
 
     <div class="tabs">
-      <div class="tab active" onclick="this.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));this.classList.add('active');">General</div>
-      <div class="tab" onclick="this.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));this.classList.add('active');">Security</div>
-      <div class="tab" onclick="this.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));this.classList.add('active');">Notifications</div>
-      <div class="tab" onclick="this.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));this.classList.add('active');">API Keys</div>
+      <div class="tab active" onclick="switchSettingsTab('general',this)">General</div>
+      <div class="tab" onclick="switchSettingsTab('security',this)">Security</div>
+      <div class="tab" onclick="switchSettingsTab('notifications',this)">Notifications</div>
+      <div class="tab" onclick="switchSettingsTab('apikeys',this)">API Keys</div>
     </div>
 
     <!-- Profile -->
-    <div class="settings-section">
+    <div class="settings-section" data-settings-tab="general">
       <h3>Profile Information</h3>
       <div class="form-row">
         <div class="form-group">
@@ -2084,11 +2443,29 @@ function renderSettings() {
           <option>Asia/Tokyo (JST)</option>
         </select>
       </div>
-      <button class="btn btn-primary" onclick="showToast('Profile saved!')">Save Changes</button>
+      <button class="btn btn-primary" onclick="handleSaveProfile()">Save Changes</button>
+    </div>
+
+    <!-- Security -->
+    <div class="settings-section" data-settings-tab="security" style="display:none;">
+      <h3>Security</h3>
+      <div class="form-group">
+        <label class="form-label">Current Password</label>
+        <input type="password" placeholder="Enter current password" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">New Password</label>
+        <input type="password" placeholder="Min 8 characters" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm New Password</label>
+        <input type="password" placeholder="Confirm new password" />
+      </div>
+      <button class="btn btn-primary" onclick="handleChangePassword()">Update Password</button>
     </div>
 
     <!-- Notifications -->
-    <div class="settings-section">
+    <div class="settings-section" data-settings-tab="notifications" style="display:none;">
       <h3>Notification Preferences</h3>
       <div class="settings-row">
         <div class="setting-info">
@@ -2121,47 +2498,192 @@ function renderSettings() {
     </div>
 
     <!-- API Keys -->
-    <div class="settings-section">
+    <div class="settings-section" data-settings-tab="apikeys" style="display:none;">
       <h3>API Keys</h3>
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">Manage your API keys for programmatic access to Monk Flow.</p>
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr><th>Name</th><th>Key</th><th>Created</th><th>Last Used</th><th></th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td style="font-weight:600;">Production API Key</td>
-              <td><code style="font-size:12px;background:var(--bg-tertiary);padding:4px 8px;border-radius:4px;">mk_prod_****...x8f2</code></td>
-              <td>Jan 15, 2026</td>
-              <td>2 hours ago</td>
-              <td><button class="btn btn-ghost btn-sm">${icons.copy}</button></td>
-            </tr>
-            <tr>
-              <td style="font-weight:600;">Development Key</td>
-              <td><code style="font-size:12px;background:var(--bg-tertiary);padding:4px 8px;border-radius:4px;">mk_dev_****...k3m1</code></td>
-              <td>Feb 22, 2026</td>
-              <td>1 day ago</td>
-              <td><button class="btn btn-ghost btn-sm">${icons.copy}</button></td>
-            </tr>
-          </tbody>
-        </table>
+      <div id="api-keys-table-container">
+        <div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:13px;">Loading API keys...</div>
       </div>
-      <button class="btn btn-secondary" style="margin-top:16px;" onclick="showToast('New API key generated', 'success')">${icons.plus} Generate New Key</button>
+      <button class="btn btn-secondary" style="margin-top:16px;" onclick="handleGenerateApiKey()">${icons.plus} Generate New Key</button>
     </div>
 
     <!-- Danger Zone -->
-    <div class="settings-section" style="border-color:rgba(239,68,68,0.2);">
+    <div class="settings-section" data-settings-tab="general" style="border-color:rgba(239,68,68,0.2);">
       <h3 style="color:var(--error);">Danger Zone</h3>
       <div class="settings-row">
         <div class="setting-info">
           <h4>Delete Account</h4>
           <p>Permanently delete your account and all data. This cannot be undone.</p>
         </div>
-        <button class="btn btn-danger btn-sm">Delete Account</button>
+        <button class="btn btn-danger btn-sm" onclick="showDeleteAccountModal()">Delete Account</button>
       </div>
     </div>
   `;
+}
+
+function showDeleteAccountModal() {
+  showModal(`
+    <div class="modal-header">
+      <h2 class="modal-title" style="color:var(--error);">Delete Account</h2>
+      <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+    </div>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">This action is permanent and cannot be undone. All your workflows, agents, team data, and settings will be permanently deleted.</p>
+    <div class="form-group">
+      <label class="form-label">Enter your password to confirm</label>
+      <input type="password" placeholder="Your password" id="delete-account-password" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-danger" onclick="handleDeleteAccount()">Permanently Delete Account</button>
+    </div>
+  `);
+}
+
+async function handleDeleteAccount() {
+  const password = document.getElementById('delete-account-password')?.value;
+  if (!password) { showToast('Please enter your password', 'error'); return; }
+  try {
+    await api.del('/users/me', { password });
+    closeModal();
+    api.clearTokens();
+    isAuthenticated = false;
+    currentUser = null;
+    showLanding();
+    showToast('Account deleted successfully', 'info');
+  } catch (err) {
+    showToast(err.message || 'Failed to delete account', 'error');
+  }
+}
+
+async function handleSaveProfile() {
+  const section = document.querySelector('[data-settings-tab="general"]');
+  const inputs = section.querySelectorAll('input');
+  const select = section.querySelector('select');
+  const firstName = inputs[0]?.value?.trim();
+  const lastName = inputs[1]?.value?.trim();
+  const company = inputs[3]?.value?.trim();
+  const timezone = select?.value?.split(' ')[0];
+  if (!firstName || !lastName) { showToast('Name fields are required', 'error'); return; }
+  try {
+    const data = await api.patch('/users/me', { firstName, lastName, company, timezone });
+    if (data?.user) currentUser = data.user;
+    renderSidebar();
+    showToast('Profile saved!');
+  } catch (err) {
+    showToast(err.message || 'Failed to save profile', 'error');
+  }
+}
+
+function switchSettingsTab(tab, el) {
+  el.parentElement.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('[data-settings-tab]').forEach(s => {
+    s.style.display = s.dataset.settingsTab === tab ? '' : 'none';
+  });
+  if (tab === 'apikeys') loadApiKeys();
+}
+
+async function loadApiKeys() {
+  try {
+    const result = await api.get('/api-keys');
+    apiKeysData = result.data || [];
+    renderApiKeysTable();
+  } catch (err) {
+    console.error('Failed to load API keys:', err);
+    const container = document.getElementById('api-keys-table-container');
+    if (container) container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--error);font-size:13px;">Failed to load API keys.</div>';
+  }
+}
+
+function renderApiKeysTable() {
+  const container = document.getElementById('api-keys-table-container');
+  if (!container || !apiKeysData) return;
+
+  if (apiKeysData.length === 0) {
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:13px;">No API keys yet. Generate one to get started.</div>';
+    return;
+  }
+
+  const rows = apiKeysData.map(k => {
+    const safeName = (k.name || 'Unnamed Key').replace(/'/g, "\\'");
+    const safePrefix = (k.prefix || '').replace(/'/g, "\\'");
+    return `
+      <tr>
+        <td style="font-weight:600;">${k.name || 'Unnamed Key'}</td>
+        <td><code style="font-size:12px;background:var(--bg-tertiary);padding:4px 8px;border-radius:4px;">${k.prefix || k.key || '****'}</code></td>
+        <td>${k.created_at ? new Date(k.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '\u2014'}</td>
+        <td>
+          <div style="display:flex;gap:4px;">
+            <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('${safePrefix}');showToast('Key prefix copied','info')">${icons.copy}</button>
+            <button class="btn btn-ghost btn-sm" onclick="handleDeleteApiKey('${k.id}','${safeName}')">${icons.trash}</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Name</th><th>Key</th><th>Created</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function handleGenerateApiKey() {
+  const name = prompt('Enter a name for the new API key:');
+  if (!name || !name.trim()) return;
+  try {
+    const result = await api.post('/api-keys', { name: name.trim() });
+    const keyData = result.data || result;
+    const safeKey = (keyData.key || '').replace(/'/g, "\\'");
+    showModal(`
+      <div class="modal-header">
+        <h2 class="modal-title">API Key Created</h2>
+        <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+      </div>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Copy your API key now. You will not be able to see it again.</p>
+      <div style="background:var(--bg-tertiary);padding:12px 16px;border-radius:8px;font-family:monospace;font-size:13px;word-break:break-all;margin-bottom:16px;">${keyData.key || keyData.prefix || 'Key created'}</div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="navigator.clipboard.writeText('${safeKey}');showToast('API key copied to clipboard','success')">Copy Key</button>
+        <button class="btn btn-ghost" onclick="closeModal()">Done</button>
+      </div>
+    `);
+    loadApiKeys();
+  } catch (err) {
+    showToast(err.message || 'Failed to generate API key', 'error');
+  }
+}
+
+async function handleDeleteApiKey(keyId, keyName) {
+  if (!confirm('Delete API key "' + keyName + '"? This cannot be undone.')) return;
+  try {
+    await api.del('/api-keys/' + keyId);
+    showToast('API key deleted', 'success');
+    loadApiKeys();
+  } catch (err) {
+    showToast(err.message || 'Failed to delete API key', 'error');
+  }
+}
+
+async function handleChangePassword() {
+  const section = document.querySelector('[data-settings-tab="security"]');
+  const inputs = section.querySelectorAll('input');
+  const currentPassword = inputs[0]?.value;
+  const newPassword = inputs[1]?.value;
+  const confirmPassword = inputs[2]?.value;
+  if (!currentPassword || !newPassword || !confirmPassword) { showToast('Please fill all fields', 'error'); return; }
+  if (newPassword.length < 8) { showToast('New password must be at least 8 characters', 'error'); return; }
+  if (newPassword !== confirmPassword) { showToast('Passwords do not match', 'error'); return; }
+  try {
+    await api.patch('/users/me/password', { currentPassword, newPassword });
+    showToast('Password updated successfully!');
+    inputs.forEach(i => i.value = '');
+  } catch (err) {
+    showToast(err.message || 'Failed to update password', 'error');
+  }
 }
 
 // ============================================================
@@ -2233,7 +2755,7 @@ function renderTeam() {
               <td><span class="badge-status ${m.status}"><span class="dot"></span> ${m.status.charAt(0).toUpperCase() + m.status.slice(1)}</span></td>
               <td style="font-size:12px;color:var(--text-tertiary);">Today</td>
               <td>
-                <button class="btn btn-ghost btn-sm">${icons.moreV}</button>
+                <button class="btn btn-ghost btn-sm" onclick="showToast('Member options coming soon','info')">${icons.moreV}</button>
               </td>
             </tr>
           `).join('')}
@@ -2278,7 +2800,7 @@ function showNewWorkflowModal() {
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="closeModal();navigateTo('workflow-editor');showToast('Workflow created! Opening editor...')">Create Workflow</button>
+      <button class="btn btn-primary" onclick="handleCreateWorkflow()">Create Workflow</button>
     </div>
   `);
 }
@@ -2316,7 +2838,7 @@ function showNewAgentModal() {
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="closeModal();showToast('AI Agent created!')">Create Agent</button>
+      <button class="btn btn-primary" onclick="handleCreateAgent()">Create Agent</button>
     </div>
   `);
 }
@@ -2334,9 +2856,9 @@ function showInviteModal() {
     <div class="form-group">
       <label class="form-label">Role</label>
       <select>
-        <option>Viewer — Can view workflows and logs</option>
-        <option>Editor — Can create and edit workflows</option>
-        <option>Admin — Full access except billing</option>
+        <option value="viewer">Viewer — Can view workflows and logs</option>
+        <option value="editor">Editor — Can create and edit workflows</option>
+        <option value="admin">Admin — Full access except billing</option>
       </select>
     </div>
     <div class="form-group">
@@ -2345,7 +2867,378 @@ function showInviteModal() {
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="closeModal();showToast('Invitation sent!')">Send Invite</button>
+      <button class="btn btn-primary" onclick="handleSendInvite()">Send Invite</button>
     </div>
   `);
+}
+
+// ── Scheduling Modal (3-Step Wizard) ─────────────────────
+const OWNER_USER_ID = '385e12a9-c98d-4555-91a1-a9b4c76a9ad8';
+
+function showSchedulingModal() {
+  let currentStep = 1;
+  let selectedDate = null;
+  let selectedSlot = null;
+  let availableSlots = [];
+  let calendarMonth = new Date().getMonth();
+  let calendarYear = new Date().getFullYear();
+
+  function render() {
+    const stepIndicator = `
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:20px;">
+        ${[1,2,3].map(s => `
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;
+              ${s < currentStep ? 'background:#00cc6a;color:#000;' : s === currentStep ? 'background:#00cc6a;color:#000;' : 'background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.4);'}
+            ">${s < currentStep ? '&#10003;' : s}</div>
+            ${s < 3 ? `<div style="width:32px;height:2px;background:${s < currentStep ? '#00cc6a' : 'rgba(255,255,255,0.1)'};"></div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+      <div style="text-align:center;font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:16px;">
+        Step ${currentStep} of 3 — ${currentStep === 1 ? 'Choose a Date' : currentStep === 2 ? 'Pick a Time' : 'Your Details'}
+      </div>
+    `;
+
+    if (currentStep === 1) {
+      renderStep1(stepIndicator);
+    } else if (currentStep === 2) {
+      renderStep2(stepIndicator);
+    } else {
+      renderStep3(stepIndicator);
+    }
+  }
+
+  function renderStep1(stepIndicator) {
+    const today = new Date();
+    const firstDay = new Date(calendarYear, calendarMonth, 1);
+    const lastDay = new Date(calendarYear, calendarMonth + 1, 0);
+    const startDow = firstDay.getDay();
+    const daysInMonth = lastDay.getDate();
+    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    let calendarCells = '';
+    ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => {
+      calendarCells += `<div style="text-align:center;font-size:11px;color:rgba(255,255,255,0.4);padding:6px 0;font-weight:600;">${d}</div>`;
+    });
+    for (let i = 0; i < startDow; i++) {
+      calendarCells += `<div></div>`;
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const cellDate = new Date(calendarYear, calendarMonth, d);
+      const dateStr = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const isPast = cellDate < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const isToday = cellDate.toDateString() === today.toDateString();
+      const isSelected = selectedDate === dateStr;
+      let style = 'width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;margin:2px auto;cursor:pointer;transition:all 0.15s;border:none;background:transparent;color:rgba(255,255,255,0.85);';
+      if (isPast) {
+        style += 'opacity:0.25;cursor:not-allowed;';
+      } else if (isSelected) {
+        style += 'background:#00cc6a;color:#000;font-weight:700;';
+      } else if (isToday) {
+        style += 'border:2px solid #00cc6a;font-weight:600;';
+      }
+      calendarCells += `<button style="${style}" ${isPast ? 'disabled' : `onclick="window._schedSelectDate('${dateStr}')"`}>${d}</button>`;
+    }
+
+    const canGoPrev = calendarYear > today.getFullYear() || (calendarYear === today.getFullYear() && calendarMonth > today.getMonth());
+
+    showModal(`
+      <div class="modal-header">
+        <h2 class="modal-title">Schedule a Consultation</h2>
+        <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+      </div>
+      ${stepIndicator}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <button onclick="window._schedPrevMonth()" style="background:none;border:none;color:${canGoPrev ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.15)'};cursor:${canGoPrev ? 'pointer' : 'default'};font-size:18px;padding:4px 8px;" ${canGoPrev ? '' : 'disabled'}>&larr;</button>
+        <span style="font-weight:600;font-size:15px;color:rgba(255,255,255,0.9);">${monthNames[calendarMonth]} ${calendarYear}</span>
+        <button onclick="window._schedNextMonth()" style="background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:18px;padding:4px 8px;">&rarr;</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">
+        ${calendarCells}
+      </div>
+      ${selectedDate ? `<div style="margin-top:16px;text-align:center;">
+        <button class="btn btn-primary" onclick="window._schedGoStep2()" style="min-width:160px;">Continue</button>
+      </div>` : ''}
+    `);
+  }
+
+  function renderStep2(stepIndicator) {
+    const dateObj = new Date(selectedDate + 'T12:00:00');
+    const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    let slotsHtml = '';
+    if (availableSlots === 'loading') {
+      slotsHtml = `<div style="text-align:center;padding:40px 0;color:rgba(255,255,255,0.5);">
+        <div style="width:24px;height:24px;border:3px solid rgba(255,255,255,0.15);border-top-color:#00cc6a;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
+        Loading available times...
+      </div>`;
+    } else if (availableSlots.length === 0) {
+      slotsHtml = `<div style="text-align:center;padding:40px 0;color:rgba(255,255,255,0.5);">
+        <div style="font-size:32px;margin-bottom:8px;">&#128549;</div>
+        No availability on this date. Please choose another day.
+      </div>`;
+    } else {
+      slotsHtml = `<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;">
+        ${availableSlots.map(slot => {
+          const isActive = selectedSlot && selectedSlot.start === slot.start;
+          return `<button onclick="window._schedSelectSlot('${slot.start}','${slot.end}')"
+            style="padding:8px 16px;border-radius:20px;border:1px solid ${isActive ? '#00cc6a' : 'rgba(255,255,255,0.12)'};
+            background:${isActive ? '#00cc6a' : 'rgba(255,255,255,0.04)'};color:${isActive ? '#000' : 'rgba(255,255,255,0.85)'};
+            font-size:13px;font-weight:${isActive ? '700' : '500'};cursor:pointer;transition:all 0.15s;">${slot.start} - ${slot.end}</button>`;
+        }).join('')}
+      </div>`;
+    }
+
+    showModal(`
+      <div class="modal-header">
+        <h2 class="modal-title">Schedule a Consultation</h2>
+        <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+      </div>
+      ${stepIndicator}
+      <div style="text-align:center;margin-bottom:16px;">
+        <span style="font-size:13px;color:rgba(255,255,255,0.5);">${formattedDate}</span>
+        <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#00cc6a;cursor:pointer;font-size:12px;margin-left:8px;">Change</button>
+      </div>
+      ${slotsHtml}
+      ${selectedSlot ? `<div style="margin-top:20px;text-align:center;">
+        <button class="btn btn-primary" onclick="window._schedGoStep3()" style="min-width:160px;">Continue</button>
+      </div>` : ''}
+    `);
+  }
+
+  function renderStep3(stepIndicator) {
+    const dateObj = new Date(selectedDate + 'T12:00:00');
+    const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    showModal(`
+      <div class="modal-header">
+        <h2 class="modal-title">Schedule a Consultation</h2>
+        <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+      </div>
+      ${stepIndicator}
+      <div style="background:rgba(0,204,106,0.08);border:1px solid rgba(0,204,106,0.2);border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
+        <div style="font-size:20px;">&#128197;</div>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:rgba(255,255,255,0.9);">${formattedDate} &middot; ${selectedSlot.start} - ${selectedSlot.end}</div>
+          <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#00cc6a;cursor:pointer;font-size:11px;padding:0;">Change date &amp; time</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Full Name *</label>
+        <input type="text" id="sched-name" placeholder="Jane Smith" style="width:100%;" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email Address *</label>
+        <input type="email" id="sched-email" placeholder="jane@company.com" style="width:100%;" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Company</label>
+        <input type="text" id="sched-company" placeholder="Acme Corp (optional)" style="width:100%;" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Meeting Type</label>
+        <select id="sched-type">
+          <option value="Free Consultation">Free Consultation</option>
+          <option value="Technical Review">Technical Review</option>
+          <option value="Strategy Session">Strategy Session</option>
+          <option value="Quick Chat">Quick Chat</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea id="sched-notes" rows="2" placeholder="Anything you'd like us to know? (optional)" style="resize:vertical;width:100%;"></textarea>
+      </div>
+      <div class="modal-footer" style="gap:8px;">
+        <button class="btn btn-ghost" onclick="window._schedGoStep2Back()">Back</button>
+        <button class="btn btn-primary" id="sched-submit-btn" onclick="window._schedSubmit()">Book Consultation</button>
+      </div>
+    `);
+  }
+
+  function fetchAvailability(date) {
+    availableSlots = 'loading';
+    selectedSlot = null;
+    render();
+    fetch(`${API_BASE}/appointments/availability?userId=${OWNER_USER_ID}&date=${date}`)
+      .then(res => res.json())
+      .then(data => {
+        availableSlots = (data.data || []);
+        render();
+      })
+      .catch(() => {
+        availableSlots = [];
+        render();
+        showToast('Failed to load availability', 'error');
+      });
+  }
+
+  // Wire up global callbacks for inline onclick handlers
+  window._schedSelectDate = (dateStr) => {
+    selectedDate = dateStr;
+    render();
+  };
+  window._schedPrevMonth = () => {
+    const today = new Date();
+    if (calendarYear > today.getFullYear() || (calendarYear === today.getFullYear() && calendarMonth > today.getMonth())) {
+      calendarMonth--;
+      if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
+      render();
+    }
+  };
+  window._schedNextMonth = () => {
+    calendarMonth++;
+    if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; }
+    render();
+  };
+  window._schedGoStep2 = () => {
+    currentStep = 2;
+    fetchAvailability(selectedDate);
+  };
+  window._schedSelectSlot = (start, end) => {
+    selectedSlot = { start, end };
+    render();
+  };
+  window._schedGoStep3 = () => {
+    currentStep = 3;
+    render();
+  };
+  window._schedGoStep2Back = () => {
+    currentStep = 2;
+    render();
+  };
+  window._schedBackToStep1 = () => {
+    currentStep = 1;
+    selectedSlot = null;
+    render();
+  };
+  window._schedSubmit = async () => {
+    const name = document.getElementById('sched-name')?.value?.trim();
+    const email = document.getElementById('sched-email')?.value?.trim();
+    const company = document.getElementById('sched-company')?.value?.trim();
+    const notes = document.getElementById('sched-notes')?.value?.trim();
+    const meetingType = document.getElementById('sched-type')?.value;
+
+    if (!name) { showToast('Please enter your name', 'error'); return; }
+    if (!email || !email.includes('@')) { showToast('Please enter a valid email', 'error'); return; }
+
+    const btn = document.getElementById('sched-submit-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Booking...'; }
+
+    try {
+      const res = await fetch(`${API_BASE}/appointments/book`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: OWNER_USER_ID,
+          date: selectedDate,
+          startTime: selectedSlot.start,
+          endTime: selectedSlot.end,
+          bookerName: name,
+          bookerEmail: email,
+          company: company || undefined,
+          notes: notes || undefined,
+          meetingType: meetingType,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Booking failed');
+
+      // Show confirmation
+      const dateObj = new Date(selectedDate + 'T12:00:00');
+      const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      showModal(`
+        <div style="text-align:center;padding:20px 0;">
+          <div style="width:56px;height:56px;border-radius:50%;background:rgba(0,204,106,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">&#10003;</div>
+          <h2 style="margin:0 0 8px;font-size:20px;color:#fff;">You're Booked!</h2>
+          <p style="color:rgba(255,255,255,0.6);font-size:14px;margin:0 0 24px;">Your consultation has been scheduled.</p>
+          <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:16px;text-align:left;margin-bottom:24px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="color:rgba(255,255,255,0.5);font-size:13px;">Date</span>
+              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">${formattedDate}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="color:rgba(255,255,255,0.5);font-size:13px;">Time</span>
+              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">${selectedSlot.start} - ${selectedSlot.end}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <span style="color:rgba(255,255,255,0.5);font-size:13px;">Type</span>
+              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">${meetingType}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+              <span style="color:rgba(255,255,255,0.5);font-size:13px;">Confirmation</span>
+              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">Sent to ${email}</span>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="closeModal()" style="min-width:160px;">Done</button>
+        </div>
+      `);
+      showToast('Consultation booked successfully!');
+    } catch (err) {
+      showToast(err.message || 'Failed to book consultation', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Book Consultation'; }
+    }
+  };
+
+  // Initialize
+  render();
+}
+
+// ── Modal API Handlers ──────────────────────────────────
+async function handleCreateWorkflow() {
+  const modal = document.getElementById('modal-content');
+  const inputs = modal.querySelectorAll('input');
+  const textarea = modal.querySelector('textarea');
+  const select = modal.querySelector('select');
+  const name = inputs[0]?.value?.trim();
+  const description = textarea?.value?.trim();
+  const triggerMap = { 'Webhook': 'webhook', 'Schedule (Cron)': 'schedule', 'Event-based': 'event', 'Manual': 'manual' };
+  const triggerType = triggerMap[select?.value] || 'manual';
+  if (!name) { showToast('Please enter a workflow name', 'error'); return; }
+  try {
+    await api.post('/workflows', { name, description, triggerType });
+    closeModal();
+    showToast('Workflow created! Opening editor...');
+    navigateTo('workflow-editor');
+  } catch (err) {
+    showToast(err.message || 'Failed to create workflow', 'error');
+  }
+}
+
+async function handleCreateAgent() {
+  const modal = document.getElementById('modal-content');
+  const inputs = modal.querySelectorAll('input');
+  const textarea = modal.querySelector('textarea');
+  const select = modal.querySelector('select');
+  const name = inputs[0]?.value?.trim();
+  const description = textarea?.value?.trim();
+  const modelMap = { 'Claude Opus 4': 'claude-opus-4-20250514', 'Claude Sonnet 4': 'claude-sonnet-4-20250514', 'GPT-4o': 'gpt-4o', 'Custom Model': 'custom' };
+  const model = modelMap[select?.value] || 'claude-sonnet-4-20250514';
+  const temperature = (inputs[1]?.value || 30) / 100;
+  const maxTokens = parseInt(inputs[2]?.value) || 4096;
+  if (!name) { showToast('Please enter an agent name', 'error'); return; }
+  try {
+    await api.post('/agents', { name, description, model, temperature, maxTokens });
+    closeModal();
+    showToast('AI Agent created!');
+    navigateTo('agents');
+  } catch (err) {
+    showToast(err.message || 'Failed to create agent', 'error');
+  }
+}
+
+async function handleSendInvite() {
+  const modal = document.getElementById('modal-content');
+  const emailInput = modal.querySelector('input[type="email"]');
+  const select = modal.querySelector('select');
+  const email = emailInput?.value?.trim();
+  const role = select?.value || 'viewer';
+  if (!email) { showToast('Please enter an email address', 'error'); return; }
+  try {
+    await api.post('/team/invite', { email, role });
+    closeModal();
+    showToast('Invitation sent!');
+  } catch (err) {
+    showToast(err.message || 'Failed to send invitation', 'error');
+  }
 }

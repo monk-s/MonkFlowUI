@@ -3076,3 +3076,457 @@ tr:hover td { background: var(--bg-card); }
   .stats-grid { grid-template-columns: 1fr; }
   .landing-hero-title { font-size: 24px; }
 }
+
+/* ============================================================
+   SCHEDULING MODAL
+   ============================================================ */
+.scheduling-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.scheduling-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scheduling-step-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  transition: all 0.2s;
+}
+
+.scheduling-step-dot.active {
+  background: var(--accent);
+  color: var(--black);
+}
+
+.scheduling-step-dot.completed {
+  background: var(--accent);
+  color: var(--black);
+}
+
+.scheduling-step-line {
+  width: 40px;
+  height: 2px;
+  background: var(--border-light);
+  transition: background 0.2s;
+}
+
+.scheduling-step-line.active {
+  background: var(--accent);
+}
+
+/* Calendar Grid */
+.calendar-container {
+  margin-bottom: 16px;
+}
+
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.calendar-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.calendar-nav-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.calendar-nav-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.calendar-weekday {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  padding: 4px 0;
+}
+
+.calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.calendar-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.calendar-day:hover:not(.disabled):not(.empty) {
+  background: var(--bg-hover);
+  border-color: var(--border-light);
+}
+
+.calendar-day.today {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.calendar-day.selected {
+  background: var(--accent) !important;
+  color: var(--black) !important;
+  font-weight: 700;
+  border-color: var(--accent);
+}
+
+.calendar-day.disabled {
+  color: var(--text-tertiary);
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.calendar-day.empty {
+  cursor: default;
+}
+
+/* Time Slot Grid */
+.time-slot-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.time-slot {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.time-slot:hover {
+  border-color: var(--accent);
+  background: rgba(0, 204, 106, 0.08);
+}
+
+.time-slot.selected {
+  background: var(--accent);
+  color: var(--black);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.no-slots-message {
+  text-align: center;
+  padding: 32px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* Booking confirmation */
+.booking-confirmation {
+  text-align: center;
+  padding: 24px 0;
+}
+
+.booking-confirmation .check-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(0, 204, 106, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+}
+
+.booking-confirmation .check-circle svg {
+  width: 32px;
+  height: 32px;
+  color: var(--accent);
+}
+
+.booking-details {
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+  text-align: left;
+}
+
+.booking-details p {
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.booking-details strong {
+  color: var(--text-primary);
+}
+
+/* ============================================================
+   LOADING SKELETONS
+   ============================================================ */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+}
+
+.skeleton-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.skeleton-line {
+  height: 14px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.skeleton-line.short {
+  width: 40%;
+}
+
+.skeleton-line.medium {
+  width: 65%;
+}
+
+.skeleton-line.tall {
+  height: 24px;
+}
+
+.skeleton-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.skeleton-bar {
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ============================================================
+   NODE CONFIG PANEL
+   ============================================================ */
+.node-config-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-light);
+  z-index: 20;
+  overflow-y: auto;
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  padding: 20px;
+}
+
+.node-config-panel.open {
+  transform: translateX(0);
+}
+
+.node-config-panel .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.node-config-panel .panel-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.node-config-panel .config-field {
+  margin-bottom: 16px;
+}
+
+.node-config-panel .config-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.node-config-panel .config-field input,
+.node-config-panel .config-field textarea,
+.node-config-panel .config-field select {
+  width: 100%;
+  font-size: 13px;
+}
+
+.node-config-panel .config-field textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+/* ============================================================
+   EXECUTION STATUS BAR
+   ============================================================ */
+.execution-status-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-light);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 15;
+  font-size: 13px;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.execution-status-bar .status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 1.5s infinite;
+}
+
+.execution-status-bar .status-indicator.running {
+  background: var(--info);
+}
+
+.execution-status-bar .status-indicator.completed {
+  background: var(--accent);
+  animation: none;
+}
+
+.execution-status-bar .status-indicator.failed {
+  background: var(--error);
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.execution-status-bar .status-text {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.execution-status-bar .status-text strong {
+  color: var(--text-primary);
+}
+
+/* Workflow node execution states */
+.workflow-node.node-completed {
+  box-shadow: 0 0 0 2px var(--accent), 0 4px 12px rgba(0, 204, 106, 0.2);
+}
+
+.workflow-node.node-failed {
+  box-shadow: 0 0 0 2px var(--error), 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+.workflow-node.node-running {
+  box-shadow: 0 0 0 2px var(--info), 0 4px 12px rgba(59, 130, 246, 0.2);
+  animation: pulse 1.5s infinite;
+}
+
+/* ============================================================
+   SCHEDULING MODAL RESPONSIVE
+   ============================================================ */
+@media (max-width: 600px) {
+  .calendar-days {
+    gap: 2px;
+  }
+
+  .calendar-day {
+    font-size: 12px;
+  }
+
+  .time-slot-grid {
+    gap: 6px;
+  }
+
+  .time-slot {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .scheduling-step-line {
+    width: 24px;
+  }
+}
