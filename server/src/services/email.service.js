@@ -91,8 +91,11 @@ async function sendAppointmentNotification(userId, appointment) {
   const user = await userModel.findById(userId);
   if (!user) return;
 
+  // Send to the owner's notification email (nathan@monkflow.io), falling back to DB email
+  const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || user.email;
+
   return sendEmail({
-    to: user.email,
+    to: ownerEmail,
     subject: `New Appointment: ${appointment.booker_name}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">

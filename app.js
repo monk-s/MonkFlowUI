@@ -2981,13 +2981,13 @@ function showSchedulingModal() {
         No availability on this date. Please choose another day.
       </div>`;
     } else {
-      slotsHtml = `<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;">
+      slotsHtml = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:420px;margin:0 auto;">
         ${availableSlots.map(slot => {
           const isActive = selectedSlot && selectedSlot.start === slot.start;
           return `<button onclick="window._schedSelectSlot('${slot.start}','${slot.end}')"
-            style="padding:8px 16px;border-radius:20px;border:1px solid ${isActive ? '#00cc6a' : 'rgba(255,255,255,0.12)'};
+            style="padding:10px 0;border-radius:8px;border:1px solid ${isActive ? '#00cc6a' : 'rgba(255,255,255,0.12)'};
             background:${isActive ? '#00cc6a' : 'rgba(255,255,255,0.04)'};color:${isActive ? '#000' : 'rgba(255,255,255,0.85)'};
-            font-size:13px;font-weight:${isActive ? '700' : '500'};cursor:pointer;transition:all 0.15s;">${slot.start} - ${slot.end}</button>`;
+            font-size:13px;font-weight:${isActive ? '700' : '500'};cursor:pointer;transition:all 0.15s;text-align:center;">${slot.start} – ${slot.end}</button>`;
         }).join('')}
       </div>`;
     }
