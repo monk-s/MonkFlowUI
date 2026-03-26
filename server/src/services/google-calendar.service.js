@@ -67,8 +67,16 @@ async function createCalendarEvent(appointment) {
   } else if (typeof dateStr === 'string' && dateStr.includes('T')) {
     dateStr = dateStr.split('T')[0];
   }
-  const startDateTime = `${dateStr}T${appointment.start_time}:00`;
-  const endDateTime = `${dateStr}T${appointment.end_time}:00`;
+  // PostgreSQL time type returns 'HH:MM:SS' — use directly, don't append extra ':00'
+  // Also handle 'HH:MM' format just in case
+  const startTime = String(appointment.start_time).split(':').length === 3
+    ? appointment.start_time   // already HH:MM:SS
+    : `${appointment.start_time}:00`;  // HH:MM → HH:MM:00
+  const endTime = String(appointment.end_time).split(':').length === 3
+    ? appointment.end_time
+    : `${appointment.end_time}:00`;
+  const startDateTime = `${dateStr}T${startTime}`;
+  const endDateTime = `${dateStr}T${endTime}`;
 
   const event = {
     summary: `MonkFlow Consultation — ${appointment.booker_name}`,
@@ -101,6 +109,8 @@ async function createCalendarEvent(appointment) {
     },
     colorId: '10', // Basil green
   };
+
+  console.log(`[Google Calendar] Creating event: start=${startDateTime}, end=${endDateTime}`);
 
   try {
     const response = await calendar.events.insert({
