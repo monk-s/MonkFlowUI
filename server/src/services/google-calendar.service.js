@@ -97,15 +97,10 @@ async function createCalendarEvent(appointment) {
       dateTime: endDateTime,
       timeZone: 'America/Los_Angeles',
     },
-    attendees: [
-      { email: appointment.booker_email, displayName: appointment.booker_name },
-    ],
+    // Note: Service accounts can't add attendees without Domain-Wide Delegation.
+    // Attendee info is included in the description instead.
     reminders: {
-      useDefault: false,
-      overrides: [
-        { method: 'email', minutes: 60 },
-        { method: 'popup', minutes: 15 },
-      ],
+      useDefault: true,
     },
     colorId: '10', // Basil green
   };
@@ -116,7 +111,7 @@ async function createCalendarEvent(appointment) {
     const response = await calendar.events.insert({
       calendarId,
       resource: event,
-      sendUpdates: 'all', // Send email notifications to attendees
+      sendUpdates: 'none', // Service account — no attendee invites
     });
 
     console.log(`[Google Calendar] Event created: ${response.data.htmlLink}`);
