@@ -3172,7 +3172,7 @@ function showSchedulingModal() {
               <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">Sent to ${email}</span>
             </div>
           </div>
-          <button class="btn btn-primary" onclick="closeModal()" style="min-width:160px;">Done</button>
+          <button class="btn btn-primary" onclick="closeModal()" style="min-width:160px;text-align:center;display:flex;align-items:center;justify-content:center;">Done</button>
         </div>
       `);
       showToast('Consultation booked successfully!');

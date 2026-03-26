@@ -60,9 +60,15 @@ async function createCalendarEvent(appointment) {
   }
 
   // Build start/end datetime strings
-  // appointment.date = 'YYYY-MM-DD', start_time = 'HH:MM', end_time = 'HH:MM'
-  const startDateTime = `${appointment.date}T${appointment.start_time}:00`;
-  const endDateTime = `${appointment.date}T${appointment.end_time}:00`;
+  // appointment.date may be a JS Date object from PostgreSQL or a 'YYYY-MM-DD' string
+  let dateStr = appointment.date;
+  if (dateStr instanceof Date) {
+    dateStr = dateStr.toISOString().split('T')[0]; // '2026-03-30'
+  } else if (typeof dateStr === 'string' && dateStr.includes('T')) {
+    dateStr = dateStr.split('T')[0];
+  }
+  const startDateTime = `${dateStr}T${appointment.start_time}:00`;
+  const endDateTime = `${dateStr}T${appointment.end_time}:00`;
 
   const event = {
     summary: `MonkFlow Consultation — ${appointment.booker_name}`,

@@ -67,16 +67,23 @@ async function sendPasswordReset(email, firstName, resetToken) {
   });
 }
 
+function formatAppointmentDate(d) {
+  if (d instanceof Date) return d.toISOString().split('T')[0];
+  if (typeof d === 'string' && d.includes('T')) return d.split('T')[0];
+  return d;
+}
+
 async function sendAppointmentConfirmation(email, bookerName, appointment) {
+  const dateStr = formatAppointmentDate(appointment.date);
   return sendEmail({
     to: email,
-    subject: `Appointment Confirmed — ${appointment.date}`,
+    subject: `Appointment Confirmed — ${dateStr}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h1 style="color: #00cc6a;">Appointment Confirmed</h1>
         <p>Hi ${bookerName}, your appointment has been confirmed.</p>
         <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
-          <p><strong>Date:</strong> ${appointment.date}</p>
+          <p><strong>Date:</strong> ${dateStr}</p>
           <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
           <p><strong>Type:</strong> ${appointment.meeting_type}</p>
         </div>
@@ -94,6 +101,7 @@ async function sendAppointmentNotification(userId, appointment) {
   // Send to the owner's notification email (nathan@monkflow.io), falling back to DB email
   const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || user.email;
 
+  const notifDateStr = formatAppointmentDate(appointment.date);
   return sendEmail({
     to: ownerEmail,
     subject: `New Appointment: ${appointment.booker_name}`,
@@ -102,7 +110,7 @@ async function sendAppointmentNotification(userId, appointment) {
         <h1 style="color: #00cc6a;">New Appointment Booked</h1>
         <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
           <p><strong>Client:</strong> ${appointment.booker_name} (${appointment.booker_email})</p>
-          <p><strong>Date:</strong> ${appointment.date}</p>
+          <p><strong>Date:</strong> ${notifDateStr}</p>
           <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
           <p><strong>Type:</strong> ${appointment.meeting_type}</p>
           ${appointment.notes ? `<p><strong>Notes:</strong> ${appointment.notes}</p>` : ''}
