@@ -21,13 +21,14 @@ const apiKeyRoutes = require('./routes/apiKey.routes');
 const teamRoutes = require('./routes/team.routes');
 const contactRoutes = require('./routes/contact.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
+const projectRoutes = require('./routes/project.routes');
 
 const app = express();
 
 // Global middleware
 app.use(helmet());
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
 app.use(morgan(env.isDev ? 'dev' : 'combined'));
 app.use(rateLimiter.global);
 
@@ -50,6 +51,7 @@ app.use('/api/v1/api-keys', apiKeyRoutes);
 app.use('/api/v1/team', teamRoutes);
 app.use('/api/v1/contact', contactRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
+app.use('/api/v1/projects', projectRoutes);
 
 // 404 handler
 app.use((req, res) => {

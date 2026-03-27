@@ -175,22 +175,12 @@ function triggerTypeLabel(triggerType) {
 }
 
 // ── Notifications Data ──────────────────────────────────
-let notifications = [
-  { id: 1, type: 'workflow', title: 'Workflow Completed', message: 'Lead Scoring Pipeline finished with 99.2% success rate', time: '2 min ago', read: false, icon: 'workflow' },
-  { id: 2, type: 'agent', title: 'Agent Alert', message: 'Support Agent handled 150 tickets today — new record!', time: '15 min ago', read: false, icon: 'agents' },
-  { id: 3, type: 'system', title: 'System Update', message: 'Platform maintenance scheduled for tonight at 2 AM EST', time: '1 hour ago', read: false, icon: 'shield' },
-  { id: 4, type: 'workflow', title: 'Workflow Error', message: 'Slack Alert System failed — API rate limit exceeded', time: '2 hours ago', read: false, icon: 'workflow' },
-  { id: 5, type: 'integration', title: 'New Integration', message: 'Salesforce connection synced 234 new records', time: '3 hours ago', read: true, icon: 'integrations' },
-  { id: 6, type: 'team', title: 'Team Update', message: 'Sarah Chen accepted your invitation to join the team', time: '5 hours ago', read: true, icon: 'users' },
-  { id: 7, type: 'agent', title: 'Agent Deployed', message: 'Content Writer v2 is now live in production', time: '1 day ago', read: true, icon: 'agents' },
-  { id: 8, type: 'workflow', title: 'Workflow Paused', message: 'Invoice Processing paused due to PDF parsing timeout', time: '1 day ago', read: true, icon: 'workflow' },
-  { id: 9, type: 'system', title: 'Usage Alert', message: 'You have used 85% of your monthly API quota', time: '2 days ago', read: true, icon: 'zap' },
-  { id: 10, type: 'integration', title: 'Integration Update', message: 'OpenAI connector updated to GPT-4o support', time: '3 days ago', read: true, icon: 'integrations' },
-];
+let notifications = [];
 
 // ── Search Index ──────────────────────────────────────────
 const searchIndex = [
   { type: 'page', name: 'Dashboard', page: 'dashboard', keywords: ['home', 'overview', 'stats', 'activity'] },
+  { type: 'page', name: 'Projects', page: 'projects', keywords: ['project', 'deliverable', 'files', 'status', 'portal', 'upload'] },
   { type: 'page', name: 'Workflows', page: 'workflows', keywords: ['automation', 'pipeline', 'trigger'] },
   { type: 'page', name: 'AI Solutions', page: 'agents', keywords: ['ai', 'agent', 'bot', 'intelligence'] },
   { type: 'page', name: 'Integrations', page: 'integrations', keywords: ['connect', 'api', 'sync', 'slack', 'salesforce'] },
@@ -277,6 +267,7 @@ function navigateTo(page) {
   renderMainContent();
   if (page === 'dashboard') loadDashboardData();
   if (page === 'workflows') loadWorkflowsData();
+  if (page === 'projects') loadProjectsData();
   if (page === 'logs') loadLogsData();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
@@ -484,12 +475,6 @@ function closeModal() {
 function renderLandingPage() {
   const container = document.getElementById('landing-container');
 
-  const testimonials = [
-    { name: 'Sarah Mitchell', role: 'CEO at Acme Corp', initials: 'SM', quote: 'MonkFlow completely transformed how we onboard new clients. What used to take 3 days now happens in under 2 hours.', result: '85% faster onboarding' },
-    { name: 'James Park', role: 'Operations Director at Meridian Health', initials: 'JP', quote: 'The AI chatbot actually understands our medical scheduling workflows. Our call center volume dropped 40% in the first month.', result: '40% fewer support calls' },
-    { name: 'Rachel Torres', role: 'Founder at Peak Fitness', initials: 'RT', quote: 'AI-powered slot optimization increased our booking rates by 28% across 12 locations.', result: '28% more bookings' },
-  ];
-
   const services = [
     { icon: icons.users, title: 'Onboarding Tools', desc: 'Automated client & employee onboarding flows with document collection and progress tracking.' },
     { icon: icons.clock, title: 'Scheduling Software', desc: 'Smart booking systems with AI-powered optimization, reminders, and multi-provider sync.' },
@@ -507,9 +492,9 @@ function renderLandingPage() {
           <div class="logo-text">Monk<span>Flow</span></div>
         </div>
         <div class="landing-nav-links">
-          <a href="#landing-services" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">Services</a>
-          <a href="#landing-testimonials" onclick="event.preventDefault();document.getElementById('landing-testimonials').scrollIntoView({behavior:'smooth'})">Testimonials</a>
-          <a href="#landing-about" onclick="event.preventDefault();document.getElementById('landing-about').scrollIntoView({behavior:'smooth'})">About</a>
+          <a href="#landing-services" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Services</a>
+          <a href="#landing-testimonials" onclick="event.preventDefault();document.getElementById('landing-testimonials').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Why MonkFlow</a>
+          <a href="#landing-about" onclick="event.preventDefault();document.getElementById('landing-about').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">About</a>
         </div>
         <div class="landing-nav-actions">
           <button class="btn btn-ghost" onclick="showAuth()">Sign In</button>
@@ -532,10 +517,10 @@ function renderLandingPage() {
           <button class="btn btn-secondary btn-lg" onclick="document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">${icons.eye} Explore Our Services</button>
         </div>
         <div class="landing-hero-stats">
-          <div class="landing-stat"><div class="landing-stat-val">120+</div><div class="landing-stat-label">Businesses Served</div></div>
-          <div class="landing-stat"><div class="landing-stat-val">340+</div><div class="landing-stat-label">Tools Delivered</div></div>
-          <div class="landing-stat"><div class="landing-stat-val">99.7%</div><div class="landing-stat-label">Client Satisfaction</div></div>
-          <div class="landing-stat"><div class="landing-stat-val">12,400h</div><div class="landing-stat-label">Hours Saved</div></div>
+          <div class="landing-stat"><div class="landing-stat-val">ACU</div><div class="landing-stat-label">Student-Founded</div></div>
+          <div class="landing-stat"><div class="landing-stat-val">100%</div><div class="landing-stat-label">Custom-Built</div></div>
+          <div class="landing-stat"><div class="landing-stat-val">Fixed</div><div class="landing-stat-label">Fee Projects</div></div>
+          <div class="landing-stat"><div class="landing-stat-val">Local</div><div class="landing-stat-label">West Texas Focus</div></div>
         </div>
       </div>
       <div class="hero-glow"></div>
@@ -569,30 +554,27 @@ function renderLandingPage() {
       </div>
     </section>
 
-    <!-- Testimonials -->
+    <!-- Why MonkFlow -->
     <section id="landing-testimonials" class="landing-section landing-section-alt">
       <div class="landing-section-inner">
         <div class="section-header">
-          <div class="hero-badge">Client Success</div>
-          <h2 class="section-title">Trusted by 120+ Businesses</h2>
-          <p class="section-subtitle">Don't take our word for it — hear from the businesses we've helped transform.</p>
+          <div class="hero-badge">Why MonkFlow</div>
+          <h2 class="section-title">Built Different</h2>
+          <p class="section-subtitle">We're not a big agency. We're a student-led software studio that builds tools businesses actually use.</p>
         </div>
         <div class="landing-testimonials-grid">
-          ${testimonials.map(t => `
-            <div class="landing-testimonial-card">
-              <div class="testimonial-quote">"${t.quote}"</div>
-              <div class="testimonial-result">
-                <span class="result-badge">${icons.zap} ${t.result}</span>
-              </div>
-              <div class="testimonial-author">
-                <div class="testimonial-avatar">${t.initials}</div>
-                <div>
-                  <div class="testimonial-name">${t.name}</div>
-                  <div class="testimonial-role">${t.role}</div>
-                </div>
-              </div>
-            </div>
-          `).join('')}
+          <div class="landing-testimonial-card">
+            <div class="testimonial-quote" style="font-size:20px;font-weight:600;color:var(--accent);">No Templates</div>
+            <div style="color:var(--text-secondary);margin-top:8px;">Every tool we build is custom. We study your business first, then write code specifically for your workflows. You'll never get a reskinned template.</div>
+          </div>
+          <div class="landing-testimonial-card">
+            <div class="testimonial-quote" style="font-size:20px;font-weight:600;color:var(--accent);">Fixed-Fee Pricing</div>
+            <div style="color:var(--text-secondary);margin-top:8px;">No hourly billing, no surprise invoices. We scope the project, quote a price, and deliver. You know exactly what you're paying before we start.</div>
+          </div>
+          <div class="landing-testimonial-card">
+            <div class="testimonial-quote" style="font-size:20px;font-weight:600;color:var(--accent);">Real Support</div>
+            <div style="color:var(--text-secondary);margin-top:8px;">We don't disappear after launch. You get a direct line to the person who built your tool — not a support ticket queue.</div>
+          </div>
         </div>
       </div>
     </section>
@@ -668,8 +650,9 @@ function renderLandingPage() {
           </div>
           <div>
             <h4>Company</h4>
-            <a href="#" onclick="event.preventDefault();document.getElementById('landing-about').scrollIntoView({behavior:'smooth'})">About</a>
-            <a href="#" onclick="event.preventDefault();document.getElementById('landing-testimonials').scrollIntoView({behavior:'smooth'})">Testimonials</a>
+            <a href="#" onclick="event.preventDefault();document.getElementById('landing-about').scrollIntoView({behavior:'smooth'})">How We Work</a>
+            <a href="#" onclick="event.preventDefault();document.getElementById('landing-testimonials').scrollIntoView({behavior:'smooth'})">Why MonkFlow</a>
+            <a href="#" onclick="event.preventDefault();showSchedulingModal()">Schedule a Call</a>
             <a href="#" onclick="event.preventDefault();showAuth()">Sign In</a>
           </div>
         </div>
@@ -713,15 +696,6 @@ function renderAuthLogin() {
             <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="handleLogin()">
               Sign In
             </button>
-            <div class="auth-divider">or continue with</div>
-            <div class="auth-social-btns">
-              <button class="auth-social-btn" onclick="showToast('Google sign-in coming soon','info')">
-                ${icons.globe} Google
-              </button>
-              <button class="auth-social-btn" onclick="showToast('GitHub sign-in coming soon','info')">
-                ${icons.key} GitHub
-              </button>
-            </div>
           </div>
           <div class="auth-footer">
             Don't have an account? <a href="#" onclick="event.preventDefault();renderAuthSignup()">Sign up free</a>
@@ -746,7 +720,7 @@ function renderAuthLogin() {
             </div>
             <div class="auth-feature">
               <div class="feature-check">${icons.check}</div>
-              120+ businesses served
+              Student-founded at ACU, Abilene TX
             </div>
             <div class="auth-feature">
               <div class="feature-check">${icons.check}</div>
@@ -800,11 +774,6 @@ function renderAuthSignup() {
             <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="handleSignup()">
               Create Account
             </button>
-            <div class="auth-divider">or sign up with</div>
-            <div class="auth-social-btns">
-              <button class="auth-social-btn" onclick="showToast('Google sign-up coming soon','info')">${icons.globe} Google</button>
-              <button class="auth-social-btn" onclick="showToast('GitHub sign-up coming soon','info')">${icons.key} GitHub</button>
-            </div>
           </div>
           <div class="auth-footer">
             Already have an account? <a href="#" onclick="event.preventDefault();renderAuthLogin()">Sign in</a>
@@ -816,8 +785,8 @@ function renderAuthSignup() {
       </div>
       <div class="auth-right">
         <div class="auth-hero-content">
-          <h2>Join <span style="color:var(--accent)">120+</span><br/>Businesses</h2>
-          <p>From startups to enterprises, we build curated software tools that transform how teams work.</p>
+          <h2>Let's Build<br/><span style="color:var(--accent)">Something Great</span></h2>
+          <p>We build custom software tools around your business — not the other way around.</p>
           <div class="auth-features">
             <div class="auth-feature">
               <div class="feature-check">${icons.check}</div>
@@ -829,7 +798,7 @@ function renderAuthSignup() {
             </div>
             <div class="auth-feature">
               <div class="feature-check">${icons.check}</div>
-              99.7% client satisfaction
+              Fixed-fee projects, no surprises
             </div>
             <div class="auth-feature">
               <div class="feature-check">${icons.check}</div>
@@ -857,10 +826,13 @@ function renderSidebar() {
       </div>
       <div class="nav-item" data-page="workflows" onclick="navigateTo('workflows')">
         ${icons.workflow} Workflows
-        <span class="badge">12</span>
       </div>
       <div class="nav-item" data-page="agents" onclick="navigateTo('agents')">
         ${icons.agents} AI Solutions
+      </div>
+
+      <div class="nav-item" data-page="projects" onclick="navigateTo('projects')">
+        ${icons.book} Projects
       </div>
 
       <div class="nav-section-label">Platform</div>
@@ -904,6 +876,7 @@ function renderSidebar() {
 function renderTopbar() {
   const titles = {
     dashboard: 'Dashboard',
+    projects: 'Projects',
     workflows: 'Workflows',
     agents: 'AI Solutions',
     integrations: 'Integrations',
@@ -1143,6 +1116,7 @@ function renderMainContent() {
   const main = document.getElementById('main-content');
   const pages = {
     dashboard: renderDashboard,
+    projects: renderProjects,
     workflows: renderWorkflows,
     agents: renderAgents,
     integrations: renderIntegrations,
@@ -1154,6 +1128,293 @@ function renderMainContent() {
     'workflow-editor': renderWorkflowEditor,
   };
   main.innerHTML = (pages[currentPage] || renderDashboard)();
+}
+
+// ============================================================
+// PROJECTS PAGE (client portal — view project status & files)
+// ============================================================
+let projectsData = null;
+let currentProjectDetail = null;
+
+async function loadProjectsData() {
+  try {
+    const isOwner = currentUser?.id === '385e12a9-c98d-4555-91a1-a9b4c76a9ad8';
+    const endpoint = isOwner ? '/projects/all' : '/projects';
+    const result = await api.get(endpoint);
+    projectsData = result.data || [];
+    renderMainContent();
+  } catch (err) {
+    console.error('Failed to load projects:', err);
+    projectsData = [];
+    renderMainContent();
+  }
+}
+
+async function viewProject(id) {
+  try {
+    currentProjectDetail = await api.get(`/projects/${id}`);
+    renderMainContent();
+  } catch (err) {
+    showToast('Failed to load project', 'error');
+  }
+}
+
+async function createProjectPrompt() {
+  showModal(`
+    <h2 style="margin-bottom:16px;">Create New Project</h2>
+    <div class="form-group">
+      <label class="form-label">Project Name</label>
+      <input type="text" id="new-project-name" placeholder="e.g., Website Redesign" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <textarea id="new-project-desc" placeholder="Brief description of the project..." rows="3" style="width:100%;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text-primary);resize:vertical;"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Client User ID</label>
+      <input type="text" id="new-project-user" placeholder="User UUID" />
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitNewProject()">Create Project</button>
+    </div>
+  `);
+}
+
+async function submitNewProject() {
+  const name = document.getElementById('new-project-name')?.value?.trim();
+  const description = document.getElementById('new-project-desc')?.value?.trim();
+  const userId = document.getElementById('new-project-user')?.value?.trim();
+  if (!name || !userId) { showToast('Name and User ID are required', 'error'); return; }
+  try {
+    await api.post('/projects', { name, description, userId });
+    closeModal();
+    showToast('Project created!');
+    loadProjectsData();
+  } catch (err) {
+    showToast(err.message || 'Failed to create project', 'error');
+  }
+}
+
+async function updateProjectStatus(id, status) {
+  try {
+    await api.patch(`/projects/${id}`, { status });
+    showToast('Status updated!');
+    viewProject(id);
+  } catch (err) {
+    showToast(err.message || 'Failed to update', 'error');
+  }
+}
+
+async function addProjectUpdate(id) {
+  const input = document.getElementById('project-update-msg');
+  const message = input?.value?.trim();
+  if (!message) return;
+  try {
+    await api.post(`/projects/${id}/updates`, { message });
+    input.value = '';
+    showToast('Update posted!');
+    viewProject(id);
+  } catch (err) {
+    showToast(err.message || 'Failed', 'error');
+  }
+}
+
+async function uploadProjectFile(projectId) {
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 50 * 1024 * 1024) { showToast('File too large (max 50MB)', 'error'); return; }
+    showToast('Uploading...', 'info');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result.split(',')[1];
+      try {
+        await api.post(`/projects/${projectId}/files`, {
+          filename: file.name,
+          data: base64,
+          mimeType: file.type,
+        });
+        showToast('File uploaded!');
+        viewProject(projectId);
+      } catch (err) {
+        showToast(err.message || 'Upload failed', 'error');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+  fileInput.click();
+}
+
+async function downloadProjectFile(projectId, fileId, filename) {
+  try {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/files/${fileId}/download`, {
+      headers: { 'Authorization': `Bearer ${api.token}` },
+    });
+    if (!res.ok) throw new Error('Download failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showToast('Download failed', 'error');
+  }
+}
+
+function renderProjects() {
+  const isOwner = currentUser?.id === '385e12a9-c98d-4555-91a1-a9b4c76a9ad8';
+
+  // If viewing a specific project
+  if (currentProjectDetail && currentPage === 'projects') {
+    const p = currentProjectDetail;
+    const statusColors = { discovery: '#6366f1', in_progress: '#f59e0b', review: '#3b82f6', delivered: '#10b981', completed: '#22c55e' };
+    const statusLabels = { discovery: 'Discovery', in_progress: 'In Progress', review: 'Under Review', delivered: 'Delivered', completed: 'Completed' };
+
+    const filesHtml = (p.files || []).map(f => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-secondary);border-radius:8px;margin-bottom:6px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${icons.download}
+          <div>
+            <div style="font-weight:500;">${f.original_name}</div>
+            <div style="font-size:11px;color:var(--text-tertiary);">${(f.file_size / 1024).toFixed(1)} KB • ${new Date(f.created_at).toLocaleDateString()}</div>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="downloadProjectFile('${p.id}','${f.id}','${f.original_name}')">Download</button>
+      </div>
+    `).join('') || '<div style="color:var(--text-tertiary);padding:12px;">No files uploaded yet.</div>';
+
+    const updatesHtml = (p.updates || []).map(u => `
+      <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="width:8px;height:8px;border-radius:50%;background:${u.status ? statusColors[u.status] || 'var(--accent)' : 'var(--text-tertiary)'};margin-top:6px;flex-shrink:0;"></div>
+        <div>
+          <div style="font-size:13px;">${u.message}</div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">${new Date(u.created_at).toLocaleString()}</div>
+        </div>
+      </div>
+    `).join('') || '<div style="color:var(--text-tertiary);padding:12px;">No updates yet.</div>';
+
+    const statusOptions = isOwner ? `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;">
+        ${Object.entries(statusLabels).map(([k, v]) => `
+          <button class="btn ${p.status === k ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="updateProjectStatus('${p.id}','${k}')">${v}</button>
+        `).join('')}
+      </div>
+    ` : '';
+
+    return `
+      <div class="page-header">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <button class="btn btn-ghost btn-sm" onclick="currentProjectDetail=null;renderMainContent();">${icons.arrowLeft} Back</button>
+          <div>
+            <h1>${p.name}</h1>
+            <p class="page-desc">${p.description || 'No description'}</p>
+          </div>
+        </div>
+        ${isOwner ? `<button class="btn btn-primary btn-sm" onclick="uploadProjectFile('${p.id}')">${icons.plus} Upload File</button>` : ''}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+        <div class="card">
+          <div class="card-header"><h3>Status</h3></div>
+          <div style="padding:16px;">
+            <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:20px;background:${statusColors[p.status] || '#666'}22;color:${statusColors[p.status] || '#666'};font-weight:600;font-size:14px;">
+              <div style="width:8px;height:8px;border-radius:50%;background:${statusColors[p.status] || '#666'}"></div>
+              ${statusLabels[p.status] || p.status}
+            </div>
+            ${statusOptions}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>Project Info</h3></div>
+          <div style="padding:16px;font-size:13px;color:var(--text-secondary);">
+            <div style="margin-bottom:8px;"><strong>Created:</strong> ${new Date(p.created_at).toLocaleDateString()}</div>
+            <div style="margin-bottom:8px;"><strong>Last Updated:</strong> ${new Date(p.updated_at).toLocaleDateString()}</div>
+            <div><strong>Files:</strong> ${(p.files || []).length}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header"><h3>Files & Deliverables</h3></div>
+        <div style="padding:16px;">${filesHtml}</div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header"><h3>Timeline & Updates</h3></div>
+        <div style="padding:16px;">
+          ${isOwner ? `
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+              <input type="text" id="project-update-msg" placeholder="Post an update..." style="flex:1;" onkeydown="if(event.key==='Enter')addProjectUpdate('${p.id}')" />
+              <button class="btn btn-primary btn-sm" onclick="addProjectUpdate('${p.id}')">Post</button>
+            </div>
+          ` : ''}
+          ${updatesHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  // Projects list view
+  if (!projectsData) {
+    return `<div class="page-header"><div><h1>Projects</h1><p class="page-desc">Loading...</p></div></div>`;
+  }
+
+  const statusColors = { discovery: '#6366f1', in_progress: '#f59e0b', review: '#3b82f6', delivered: '#10b981', completed: '#22c55e' };
+  const statusLabels = { discovery: 'Discovery', in_progress: 'In Progress', review: 'Under Review', delivered: 'Delivered', completed: 'Completed' };
+
+  const projectCards = projectsData.length === 0
+    ? `<div style="text-align:center;padding:60px 20px;color:var(--text-tertiary);">
+        <div style="font-size:48px;margin-bottom:12px;">${icons.book}</div>
+        <h3 style="color:var(--text-primary);">No projects yet</h3>
+        <p>Projects will appear here once we start building for ${isOwner ? 'clients' : 'you'}.</p>
+      </div>`
+    : `<div class="table-wrapper"><table>
+        <thead><tr>
+          <th>Project</th>
+          ${isOwner ? '<th>Client</th>' : ''}
+          <th>Status</th>
+          <th>Files</th>
+          <th>Last Updated</th>
+          <th></th>
+        </tr></thead>
+        <tbody>
+          ${projectsData.map(p => `
+            <tr onclick="viewProject('${p.id}')" style="cursor:pointer;">
+              <td>
+                <div style="font-weight:600;">${p.name}</div>
+                <div style="font-size:11px;color:var(--text-tertiary);">${p.description || ''}</div>
+              </td>
+              ${isOwner ? `<td style="font-size:13px;">${p.client_first_name || ''} ${p.client_last_name || ''}<br/><span style="color:var(--text-tertiary);font-size:11px;">${p.client_email || ''}</span></td>` : ''}
+              <td>
+                <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:12px;background:${statusColors[p.status] || '#666'}22;color:${statusColors[p.status] || '#666'};font-weight:500;font-size:12px;">
+                  <span style="width:6px;height:6px;border-radius:50%;background:${statusColors[p.status] || '#666'}"></span>
+                  ${statusLabels[p.status] || p.status}
+                </span>
+              </td>
+              <td>${p.file_count || 0}</td>
+              <td style="font-size:12px;color:var(--text-tertiary);">${timeAgo(p.updated_at)}</td>
+              <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();viewProject('${p.id}')">View</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table></div>`;
+
+  return `
+    <div class="page-header">
+      <div>
+        <h1>Projects</h1>
+        <p class="page-desc">${isOwner ? 'Manage all client projects and deliverables' : 'View your project status and download deliverables'}</p>
+      </div>
+      ${isOwner ? `<button class="btn btn-primary" onclick="createProjectPrompt()">${icons.plus} New Project</button>` : ''}
+    </div>
+    ${projectCards}
+  `;
 }
 
 // ============================================================
