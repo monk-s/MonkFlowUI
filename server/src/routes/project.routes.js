@@ -1,9 +1,9 @@
 const router = require('express').Router();
-const auth = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
 const projectController = require('../controllers/project.controller');
 
 // All routes require authentication
-router.use(auth);
+router.use(authenticate);
 
 // Client routes
 router.get('/', projectController.listProjects);

@@ -22,7 +22,7 @@ exports.listProjects = async (req, res, next) => {
       FROM projects p
       WHERE p.user_id = $1
       ORDER BY p.updated_at DESC`,
-      [req.user.id]
+      [req.user.userId]
     );
     res.json({ data: rows });
   } catch (err) {
@@ -57,8 +57,8 @@ exports.getProject = async (req, res, next) => {
     if (!project) return res.status(404).json({ error: { message: 'Project not found' } });
 
     // Check access: owner can see all, client can only see their own
-    const isOwner = req.user.id === process.env.OWNER_USER_ID;
-    if (!isOwner && project.user_id !== req.user.id) {
+    const isOwner = req.user.userId === process.env.OWNER_USER_ID;
+    if (!isOwner && project.user_id !== req.user.userId) {
       return res.status(403).json({ error: { message: 'Access denied' } });
     }
 
@@ -95,7 +95,7 @@ exports.createProject = async (req, res, next) => {
     // Create initial update
     await db.query(
       'INSERT INTO project_updates (project_id, status, message, created_by) VALUES ($1, $2, $3, $4)',
-      [project.id, project.status, `Project "${name}" created`, req.user.id]
+      [project.id, project.status, `Project "${name}" created`, req.user.userId]
     );
 
     res.status(201).json(project);
@@ -134,7 +134,7 @@ exports.updateProject = async (req, res, next) => {
       const statusLabels = { discovery: 'Discovery', in_progress: 'In Progress', review: 'Under Review', delivered: 'Delivered', completed: 'Completed' };
       await db.query(
         'INSERT INTO project_updates (project_id, status, message, created_by) VALUES ($1, $2, $3, $4)',
-        [project.id, status, `Status changed to ${statusLabels[status] || status}`, req.user.id]
+        [project.id, status, `Status changed to ${statusLabels[status] || status}`, req.user.userId]
       );
     }
 
@@ -152,7 +152,7 @@ exports.addUpdate = async (req, res, next) => {
 
     const { rows: [update] } = await db.query(
       'INSERT INTO project_updates (project_id, status, message, created_by) VALUES ($1, $2, $3, $4) RETURNING *',
-      [req.params.id, status || null, message, req.user.id]
+      [req.params.id, status || null, message, req.user.userId]
     );
 
     // Update project timestamp
@@ -197,7 +197,7 @@ exports.uploadFile = async (req, res, next) => {
     const { rows: [fileRecord] } = await db.query(
       `INSERT INTO project_files (project_id, filename, original_name, file_path, file_size, mime_type, uploaded_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, original_name, file_size, mime_type, created_at`,
-      [req.params.id, savedFilename, filename, filePath, buffer.length, mimeType || 'application/octet-stream', req.user.id]
+      [req.params.id, savedFilename, filename, filePath, buffer.length, mimeType || 'application/octet-stream', req.user.userId]
     );
 
     // Update project timestamp
@@ -206,7 +206,7 @@ exports.uploadFile = async (req, res, next) => {
     // Add update log
     await db.query(
       'INSERT INTO project_updates (project_id, message, created_by) VALUES ($1, $2, $3)',
-      [req.params.id, `File uploaded: ${filename}`, req.user.id]
+      [req.params.id, `File uploaded: ${filename}`, req.user.userId]
     );
 
     res.status(201).json(fileRecord);
@@ -227,8 +227,8 @@ exports.downloadFile = async (req, res, next) => {
     if (!file) return res.status(404).json({ error: { message: 'File not found' } });
 
     // Check access
-    const isOwner = req.user.id === process.env.OWNER_USER_ID;
-    if (!isOwner && file.user_id !== req.user.id) {
+    const isOwner = req.user.userId === process.env.OWNER_USER_ID;
+    if (!isOwner && file.user_id !== req.user.userId) {
       return res.status(403).json({ error: { message: 'Access denied' } });
     }
 
