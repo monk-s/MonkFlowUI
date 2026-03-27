@@ -19,18 +19,28 @@ async function sendEmail({ to, subject, html }) {
     return { id: 'dev-' + Date.now() };
   }
 
-  try {
-    const result = await client.emails.send({
-      from: env.emailFrom,
-      to,
-      subject,
-      html,
-    });
-    console.log(`[Email] Sent to ${to}: id=${result?.data?.id || result?.id || JSON.stringify(result)}`);
-    return result;
-  } catch (emailErr) {
-    console.error(`[Email] FAILED to send to ${to}: ${emailErr.message}`, emailErr.statusCode || '', JSON.stringify(emailErr.response?.body || emailErr.message));
-    throw emailErr;
+  // Try with configured domain first, fall back to Resend's default if domain not verified
+  const fromAddresses = [env.emailFrom, 'MonkFlow <onboarding@resend.dev>'];
+
+  for (const fromAddr of fromAddresses) {
+    try {
+      const result = await client.emails.send({
+        from: fromAddr,
+        to,
+        subject,
+        html,
+      });
+      console.log(`[Email] Sent to ${to} from ${fromAddr}: id=${result?.data?.id || result?.id || JSON.stringify(result)}`);
+      return result;
+    } catch (emailErr) {
+      console.error(`[Email] FAILED from ${fromAddr} to ${to}: ${emailErr.message}`, emailErr.statusCode || '');
+      // If domain not verified (403), try fallback
+      if (emailErr.statusCode === 403 && fromAddr === env.emailFrom) {
+        console.log(`[Email] Retrying with Resend default sender...`);
+        continue;
+      }
+      throw emailErr;
+    }
   }
 }
 
