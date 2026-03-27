@@ -111,6 +111,7 @@ let searchSelectedIndex = -1;
 let dashboardData = null;
 let workflowsData = null;
 let logsData = null;
+let agentsData = null;
 let currentWorkflowId = null;
 let logsSearchDebounceTimer = null;
 let apiKeysData = null;
@@ -269,6 +270,9 @@ function navigateTo(page) {
   if (page === 'workflows') loadWorkflowsData();
   if (page === 'projects') loadProjectsData();
   if (page === 'logs') loadLogsData();
+  if (page === 'agents') loadAgentsData();
+  if (page === 'team') loadTeamData();
+  if (page === 'analytics' && !dashboardData) loadDashboardData();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
@@ -306,6 +310,16 @@ async function loadLogsData() {
     renderMainContent();
   } catch (err) {
     console.error('Failed to load logs:', err);
+  }
+}
+
+async function loadAgentsData() {
+  try {
+    const result = await api.get('/agents?limit=50');
+    agentsData = result.data || [];
+    renderMainContent();
+  } catch (err) {
+    console.error('Failed to load agents:', err);
   }
 }
 
@@ -1814,44 +1828,83 @@ async function loadWorkflowInEditor(workflowId) {
 // AI AGENTS PAGE
 // ============================================================
 function renderAgents() {
-  const agents = [
-    { name: 'Lead Qualifier', icon: '🎯', role: 'Scores and qualifies incoming leads using custom criteria', tasks: '2,340', accuracy: '96%', status: 'active' },
-    { name: 'Content Writer', icon: '✍️', role: 'Generates blog posts, emails, and social media content', tasks: '1,205', accuracy: '94%', status: 'active' },
-    { name: 'Data Analyst', icon: '📊', role: 'Analyzes datasets and generates reports with insights', tasks: '856', accuracy: '98%', status: 'active' },
-    { name: 'Support Agent', icon: '💬', role: 'Handles customer support tickets and provides solutions', tasks: '4,512', accuracy: '92%', status: 'active' },
-    { name: 'Code Reviewer', icon: '🔍', role: 'Reviews pull requests and suggests improvements', tasks: '678', accuracy: '97%', status: 'paused' },
-    { name: 'Email Composer', icon: '📧', role: 'Drafts personalized outreach and follow-up emails', tasks: '3,210', accuracy: '95%', status: 'active' },
-  ];
+  const agents = agentsData;
 
-  const cards = agents.map(a => `
-    <div class="agent-card">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div class="agent-avatar">${a.icon}</div>
-        <span class="badge-status ${a.status}"><span class="dot"></span> ${a.status.charAt(0).toUpperCase() + a.status.slice(1)}</span>
+  if (agents === null) {
+    // Loading skeleton
+    const skeletonCards = Array.from({ length: 6 }, () => `
+      <div class="agent-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="width:44px;height:44px;border-radius:12px;background:var(--bg-tertiary);animation:pulse 1.5s infinite;"></div>
+          <div style="width:60px;height:20px;border-radius:4px;background:var(--bg-tertiary);animation:pulse 1.5s infinite;"></div>
+        </div>
+        <div style="height:18px;width:70%;background:var(--bg-tertiary);border-radius:4px;margin:12px 0 8px;animation:pulse 1.5s infinite;"></div>
+        <div style="height:14px;width:90%;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div>
       </div>
-      <div class="agent-name">${a.name}</div>
-      <div class="agent-role">${a.role}</div>
-      <div class="agent-stats">
-        <div class="agent-stat-item" style="flex:1;">
-          <div class="agent-stat-val">${a.tasks}</div>
-          <div class="agent-stat-label">Tasks</div>
+    `).join('');
+
+    return `
+      <div class="page-header">
+        <div>
+          <h1>AI Agents</h1>
+          <p class="page-desc">Intelligent agents that power your workflows.</p>
         </div>
-        <div class="agent-stat-item" style="flex:1;">
-          <div class="agent-stat-val">${a.accuracy}</div>
-          <div class="agent-stat-label">Accuracy</div>
-        </div>
-        <div class="agent-stat-item" style="flex:1;">
-          <button class="btn btn-ghost btn-sm" onclick="showToast('Agent configuration opened')">${icons.settings}</button>
+        <div class="page-actions">
+          <button class="btn btn-primary btn-sm" onclick="showNewAgentModal()">${icons.plus} Create Agent</button>
         </div>
       </div>
+      <div class="grid-3">${skeletonCards}</div>
+    `;
+  }
+
+  const activeCount = agents.filter(a => a.status === 'active').length;
+
+  const cards = agents.map(a => {
+    const status = a.status || 'draft';
+    const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+    const agentIcon = a.icon || '🤖';
+    return `
+      <div class="agent-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div class="agent-avatar">${agentIcon}</div>
+          <span class="badge-status ${status}"><span class="dot"></span> ${statusLabel}</span>
+        </div>
+        <div class="agent-name">${a.name || 'Unnamed Agent'}</div>
+        <div class="agent-role">${a.description || a.agent_type || 'No description'}</div>
+        <div class="agent-stats">
+          <div class="agent-stat-item" style="flex:1;">
+            <div class="agent-stat-val">${a.model || 'claude'}</div>
+            <div class="agent-stat-label">Model</div>
+          </div>
+          <div class="agent-stat-item" style="flex:1;">
+            <div class="agent-stat-val">${a.agent_type || 'general'}</div>
+            <div class="agent-stat-label">Type</div>
+          </div>
+          <div class="agent-stat-item" style="flex:1;">
+            <div style="display:flex;gap:4px;">
+              <button class="btn btn-ghost btn-sm" onclick="showToast('Agent configuration coming soon')" title="Configure">${icons.settings}</button>
+              <button class="btn btn-ghost btn-sm" onclick="deleteAgent('${a.id}','${(a.name || '').replace(/'/g, "\\'")}')" title="Delete">${icons.trash}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const emptyState = agents.length === 0 ? `
+    <div style="text-align:center;padding:60px 20px;color:var(--text-secondary);">
+      <div style="font-size:48px;margin-bottom:16px;">🤖</div>
+      <h3 style="color:var(--text-primary);margin-bottom:8px;">No agents yet</h3>
+      <p style="font-size:13px;margin-bottom:20px;">Create your first AI agent to automate tasks.</p>
+      <button class="btn btn-primary" onclick="showNewAgentModal()">${icons.plus} Create Agent</button>
     </div>
-  `).join('');
+  ` : '';
 
   return `
     <div class="page-header">
       <div>
-        <h1>AI Solutions</h1>
-        <p class="page-desc">Intelligent agents we build and deploy — AI that actually works.</p>
+        <h1>AI Agents</h1>
+        <p class="page-desc">Intelligent agents that power your workflows.</p>
       </div>
       <div class="page-actions">
         <button class="btn btn-primary btn-sm" onclick="showNewAgentModal()">${icons.plus} Create Agent</button>
@@ -1870,20 +1923,31 @@ function renderAgents() {
         <div class="stat-header">
           <div class="stat-icon blue">${icons.zap}</div>
         </div>
-        <div class="stat-value">12,801</div>
-        <div class="stat-label">Total Tasks Completed</div>
+        <div class="stat-value">${activeCount}</div>
+        <div class="stat-label">Active Agents</div>
       </div>
       <div class="stat-card">
         <div class="stat-header">
           <div class="stat-icon yellow">${icons.analytics}</div>
         </div>
-        <div class="stat-value">95.3%</div>
-        <div class="stat-label">Average Accuracy</div>
+        <div class="stat-value">${agents.length - activeCount}</div>
+        <div class="stat-label">Paused / Draft</div>
       </div>
     </div>
 
-    <div class="grid-3">${cards}</div>
+    ${emptyState || `<div class="grid-3">${cards}</div>`}
   `;
+}
+
+async function deleteAgent(agentId, agentName) {
+  if (!confirm('Are you sure you want to delete "' + agentName + '"? This cannot be undone.')) return;
+  try {
+    await api.del('/agents/' + agentId);
+    showToast('Agent deleted', 'success');
+    loadAgentsData();
+  } catch (err) {
+    showToast(err.message || 'Failed to delete agent', 'error');
+  }
 }
 
 // ============================================================
@@ -1891,18 +1955,18 @@ function renderAgents() {
 // ============================================================
 function renderIntegrations() {
   const integrations = [
-    { name: 'Slack', icon: '💬', desc: 'Send messages, create channels, and receive notifications.', connected: true, cat: 'Communication' },
-    { name: 'Salesforce', icon: '☁️', desc: 'Sync leads, contacts, and opportunities with your CRM.', connected: true, cat: 'CRM' },
-    { name: 'Google Sheets', icon: '📊', desc: 'Read and write spreadsheet data in your workflows.', connected: true, cat: 'Productivity' },
+    { name: 'Google Calendar', icon: '📅', desc: 'Sync appointments and scheduling with Google Calendar.', connected: true, cat: 'Productivity' },
+    { name: 'Email (Resend)', icon: '📧', desc: 'Send transactional emails and notifications.', connected: true, cat: 'Communication' },
+    { name: 'Claude AI', icon: '🤖', desc: 'AI-powered agents for text generation and analysis.', connected: true, cat: 'AI' },
+    { name: 'PostgreSQL', icon: '🐘', desc: 'Query, insert, and manage your database records.', connected: true, cat: 'Database' },
+    { name: 'Webhooks', icon: '🔗', desc: 'Trigger workflows from external services via webhooks.', connected: true, cat: 'Automation' },
+    { name: 'Slack', icon: '💬', desc: 'Send messages, create channels, and receive notifications.', connected: false, cat: 'Communication' },
+    { name: 'Stripe', icon: '💳', desc: 'Process payments, manage subscriptions, and invoices.', connected: false, cat: 'Finance' },
+    { name: 'Google Sheets', icon: '📊', desc: 'Read and write spreadsheet data in your workflows.', connected: false, cat: 'Productivity' },
     { name: 'GitHub', icon: '🐙', desc: 'Trigger workflows on PRs, issues, and deployments.', connected: false, cat: 'Developer' },
-    { name: 'Stripe', icon: '💳', desc: 'Process payments, manage subscriptions, and invoices.', connected: true, cat: 'Finance' },
     { name: 'HubSpot', icon: '🟠', desc: 'Marketing automation, CRM, and analytics integration.', connected: false, cat: 'Marketing' },
     { name: 'Twilio', icon: '📱', desc: 'Send SMS, make calls, and manage communications.', connected: false, cat: 'Communication' },
-    { name: 'PostgreSQL', icon: '🐘', desc: 'Query, insert, and manage your database records.', connected: true, cat: 'Database' },
-    { name: 'OpenAI', icon: '🤖', desc: 'Access GPT models for text generation and analysis.', connected: true, cat: 'AI' },
     { name: 'Notion', icon: '📝', desc: 'Sync pages, databases, and documents.', connected: false, cat: 'Productivity' },
-    { name: 'Jira', icon: '🔷', desc: 'Create issues, track sprints, and manage projects.', connected: true, cat: 'Developer' },
-    { name: 'Zapier', icon: '⚡', desc: 'Connect to 5,000+ apps through Zapier webhooks.', connected: false, cat: 'Automation' },
   ];
 
   const cards = integrations.map(i => `
@@ -1959,115 +2023,81 @@ function filterIntegrations(filter, el) {
 // ANALYTICS PAGE
 // ============================================================
 function renderAnalytics() {
-  const weekData = [72, 58, 84, 91, 66, 78, 95];
-  const weekLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const weekBars = weekData.map((v, i) => `<div class="chart-bar" style="height:${v}%"><span class="bar-value">${v * 8}</span><span class="bar-label">${weekLabels[i]}</span></div>`).join('');
+  // Use real dashboard data if available
+  const d = dashboardData;
+  const totalExec = d?.executions?.total || 0;
+  const completedExec = d?.executions?.completed || 0;
+  const failedExec = d?.executions?.failed || 0;
+  const successRate = d?.executions?.successRate != null ? d.executions.successRate.toFixed(1) + '%' : '--';
+  const wfCount = d?.workflows?.total || 0;
+  const agentCount = d?.agents?.total || 0;
+
+  // Chart from real data
+  const chartData = d?.chartData || [];
+  const maxCount = Math.max(...chartData.map(c => c.count), 1);
+  const bars = chartData.map(c => `<div class="chart-bar" style="height:${Math.round((c.count / maxCount) * 100)}%"><span class="bar-value">${c.count}</span><span class="bar-label">${c.month}</span></div>`).join('');
 
   return `
     <div class="page-header">
       <div>
         <h1>Analytics</h1>
-        <p class="page-desc">Detailed insights into your workflow and agent performance.</p>
-      </div>
-      <div class="page-actions">
-        <select style="width:auto;padding:8px 12px;font-size:12px;">
-          <option>Last 7 days</option>
-          <option>Last 30 days</option>
-          <option>Last 90 days</option>
-          <option>This year</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" onclick="showToast('Report exported','success')">${icons.download} Export Report</button>
+        <p class="page-desc">Insights into your workflow and agent performance.</p>
       </div>
     </div>
 
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-header"><div class="stat-icon green">${icons.zap}</div><span class="stat-change up">${icons.arrowUp} 18%</span></div>
-        <div class="stat-value">5,421</div>
-        <div class="stat-label">Total Executions</div>
+        <div class="stat-header"><div class="stat-icon green">${icons.zap}</div></div>
+        <div class="stat-value">${totalExec.toLocaleString()}</div>
+        <div class="stat-label">Total Executions (30d)</div>
       </div>
       <div class="stat-card">
-        <div class="stat-header"><div class="stat-icon blue">${icons.clock}</div><span class="stat-change down">${icons.arrowDown} 12%</span></div>
-        <div class="stat-value">1.2s</div>
-        <div class="stat-label">Avg. Execution Time</div>
+        <div class="stat-header"><div class="stat-icon blue">${icons.check}</div></div>
+        <div class="stat-value">${successRate}</div>
+        <div class="stat-label">Success Rate</div>
       </div>
       <div class="stat-card">
-        <div class="stat-header"><div class="stat-icon yellow">${icons.workflow}</div><span class="stat-change up">${icons.arrowUp} 5%</span></div>
-        <div class="stat-value">99.4%</div>
-        <div class="stat-label">Uptime</div>
+        <div class="stat-header"><div class="stat-icon yellow">${icons.workflow}</div></div>
+        <div class="stat-value">${wfCount}</div>
+        <div class="stat-label">Total Workflows</div>
       </div>
       <div class="stat-card">
-        <div class="stat-header"><div class="stat-icon green">${icons.analytics}</div><span class="stat-change up">${icons.arrowUp} 32%</span></div>
-        <div class="stat-value">$24.8k</div>
-        <div class="stat-label">Estimated ROI</div>
+        <div class="stat-header"><div class="stat-icon green">${icons.agents}</div></div>
+        <div class="stat-value">${agentCount}</div>
+        <div class="stat-label">AI Agents</div>
       </div>
     </div>
 
     <div class="grid-2" style="margin-bottom:28px;">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Weekly Execution Volume</div>
+          <div class="card-title">Monthly Execution Volume</div>
         </div>
-        <div class="chart-bar-group" style="margin-bottom:30px;">${weekBars}</div>
+        <div class="chart-bar-group" style="margin-bottom:30px;">
+          ${bars || '<div style="padding:40px 20px;text-align:center;color:var(--text-secondary);font-size:13px;">No execution data yet. Run a workflow to see analytics here.</div>'}
+        </div>
       </div>
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Top Performing Workflows</div>
+          <div class="card-title">Execution Breakdown</div>
         </div>
-        <div>
-          ${['Support Ticket Router', 'Lead Scoring Pipeline', 'Data Sync Pipeline', 'Email Outreach', 'Customer Onboarding'].map((name, i) => `
-            <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
-              <span style="font-size:12px;color:var(--text-tertiary);width:20px;">${i + 1}</span>
-              <span style="flex:1;font-size:13px;font-weight:500;">${name}</span>
-              <div class="sparkline">
-                ${Array.from({length: 8}, () => `<div class="sparkline-bar" style="height:${Math.random() * 100}%;"></div>`).join('')}
-              </div>
-              <span style="font-size:12px;font-weight:600;color:var(--accent);">${(99 - i * 2)}%</span>
-            </div>
-          `).join('')}
+        <div style="padding:20px 0;">
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
+            <div style="width:10px;height:10px;border-radius:2px;background:var(--accent);"></div>
+            <span style="flex:1;font-size:13px;">Completed</span>
+            <span style="font-weight:600;font-size:13px;">${completedExec}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
+            <div style="width:10px;height:10px;border-radius:2px;background:var(--error);"></div>
+            <span style="flex:1;font-size:13px;">Failed</span>
+            <span style="font-weight:600;font-size:13px;">${failedExec}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;">
+            <div style="width:10px;height:10px;border-radius:2px;background:var(--info);"></div>
+            <span style="flex:1;font-size:13px;">Running</span>
+            <span style="font-weight:600;font-size:13px;">${d?.executions?.running || 0}</span>
+          </div>
         </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Agent Performance Comparison</div>
-      </div>
-      <div class="table-wrapper" style="border:none;">
-        <table>
-          <thead>
-            <tr>
-              <th>Agent</th>
-              <th>Tasks Completed</th>
-              <th>Accuracy</th>
-              <th>Avg. Response</th>
-              <th>Satisfaction</th>
-              <th>Trend</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${[
-              ['Support Agent', '4,512', '92%', '0.8s', '4.7/5'],
-              ['Lead Qualifier', '2,340', '96%', '1.1s', '4.8/5'],
-              ['Content Writer', '1,205', '94%', '3.2s', '4.5/5'],
-              ['Email Composer', '3,210', '95%', '1.5s', '4.6/5'],
-              ['Data Analyst', '856', '98%', '2.4s', '4.9/5'],
-            ].map(row => `
-              <tr>
-                <td style="font-weight:600;">${row[0]}</td>
-                <td>${row[1]}</td>
-                <td><span style="color:var(--accent);">${row[2]}</span></td>
-                <td>${row[3]}</td>
-                <td>${row[4]}</td>
-                <td>
-                  <div class="sparkline">
-                    ${Array.from({length: 8}, () => `<div class="sparkline-bar" style="height:${30 + Math.random() * 70}%;"></div>`).join('')}
-                  </div>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
       </div>
     </div>
   `;
@@ -2680,20 +2710,20 @@ function renderSettings() {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">First Name</label>
-          <input type="text" value="Nathan" />
+          <input type="text" value="${currentUser?.first_name || ''}" />
         </div>
         <div class="form-group">
           <label class="form-label">Last Name</label>
-          <input type="text" value="Linder" />
+          <input type="text" value="${currentUser?.last_name || ''}" />
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">Email Address</label>
-        <input type="email" value="nathan@monkflow.io" />
+        <input type="email" value="${currentUser?.email || ''}" />
       </div>
       <div class="form-group">
         <label class="form-label">Company</label>
-        <input type="text" value="MonkFlow Inc." />
+        <input type="text" value="${currentUser?.company || ''}" />
       </div>
       <div class="form-group">
         <label class="form-label">Timezone</label>
@@ -2950,17 +2980,43 @@ async function handleChangePassword() {
 // ============================================================
 // TEAM PAGE
 // ============================================================
+let teamData = null;
+
+async function loadTeamData() {
+  try {
+    const result = await api.get('/team/members');
+    teamData = result.data || [];
+    renderMainContent();
+  } catch (err) {
+    console.error('Failed to load team:', err);
+  }
+}
+
 function renderTeam() {
-  const members = [
-    { name: 'Nathan Linder', email: 'nathan@monkflow.io', role: 'Owner', status: 'active', initials: 'NL' },
-    { name: 'Sarah Chen', email: 'sarah@monkflow.io', role: 'Admin', status: 'active', initials: 'SC' },
-    { name: 'Marcus Johnson', email: 'marcus@monkflow.io', role: 'Editor', status: 'active', initials: 'MJ' },
-    { name: 'Priya Patel', email: 'priya@monkflow.io', role: 'Editor', status: 'active', initials: 'PP' },
-    { name: 'Alex Kim', email: 'alex@monkflow.io', role: 'Viewer', status: 'active', initials: 'AK' },
-    { name: 'Jordan Rivera', email: 'jordan@monkflow.io', role: 'Editor', status: 'active', initials: 'JR' },
-    { name: 'Emily Zhao', email: 'emily@monkflow.io', role: 'Viewer', status: 'paused', initials: 'EZ' },
-    { name: "Chris O'Brien", email: 'chris@monkflow.io', role: 'Editor', status: 'active', initials: 'CO' },
-  ];
+  const members = teamData;
+
+  if (members === null) {
+    return `
+      <div class="page-header">
+        <div>
+          <h1>Team Management</h1>
+          <p class="page-desc">Invite and manage team members and their permissions.</p>
+        </div>
+      </div>
+      <div style="padding:40px;text-align:center;color:var(--text-secondary);">Loading team members...</div>
+    `;
+  }
+
+  const getInitials = (m) => {
+    const f = (m.first_name || m.email || '?')[0].toUpperCase();
+    const l = (m.last_name || '')[0]?.toUpperCase() || '';
+    return f + l;
+  };
+  const getName = (m) => {
+    if (m.first_name && m.last_name) return m.first_name + ' ' + m.last_name;
+    if (m.first_name) return m.first_name;
+    return m.email;
+  };
 
   return `
     <div class="page-header">
@@ -2973,56 +3029,53 @@ function renderTeam() {
       </div>
     </div>
 
-    <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:28px;">
+    <div class="stats-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:28px;">
       <div class="stat-card">
         <div class="stat-value">${members.length}</div>
         <div class="stat-label">Team Members</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">15</div>
-        <div class="stat-label">Seats Available</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value">2</div>
-        <div class="stat-label">Pending Invites</div>
+        <div class="stat-value">${members.filter(m => m.role === 'owner' || m.role === 'admin').length}</div>
+        <div class="stat-label">Admins</div>
       </div>
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden;">
-      <table>
-        <thead>
-          <tr><th>Member</th><th>Role</th><th>Status</th><th>Last Active</th><th>Actions</th></tr>
-        </thead>
-        <tbody>
-          ${members.map(m => `
-            <tr>
-              <td>
-                <div style="display:flex;align-items:center;gap:10px;">
-                  <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--green-700));display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--black);">${m.initials}</div>
-                  <div>
-                    <div style="font-weight:600;">${m.name}</div>
-                    <div style="font-size:11px;color:var(--text-tertiary);">${m.email}</div>
+    ${members.length === 0 ? `
+      <div style="text-align:center;padding:60px 20px;color:var(--text-secondary);">
+        <h3 style="color:var(--text-primary);margin-bottom:8px;">No team members yet</h3>
+        <p style="font-size:13px;margin-bottom:20px;">Invite your first team member to collaborate.</p>
+        <button class="btn btn-primary" onclick="showInviteModal()">${icons.plus} Invite Member</button>
+      </div>
+    ` : `
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table>
+          <thead>
+            <tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            ${members.map(m => `
+              <tr>
+                <td>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--green-700));display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--black);">${getInitials(m)}</div>
+                    <div>
+                      <div style="font-weight:600;">${getName(m)}</div>
+                      <div style="font-size:11px;color:var(--text-tertiary);">${m.email}</div>
+                    </div>
                   </div>
-                </div>
-              </td>
-              <td>
-                <select style="width:auto;padding:4px 8px;font-size:12px;background:var(--bg-tertiary);">
-                  <option ${m.role==='Owner'?'selected':''}>Owner</option>
-                  <option ${m.role==='Admin'?'selected':''}>Admin</option>
-                  <option ${m.role==='Editor'?'selected':''}>Editor</option>
-                  <option ${m.role==='Viewer'?'selected':''}>Viewer</option>
-                </select>
-              </td>
-              <td><span class="badge-status ${m.status}"><span class="dot"></span> ${m.status.charAt(0).toUpperCase() + m.status.slice(1)}</span></td>
-              <td style="font-size:12px;color:var(--text-tertiary);">Today</td>
-              <td>
-                <button class="btn btn-ghost btn-sm" onclick="showToast('Member options coming soon','info')">${icons.moreV}</button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
+                </td>
+                <td><span style="font-size:12px;text-transform:capitalize;">${m.role || 'member'}</span></td>
+                <td><span class="badge-status active"><span class="dot"></span> Active</span></td>
+                <td style="font-size:12px;color:var(--text-tertiary);">${m.created_at ? new Date(m.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '--'}</td>
+                <td>
+                  <button class="btn btn-ghost btn-sm" onclick="showToast('Member options coming soon','info')">${icons.moreV}</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `}
   `;
 }
 
