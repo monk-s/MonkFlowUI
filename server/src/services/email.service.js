@@ -30,13 +30,24 @@ async function sendEmail({ to, subject, html }) {
         subject,
         html,
       });
-      console.log(`[Email] Sent to ${to} from ${fromAddr}: id=${result?.data?.id || result?.id || JSON.stringify(result)}`);
+
+      // Resend SDK returns { data, error } instead of throwing
+      if (result?.error) {
+        const errCode = result.error.statusCode || result.error.status;
+        console.error(`[Email] FAILED from ${fromAddr} to ${to}: ${result.error.message}`, errCode);
+        if (errCode === 403 && fromAddr === env.emailFrom) {
+          console.log(`[Email] Domain not verified, retrying with Resend default sender...`);
+          continue;
+        }
+        return result; // Return error result if not retryable
+      }
+
+      console.log(`[Email] Sent to ${to} from ${fromAddr}: id=${result?.data?.id || JSON.stringify(result)}`);
       return result;
     } catch (emailErr) {
-      console.error(`[Email] FAILED from ${fromAddr} to ${to}: ${emailErr.message}`, emailErr.statusCode || '');
-      // If domain not verified (403), try fallback
-      if (emailErr.statusCode === 403 && fromAddr === env.emailFrom) {
-        console.log(`[Email] Retrying with Resend default sender...`);
+      console.error(`[Email] EXCEPTION from ${fromAddr} to ${to}: ${emailErr.message}`, emailErr.statusCode || '');
+      if ((emailErr.statusCode === 403) && fromAddr === env.emailFrom) {
+        console.log(`[Email] Domain not verified, retrying with Resend default sender...`);
         continue;
       }
       throw emailErr;
