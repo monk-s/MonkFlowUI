@@ -3505,6 +3505,28 @@ tr:hover td { background: var(--bg-card); }
   animation: pulse 1.5s infinite;
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Node Config Panel */
+#node-config-panel input,
+#node-config-panel select,
+#node-config-panel textarea {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+#node-config-panel input:focus,
+#node-config-panel select:focus,
+#node-config-panel textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* ============================================================
    SCHEDULING MODAL RESPONSIVE
    ============================================================ */

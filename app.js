@@ -115,6 +115,8 @@ let agentsData = null;
 let currentWorkflowId = null;
 let logsSearchDebounceTimer = null;
 let apiKeysData = null;
+let currentWorkflowDetail = null;
+let executionPollTimer = null;
 
 // ── Type Mappings ──────────────────────────────────────────
 const FRONTEND_TO_BACKEND_TYPE = {
@@ -273,6 +275,7 @@ function navigateTo(page) {
   if (page === 'agents') loadAgentsData();
   if (page === 'team') loadTeamData();
   if (page === 'analytics' && !dashboardData) loadDashboardData();
+  if (page === 'workflow-detail') loadWorkflowDetail();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
@@ -1140,6 +1143,7 @@ function renderMainContent() {
     settings: renderSettings,
     team: renderTeam,
     'workflow-editor': renderWorkflowEditor,
+    'workflow-detail': renderWorkflowDetail,
   };
   main.innerHTML = (pages[currentPage] || renderDashboard)();
 }
@@ -1674,7 +1678,7 @@ function renderWorkflows() {
 
     return `
       <tr data-workflow-status="${status}">
-        <td style="font-weight:600;">${w.name || 'Untitled'}</td>
+        <td style="font-weight:600;"><a href="#" onclick="event.preventDefault();currentWorkflowId='${w.id}';currentWorkflowDetail=null;workflowDetailExecutions=null;navigateTo('workflow-detail')" style="color:var(--text-primary);text-decoration:none;cursor:pointer;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-primary)'">${w.name || 'Untitled'}</a></td>
         <td><span class="badge-status ${status}"><span class="dot"></span> ${statusLabel}</span></td>
         <td>${trigger}</td>
         <td>${totalRuns}</td>
@@ -1803,6 +1807,7 @@ async function loadWorkflowInEditor(workflowId) {
           y: n.y || 140 + Math.floor(i / 3) * 180,
           color: n.color || color,
           icon: n.icon || icon,
+          config: n.config || getDefaultNodeConfig(frontendType),
         };
       });
       editorState.nextId = Math.max(...editorState.nodes.map(n => n.id), 0) + 1;
@@ -2569,6 +2574,9 @@ function renderEditorNodes() {
       <div class="node-connector out" title="Connect output"></div>
     </div>
   `).join('');
+
+  // Update node config panel
+  renderNodeConfigPanel();
 }
 
 function renderEditorConnections() {
@@ -2603,9 +2611,29 @@ function addNodeToEditor(type, label, icon, color, desc) {
     id, type, label, desc, icon, color,
     x: 200 + Math.random() * 300,
     y: 100 + Math.random() * 200,
+    config: getDefaultNodeConfig(type),
   });
   renderEditorNodes();
   showToast(`${label} node added`, 'info');
+}
+
+function getDefaultNodeConfig(type) {
+  switch (type) {
+    case 'webhook-trigger': return { method: 'POST', path: '' };
+    case 'schedule-trigger': return { cron: '0 9 * * *' };
+    case 'event-trigger': return { eventType: '' };
+    case 'ai-classifier': return { prompt: '', model: 'claude-sonnet-4-20250514', temperature: 0.7, maxTokens: 1024 };
+    case 'ai-generator': return { prompt: '', model: 'claude-sonnet-4-20250514', temperature: 0.7, maxTokens: 2048 };
+    case 'ai-analyzer': return { prompt: '', model: 'claude-sonnet-4-20250514', temperature: 0.3, maxTokens: 1024 };
+    case 'condition': return { expression: '' };
+    case 'delay': return { seconds: 60 };
+    case 'loop': return { collection: '' };
+    case 'action': return { actionType: 'email', recipient: '', subject: '', body: '' };
+    case 'api-call': return { url: '', method: 'GET', headers: '{}', body: '' };
+    case 'notify': return { message: '' };
+    case 'database': return { operation: 'query', query: '' };
+    default: return {};
+  }
 }
 
 function editorZoom(delta) {
@@ -2640,6 +2668,7 @@ async function handleEditorSave() {
       y: n.y,
       color: n.color,
       icon: n.icon,
+      config: n.config || {},
     }));
 
     // Determine trigger type from the first trigger node
@@ -2678,10 +2707,368 @@ async function handleEditorDeploy() {
     // Set status to active
     await api.patch(`/workflows/${currentWorkflowId}`, { status: 'active' });
     // Execute the workflow
-    await api.post(`/workflows/${currentWorkflowId}/execute`);
+    const result = await api.post(`/workflows/${currentWorkflowId}/execute`);
+    const executionId = result.executionId || result.data?.executionId;
     showToast('Workflow deployed and executing!', 'success');
+    showExecutionStatusBar('running', executionId);
+    startExecutionPolling(currentWorkflowId, executionId);
   } catch (err) {
     showToast(err.message || 'Failed to deploy workflow', 'error');
+  }
+}
+
+// ── Execution Status Polling ────────────────────────────
+function showExecutionStatusBar(status, executionId) {
+  let bar = document.getElementById('execution-status-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'execution-status-bar';
+    const editorMain = document.querySelector('.editor-main');
+    if (editorMain) editorMain.appendChild(bar);
+    else return;
+  }
+  const statusColors = { running: '#3b82f6', completed: '#00ff88', failed: '#ef4444', pending: '#fbbf24' };
+  const statusIcons = { running: '⟳', completed: '✓', failed: '✗', pending: '◌' };
+  bar.style.cssText = `position:absolute;bottom:0;left:0;right:0;height:40px;background:var(--bg-secondary);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:10px;font-size:12px;z-index:10;`;
+  bar.innerHTML = `
+    <span style="color:${statusColors[status] || '#999'};font-size:16px;${status === 'running' ? 'animation:spin 1s linear infinite;' : ''}">${statusIcons[status] || '•'}</span>
+    <span style="color:var(--text-secondary);">Execution ${executionId ? '#' + executionId.slice(0,8) : ''}: <strong style="color:${statusColors[status] || 'var(--text-primary)'};text-transform:capitalize;">${status}</strong></span>
+    ${status === 'completed' || status === 'failed' ? `<button class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:11px;" onclick="document.getElementById('execution-status-bar').remove()">Dismiss</button>` : `<span style="margin-left:auto;color:var(--text-tertiary);font-size:11px;">Polling for updates...</span>`}
+  `;
+}
+
+function startExecutionPolling(workflowId, executionId) {
+  if (executionPollTimer) clearInterval(executionPollTimer);
+  let polls = 0;
+  executionPollTimer = setInterval(async () => {
+    polls++;
+    try {
+      const result = await api.get(`/workflows/${workflowId}/executions?limit=1`);
+      const executions = result.data || result;
+      if (executions && executions.length > 0) {
+        const latest = executions[0];
+        const status = latest.status || 'pending';
+        showExecutionStatusBar(status, latest.id || executionId);
+        // Highlight nodes based on results
+        if (latest.node_results) {
+          highlightExecutionNodes(latest.node_results);
+        }
+        if (status === 'completed' || status === 'failed') {
+          clearInterval(executionPollTimer);
+          executionPollTimer = null;
+          if (status === 'completed') showToast('Workflow execution completed!', 'success');
+          else showToast('Workflow execution failed', 'error');
+        }
+      }
+    } catch (err) {
+      // Silently ignore polling errors
+    }
+    // Stop polling after 60 attempts (2 minutes)
+    if (polls >= 60) {
+      clearInterval(executionPollTimer);
+      executionPollTimer = null;
+      showExecutionStatusBar('timeout', executionId);
+    }
+  }, 2000);
+}
+
+function highlightExecutionNodes(nodeResults) {
+  const nodeEls = document.querySelectorAll('.workflow-node');
+  nodeEls.forEach(el => {
+    el.style.boxShadow = '';
+    el.style.borderColor = '';
+  });
+  if (!nodeResults || typeof nodeResults !== 'object') return;
+  Object.entries(nodeResults).forEach(([nodeId, result]) => {
+    const el = document.querySelector(`.workflow-node[data-id="${nodeId}"]`);
+    if (!el) return;
+    if (result.status === 'completed' || result.success) {
+      el.style.boxShadow = '0 0 12px rgba(0,255,136,0.4)';
+      el.style.borderColor = '#00ff88';
+    } else if (result.status === 'failed' || result.error) {
+      el.style.boxShadow = '0 0 12px rgba(239,68,68,0.4)';
+      el.style.borderColor = '#ef4444';
+    }
+  });
+}
+
+// ── Node Configuration Panel ────────────────────────────
+function renderNodeConfigPanel() {
+  let panel = document.getElementById('node-config-panel');
+  const selectedNode = editorState.nodes.find(n => n.id === editorState.selectedNodeId);
+
+  if (!selectedNode) {
+    if (panel) panel.style.display = 'none';
+    return;
+  }
+
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'node-config-panel';
+    const editorMain = document.querySelector('.editor-main');
+    if (editorMain) editorMain.appendChild(panel);
+    else return;
+  }
+
+  panel.style.cssText = 'position:absolute;top:48px;right:0;bottom:0;width:280px;background:var(--bg-secondary);border-left:1px solid var(--border);overflow-y:auto;z-index:15;padding:16px;display:block;';
+
+  const config = selectedNode.config || {};
+  const nodeId = selectedNode.id;
+  let fields = '';
+
+  // Node label
+  fields += `
+    <div style="margin-bottom:12px;">
+      <label style="display:block;font-size:11px;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Node Label</label>
+      <input type="text" value="${selectedNode.label}" style="width:100%;font-size:12px;padding:6px 10px;" onchange="updateNodeConfig(${nodeId},'_label',this.value)" />
+    </div>
+  `;
+
+  // Type-specific fields
+  switch (selectedNode.type) {
+    case 'webhook-trigger':
+      fields += configField(nodeId, 'method', 'Method', config.method || 'POST', 'select', ['GET','POST','PUT','DELETE']);
+      fields += configField(nodeId, 'path', 'Path', config.path || '', 'text', null, '/api/leads');
+      if (currentWorkflowId) {
+        fields += `<div style="margin-bottom:12px;"><label style="display:block;font-size:11px;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Webhook URL</label><input type="text" value="/api/v1/webhooks/${currentWorkflowId}" readonly style="width:100%;font-size:11px;padding:6px 10px;opacity:0.7;cursor:not-allowed;" /></div>`;
+      }
+      break;
+    case 'schedule-trigger':
+      fields += configField(nodeId, 'cron', 'Cron Expression', config.cron || '0 9 * * *', 'text', null, '0 9 * * *');
+      fields += `<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:12px;">Minute Hour Day Month Weekday</div>`;
+      break;
+    case 'event-trigger':
+      fields += configField(nodeId, 'eventType', 'Event Type', config.eventType || '', 'text', null, 'user.created');
+      break;
+    case 'ai-classifier':
+    case 'ai-generator':
+    case 'ai-analyzer':
+      fields += configField(nodeId, 'prompt', 'Prompt', config.prompt || '', 'textarea', null, 'Analyze the input and...');
+      fields += configField(nodeId, 'model', 'Model', config.model || 'claude-sonnet-4-20250514', 'select', ['claude-sonnet-4-20250514','claude-opus-4-20250514','claude-3-haiku-20240307']);
+      fields += configField(nodeId, 'temperature', 'Temperature', config.temperature ?? 0.7, 'number');
+      fields += configField(nodeId, 'maxTokens', 'Max Tokens', config.maxTokens ?? 1024, 'number');
+      break;
+    case 'condition':
+      fields += configField(nodeId, 'expression', 'Expression', config.expression || '', 'text', null, 'input.score >= 80');
+      break;
+    case 'delay':
+      fields += configField(nodeId, 'seconds', 'Delay (seconds)', config.seconds ?? 60, 'number');
+      break;
+    case 'loop':
+      fields += configField(nodeId, 'collection', 'Collection Path', config.collection || '', 'text', null, 'input.items');
+      break;
+    case 'action':
+      fields += configField(nodeId, 'actionType', 'Action Type', config.actionType || 'email', 'select', ['email','webhook','log']);
+      fields += configField(nodeId, 'recipient', 'Recipient', config.recipient || '', 'text', null, 'user@example.com');
+      fields += configField(nodeId, 'subject', 'Subject', config.subject || '', 'text', null, 'Notification');
+      fields += configField(nodeId, 'body', 'Body', config.body || '', 'textarea', null, 'Email body...');
+      break;
+    case 'api-call':
+      fields += configField(nodeId, 'url', 'URL', config.url || '', 'text', null, 'https://api.example.com');
+      fields += configField(nodeId, 'method', 'Method', config.method || 'GET', 'select', ['GET','POST','PUT','PATCH','DELETE']);
+      fields += configField(nodeId, 'headers', 'Headers (JSON)', config.headers || '{}', 'textarea', null, '{"Authorization":"Bearer ..."}');
+      fields += configField(nodeId, 'body', 'Request Body', config.body || '', 'textarea', null, '{"key":"value"}');
+      break;
+    case 'notify':
+      fields += configField(nodeId, 'message', 'Message', config.message || '', 'textarea', null, 'Notification message...');
+      break;
+    case 'database':
+      fields += configField(nodeId, 'operation', 'Operation', config.operation || 'query', 'select', ['query','insert','update','delete']);
+      fields += configField(nodeId, 'query', 'Query / Expression', config.query || '', 'textarea', null, 'SELECT * FROM...');
+      break;
+  }
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <span style="font-weight:600;font-size:13px;">Node Config</span>
+      <button class="btn btn-ghost btn-sm" style="font-size:16px;padding:2px 6px;" onclick="editorState.selectedNodeId=null;renderEditorNodes();">×</button>
+    </div>
+    <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;">Type: ${selectedNode.type}</div>
+    ${fields}
+    <button class="btn btn-ghost btn-sm" style="color:#ef4444;width:100%;margin-top:8px;" onclick="if(confirm('Delete this node?')){editorState.nodes=editorState.nodes.filter(n=>n.id!==${nodeId});editorState.connections=editorState.connections.filter(c=>c.from!==${nodeId}&&c.to!==${nodeId});editorState.selectedNodeId=null;renderEditorNodes();renderEditorConnections();showToast('Node deleted','info');}">Delete Node</button>
+  `;
+}
+
+function configField(nodeId, key, label, value, type, options, placeholder) {
+  const escaped = typeof value === 'string' ? value.replace(/"/g, '&quot;') : value;
+  let input = '';
+  if (type === 'textarea') {
+    input = `<textarea style="width:100%;font-size:12px;padding:6px 10px;min-height:60px;resize:vertical;" placeholder="${placeholder || ''}" onchange="updateNodeConfig(${nodeId},'${key}',this.value)">${value || ''}</textarea>`;
+  } else if (type === 'select' && options) {
+    input = `<select style="width:100%;font-size:12px;padding:6px 10px;" onchange="updateNodeConfig(${nodeId},'${key}',this.value)">
+      ${options.map(o => `<option value="${o}" ${o === value ? 'selected' : ''}>${o}</option>`).join('')}
+    </select>`;
+  } else if (type === 'number') {
+    input = `<input type="number" value="${value}" style="width:100%;font-size:12px;padding:6px 10px;" step="${key === 'temperature' ? '0.1' : '1'}" onchange="updateNodeConfig(${nodeId},'${key}',parseFloat(this.value))" />`;
+  } else {
+    input = `<input type="text" value="${escaped}" style="width:100%;font-size:12px;padding:6px 10px;" placeholder="${placeholder || ''}" onchange="updateNodeConfig(${nodeId},'${key}',this.value)" />`;
+  }
+  return `<div style="margin-bottom:12px;"><label style="display:block;font-size:11px;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">${label}</label>${input}</div>`;
+}
+
+function updateNodeConfig(nodeId, key, value) {
+  const node = editorState.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  if (key === '_label') {
+    node.label = value;
+    renderEditorNodes();
+    return;
+  }
+  if (!node.config) node.config = {};
+  node.config[key] = value;
+}
+
+// ============================================================
+// WORKFLOW DETAIL PAGE
+// ============================================================
+let workflowDetailExecutions = null;
+
+async function loadWorkflowDetail() {
+  if (!currentWorkflowId) { navigateTo('workflows'); return; }
+  try {
+    const [wfResult, execResult] = await Promise.all([
+      api.get(`/workflows/${currentWorkflowId}`),
+      api.get(`/workflows/${currentWorkflowId}/executions?limit=20`).catch(() => ({ data: [] })),
+    ]);
+    currentWorkflowDetail = wfResult.data || wfResult;
+    workflowDetailExecutions = execResult.data || execResult || [];
+    renderMainContent();
+  } catch (err) {
+    showToast(err.message || 'Failed to load workflow', 'error');
+    navigateTo('workflows');
+  }
+}
+
+function renderWorkflowDetail() {
+  if (!currentWorkflowDetail) {
+    return `
+      <div class="page-header"><div><h1>Workflow Details</h1><p class="page-desc">Loading...</p></div></div>
+      <div class="card" style="padding:32px;text-align:center;">
+        <div style="width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px;"></div>
+        <p style="color:var(--text-secondary);font-size:13px;">Loading workflow details...</p>
+      </div>
+    `;
+  }
+
+  const wf = currentWorkflowDetail;
+  const execs = workflowDetailExecutions || [];
+  const status = wf.status || 'draft';
+  const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+  const trigger = triggerTypeLabel(wf.trigger_type);
+  const nodeCount = wf.definition?.nodes?.length || 0;
+  const connectionCount = wf.definition?.connections?.length || 0;
+  const totalRuns = wf.total_runs || execs.length || 0;
+  const successRate = wf.success_rate != null ? wf.success_rate + '%' : (execs.length > 0 ? Math.round(execs.filter(e => e.status === 'completed').length / execs.length * 100) + '%' : '\u2014');
+  const lastRun = wf.last_run_at ? timeAgo(wf.last_run_at) : 'Never';
+  const created = wf.created_at ? new Date(wf.created_at).toLocaleDateString() : '\u2014';
+
+  const executionRows = execs.length > 0 ? execs.map(e => {
+    const eStatus = e.status || 'pending';
+    const eStatusColor = { completed: '#00ff88', failed: '#ef4444', running: '#3b82f6', pending: '#fbbf24' };
+    const duration = e.started_at && e.completed_at ? ((new Date(e.completed_at) - new Date(e.started_at)) / 1000).toFixed(1) + 's' : e.started_at ? 'Running...' : '\u2014';
+    return `
+      <tr>
+        <td style="font-family:monospace;font-size:11px;">${(e.id || '').slice(0, 8)}</td>
+        <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${eStatusColor[eStatus] || '#666'};"></span> ${eStatus}</span></td>
+        <td>${e.started_at ? new Date(e.started_at).toLocaleString() : '\u2014'}</td>
+        <td>${duration}</td>
+        <td style="font-size:11px;color:var(--text-secondary);">${e.error_message ? e.error_message.slice(0, 60) : '\u2014'}</td>
+      </tr>
+    `;
+  }).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:24px;">No executions yet. Deploy and run this workflow to see execution history.</td></tr>`;
+
+  return `
+    <div class="page-header">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <button class="btn btn-ghost btn-sm" onclick="navigateTo('workflows')">${icons.arrowLeft} Back</button>
+          <h1 style="margin:0;">${wf.name || 'Untitled Workflow'}</h1>
+          <span class="badge-status ${status}"><span class="dot"></span> ${statusLabel}</span>
+        </div>
+        <p class="page-desc">${wf.description || 'No description'}</p>
+      </div>
+      <div class="page-actions" style="display:flex;gap:8px;">
+        <button class="btn btn-secondary btn-sm" onclick="loadWorkflowInEditor('${wf.id}')">${icons.edit} Edit in Builder</button>
+        <button class="btn btn-primary btn-sm" onclick="executeWorkflowFromDetail('${wf.id}')">${icons.play} Run Now</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleWorkflowPause('${wf.id}','${status}')">${status === 'active' ? icons.clock + ' Pause' : icons.zap + ' Activate'}</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444;" onclick="deleteWorkflowFromDetail('${wf.id}','${(wf.name||'').replace(/'/g,"\\'")}')">${icons.trash} Delete</button>
+      </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="stats-grid" style="margin-bottom:24px;">
+      <div class="stat-card"><div class="stat-value">${totalRuns}</div><div class="stat-label">Total Runs</div></div>
+      <div class="stat-card"><div class="stat-value">${successRate}</div><div class="stat-label">Success Rate</div></div>
+      <div class="stat-card"><div class="stat-value">${trigger}</div><div class="stat-label">Trigger Type</div></div>
+      <div class="stat-card"><div class="stat-value">${nodeCount}</div><div class="stat-label">Nodes</div></div>
+    </div>
+
+    <!-- Info Grid -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+      <div class="card" style="padding:16px;">
+        <div class="card-title" style="margin-bottom:12px;">Details</div>
+        <div style="font-size:13px;display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Created</span><span>${created}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Last Run</span><span>${lastRun}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Connections</span><span>${connectionCount}</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Trigger</span><span>${trigger}</span></div>
+        </div>
+      </div>
+      <div class="card" style="padding:16px;">
+        <div class="card-title" style="margin-bottom:12px;">Quick Actions</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="loadWorkflowInEditor('${wf.id}')" style="justify-content:flex-start;">${icons.edit} Open in Visual Editor</button>
+          <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('/api/v1/webhooks/${wf.id}');showToast('Webhook URL copied!','success');" style="justify-content:flex-start;">${icons.globe} Copy Webhook URL</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowDetail()" style="justify-content:flex-start;">${icons.refresh || icons.workflow} Refresh</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Execution History -->
+    <div class="card" style="padding:0;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+        <div class="card-title" style="margin:0;">Execution History</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadWorkflowDetail()">Refresh</button>
+      </div>
+      <div class="table-wrapper" style="border:0;border-radius:0;">
+        <table>
+          <thead><tr><th>ID</th><th>Status</th><th>Started</th><th>Duration</th><th>Error</th></tr></thead>
+          <tbody>${executionRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function executeWorkflowFromDetail(workflowId) {
+  try {
+    const result = await api.post(`/workflows/${workflowId}/execute`);
+    showToast(`Workflow executed! Execution ID: ${result.executionId || 'started'}`, 'success');
+    setTimeout(() => loadWorkflowDetail(), 1500);
+  } catch (err) {
+    showToast(err.message || 'Failed to execute workflow', 'error');
+  }
+}
+
+async function toggleWorkflowPause(workflowId, currentStatus) {
+  try {
+    const newStatus = currentStatus === 'active' ? 'paused' : 'active';
+    await api.patch(`/workflows/${workflowId}`, { status: newStatus });
+    showToast(`Workflow ${newStatus === 'active' ? 'activated' : 'paused'}`, 'success');
+    loadWorkflowDetail();
+  } catch (err) {
+    showToast(err.message || 'Failed to update workflow', 'error');
+  }
+}
+
+async function deleteWorkflowFromDetail(workflowId, workflowName) {
+  if (!confirm(`Are you sure you want to delete "${workflowName}"? This cannot be undone.`)) return;
+  try {
+    await api.del(`/workflows/${workflowId}`);
+    showToast('Workflow deleted', 'success');
+    navigateTo('workflows');
+  } catch (err) {
+    showToast(err.message || 'Failed to delete workflow', 'error');
   }
 }
 
