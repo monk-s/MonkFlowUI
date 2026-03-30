@@ -6,7 +6,7 @@ const http = require('http');
 const { URL } = require('url');
 
 // ── Config ──────────────────────────────────────────
-const SERPAPI_KEY = process.env.SERPAPI_KEY || '';
+const SEARCH_API_KEY = process.env.SEARCHAPI_KEY || process.env.SERPAPI_KEY || '';
 const DAILY_LIMIT = parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 250;
 const PER_SENDER_LIMIT = parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 25;
 const UNSUBSCRIBE_BASE = (env.frontendUrl || 'https://monkflow.io').replace(/\/$/, '');
@@ -113,17 +113,17 @@ function extractEmails(html) {
   return filtered;
 }
 
-// ── SerpAPI Search ──────────────────────────────────
+// ── SearchAPI.io Search ────────────────────────────
 
 async function searchSerpAPI(queryStr) {
-  if (!SERPAPI_KEY) {
-    console.warn('[LEADGEN] No SERPAPI_KEY set, skipping search');
+  if (!SEARCH_API_KEY) {
+    console.warn('[LEADGEN] No SEARCHAPI_KEY set, skipping search');
     return [];
   }
 
   const params = new URLSearchParams({
     q: queryStr,
-    api_key: SERPAPI_KEY,
+    api_key: SEARCH_API_KEY,
     engine: 'google',
     num: '15',
     gl: 'us',
@@ -131,15 +131,15 @@ async function searchSerpAPI(queryStr) {
   });
 
   try {
-    const resp = await fetchUrl(`https://serpapi.com/search.json?${params}`, 15000);
+    const resp = await fetchUrl(`https://www.searchapi.io/api/v1/search?${params}`, 15000);
     const data = JSON.parse(resp.html);
 
     // Check for API-level errors (invalid key, rate limit, etc.)
     if (data.error) {
-      console.error(`[LEADGEN] SerpAPI API error: ${data.error}`);
-      // If it's an auth error, throw to stop wasting time on all 450 queries
-      if (data.error.toLowerCase().includes('invalid api key') || resp.status === 401) {
-        throw new Error(`SERPAPI_AUTH_FAILURE: ${data.error}`);
+      const errMsg = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+      console.error(`[LEADGEN] SearchAPI error: ${errMsg}`);
+      if (errMsg.toLowerCase().includes('invalid') || errMsg.toLowerCase().includes('unauthorized') || resp.status === 401 || resp.status === 403) {
+        throw new Error(`SEARCHAPI_AUTH_FAILURE: ${errMsg}`);
       }
       return [];
     }
@@ -152,8 +152,8 @@ async function searchSerpAPI(queryStr) {
     return results;
   } catch (err) {
     // Re-throw auth failures so the main orchestrator can abort early
-    if (err.message.startsWith('SERPAPI_AUTH_FAILURE')) throw err;
-    console.error('[LEADGEN] SerpAPI error:', err.message);
+    if (err.message.startsWith('SEARCHAPI_AUTH_FAILURE')) throw err;
+    console.error('[LEADGEN] SearchAPI error:', err.message);
     return [];
   }
 }
@@ -405,8 +405,8 @@ async function runDailyLeadGeneration() {
           rawLeads.push({ ...r, city, searchQuery, firmType: firmType.type });
         }
       } catch (err) {
-        if (err.message.startsWith('SERPAPI_AUTH_FAILURE')) {
-          console.error('[LEADGEN] ❌ SerpAPI authentication failed — aborting all searches. Check your SERPAPI_KEY.');
+        if (err.message.startsWith('SEARCHAPI_AUTH_FAILURE')) {
+          console.error('[LEADGEN] ❌ SearchAPI authentication failed — aborting all searches. Check your SEARCHAPI_KEY.');
           stats.errors++;
           serpApiAborted = true;
           break;
@@ -566,7 +566,7 @@ async function sendOwnerSummary(batchDate, stats, leads) {
         ${stats.errors ? `<p style="color: #c0392b;">Errors: ${stats.errors}</p>` : ''}
         ${stats.searched === 0 ? `<div style="background: #ffe0e0; border-left: 4px solid #c0392b; padding: 12px 16px; margin-top: 16px; border-radius: 4px;">
           <strong style="color: #c0392b;">⚠️ Zero search results.</strong> This usually means the SerpAPI key is invalid or expired.
-          Check your SERPAPI_KEY environment variable and verify it at <a href="https://serpapi.com/manage-api-key">serpapi.com</a>.
+          Check your SEARCHAPI_KEY environment variable and verify it at <a href="https://www.searchapi.io/dashboard">searchapi.io</a>.
         </div>` : ''}
       </div>
     `,
