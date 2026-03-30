@@ -73,16 +73,28 @@ function shuffle(arr) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function fetchUrl(url, timeout = 10000) {
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function fetchUrl(url, timeout = 10000, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
+    if (maxRedirects <= 0) return reject(new Error('too many redirects'));
     const parsed = new URL(url);
     const lib = parsed.protocol === 'https:' ? https : http;
+    const MAX_BODY = 5 * 1024 * 1024; // 5MB limit
     const req = lib.get(url, { timeout, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MonkFlowBot/1.0)' } }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return fetchUrl(res.headers.location, timeout).then(resolve).catch(reject);
+        return fetchUrl(res.headers.location, timeout, maxRedirects - 1).then(resolve).catch(reject);
       }
       let data = '';
-      res.on('data', chunk => { data += chunk; });
+      let size = 0;
+      res.on('data', chunk => {
+        size += chunk.length;
+        if (size > MAX_BODY) { req.destroy(); return reject(new Error('response too large')); }
+        data += chunk;
+      });
       res.on('end', () => resolve({ status: res.statusCode, html: data, url: res.responseUrl || url }));
     });
     req.on('error', reject);
@@ -313,10 +325,10 @@ async function sendColdEmail(lead, sender) {
 
   const htmlBody = `
     <div style="font-family: -apple-system, sans-serif; max-width: 600px; line-height: 1.6; color: #333;">
-      ${lead.outreach_body.split('\n').map(line => line.trim() ? `<p style="margin: 0 0 12px;">${line}</p>` : '<br>').join('')}
+      ${lead.outreach_body.split('\n').map(line => line.trim() ? `<p style="margin: 0 0 12px;">${escapeHtml(line)}</p>` : '<br>').join('')}
     </div>
     <div style="margin-top: 30px; padding-top: 15px; border-top: 1px solid #eee; font-size: 11px; color: #999;">
-      <p>MonkFlow LLC | Abilene, TX</p>
+      <p>MonkFlow LLC | 1600 Sayles Blvd, Abilene, TX 79605</p>
       <p><a href="${unsubUrl}" style="color: #999;">Unsubscribe</a></p>
     </div>
   `;
@@ -332,6 +344,10 @@ async function sendColdEmail(lead, sender) {
       html: htmlBody,
       from: fromAddr,
       bcc: ownerBcc,
+      headers: {
+        'List-Unsubscribe': `<${unsubUrl}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      },
     });
 
     const emailId = result?.data?.id || result?.id || null;
@@ -348,7 +364,7 @@ async function sendColdEmail(lead, sender) {
 async function runDailyLeadGeneration() {
   console.log('[LEADGEN] === Starting daily lead generation ===');
   const batchDate = new Date().toISOString().split('T')[0];
-  const stats = { searched: 0, discovered: 0, diagnosed: 0, emailed: 0, errors: 0 };
+  const stats = { searched: 0, discovered: 0, emailsGenerated: 0, emailed: 0, errors: 0 };
 
   // 1. Pick firm types and cities — budget ~450 searches/day to stay under 10k/month
   // 10 firm types × 45 cities = 450 searches/day × 22 weekdays = 9,900/month
@@ -406,7 +422,7 @@ async function runDailyLeadGeneration() {
         ...diagnosis,
         diagnosis_json: diagnosis,
         status: 'diagnosed',
-        priority: scoreLead(diagnosis) >= 7 ? 'HIGH' : scoreLead(diagnosis) >= 4 ? 'MEDIUM' : 'LOW',
+        priority: (() => { const s = scoreLead(diagnosis); return s >= 7 ? 'HIGH' : s >= 4 ? 'MEDIUM' : 'LOW'; })(),
         batch_date: batchDate,
         search_query: raw.searchQuery,
       };
@@ -436,7 +452,7 @@ async function runDailyLeadGeneration() {
       await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated' });
       lead.outreach_subject = subject;
       lead.outreach_body = body;
-      stats.diagnosed++;
+      stats.emailsGenerated++;
     } catch (err) {
       console.error(`[LEADGEN] Email generation error for ${lead.email}:`, err.message);
       stats.errors++;
@@ -447,10 +463,20 @@ async function runDailyLeadGeneration() {
   // 6. Send emails — distribute round-robin across senders (max PER_SENDER_LIMIT each)
   const senderCounts = new Map(SENDERS.map(s => [s.email, 0]));
   const readyLeads = toEmail.filter(l => l.outreach_subject && l.outreach_body);
+  let senderIdx = 0;
 
   for (let i = 0; i < readyLeads.length; i++) {
-    const sender = SENDERS[i % SENDERS.length];
-    if (senderCounts.get(sender.email) >= PER_SENDER_LIMIT) continue; // skip if sender maxed out
+    // Find next available sender (one that hasn't hit the per-sender limit)
+    let sender = null;
+    for (let j = 0; j < SENDERS.length; j++) {
+      const candidate = SENDERS[(senderIdx + j) % SENDERS.length];
+      if (senderCounts.get(candidate.email) < PER_SENDER_LIMIT) {
+        sender = candidate;
+        senderIdx = (senderIdx + j + 1) % SENDERS.length;
+        break;
+      }
+    }
+    if (!sender) { console.log('[LEADGEN] All senders maxed out, stopping.'); break; }
 
     const result = await sendColdEmail(readyLeads[i], sender);
     if (result.success) {
@@ -465,7 +491,11 @@ async function runDailyLeadGeneration() {
   console.log(`[LEADGEN] Sender distribution: ${[...senderCounts.entries()].map(([e,c]) => `${e}=${c}`).join(', ')}`);
 
   // 7. Send summary to owner
-  await sendOwnerSummary(batchDate, stats, toEmail);
+  try {
+    await sendOwnerSummary(batchDate, stats, toEmail);
+  } catch (err) {
+    console.error('[LEADGEN] Failed to send owner summary:', err.message);
+  }
 
   console.log(`[LEADGEN] === Complete: ${JSON.stringify(stats)} ===`);
   return stats;
@@ -475,7 +505,7 @@ async function sendOwnerSummary(batchDate, stats, leads) {
   const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || 'nathan@monkflow.io';
 
   const leadsTable = leads.map(l =>
-    `<tr><td>${l.business_name}</td><td>${l.city}, ${l.state}</td><td>${l.email}</td><td>${l.priority}</td></tr>`
+    `<tr><td>${escapeHtml(l.business_name)}</td><td>${escapeHtml(l.city)}, ${escapeHtml(l.state)}</td><td>${escapeHtml(l.email)}</td><td>${l.priority}</td></tr>`
   ).join('');
 
   await sendEmail({

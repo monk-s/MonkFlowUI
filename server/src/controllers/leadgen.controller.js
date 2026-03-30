@@ -24,8 +24,7 @@ const getStats = async (req, res) => {
 
 const getLead = async (req, res) => {
   try {
-    const leads = await leadModel.findAll({ limit: 1, offset: 0 });
-    const lead = leads.find(l => l.id === req.params.id);
+    const lead = await leadModel.findById(req.params.id);
     if (!lead) return res.status(404).json({ error: { message: 'Lead not found' } });
     res.json({ data: lead });
   } catch (err) {
@@ -33,12 +32,18 @@ const getLead = async (req, res) => {
   }
 };
 
+let leadgenRunning = false;
+
 const triggerRun = async (req, res) => {
   try {
+    if (leadgenRunning) return res.status(429).json({ error: { message: 'Lead generation already running' } });
+    leadgenRunning = true;
     res.json({ message: 'Lead generation started', status: 'running' });
-    // Run async after response
-    runDailyLeadGeneration().catch(err => console.error('[LEADGEN] Manual run failed:', err.message));
+    runDailyLeadGeneration()
+      .catch(err => console.error('[LEADGEN] Manual run failed:', err.message))
+      .finally(() => { leadgenRunning = false; });
   } catch (err) {
+    leadgenRunning = false;
     res.status(500).json({ error: { message: err.message } });
   }
 };

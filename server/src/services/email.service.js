@@ -10,7 +10,7 @@ function getResendClient() {
   return resendClient;
 }
 
-async function sendEmail({ to, subject, html, from, bcc }) {
+async function sendEmail({ to, subject, html, from, bcc, headers }) {
   const client = getResendClient();
 
   if (!client) {
@@ -29,6 +29,7 @@ async function sendEmail({ to, subject, html, from, bcc }) {
     try {
       const sendPayload = { from: fromAddr, to, subject, html };
       if (bcc) sendPayload.bcc = bcc;
+      if (headers) sendPayload.headers = headers;
       const result = await client.emails.send(sendPayload);
 
       // Resend SDK returns { data, error } instead of throwing
@@ -53,6 +54,7 @@ async function sendEmail({ to, subject, html, from, bcc }) {
       throw emailErr;
     }
   }
+  throw new Error('All sender addresses failed');
 }
 
 // ── Templates ──────────────────────────────────────────
