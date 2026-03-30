@@ -391,7 +391,6 @@ async function sendColdEmail(lead, sender) {
   const fromAddr = sender ? `${sender.name} <${sender.email}>` : undefined;
 
   try {
-    const ownerBcc = process.env.OWNER_NOTIFICATION_EMAIL || 'nathan@monkflow.io';
     const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@monkflow.io';
     const result = await sendEmail({
       to: lead.email,
@@ -399,7 +398,6 @@ async function sendColdEmail(lead, sender) {
       html: htmlBody,
       from: fromAddr,
       reply_to: replyTo,
-      bcc: ownerBcc,
       headers: {
         'Reply-To': replyTo,
         'List-Unsubscribe': `<${unsubUrl}>`,
