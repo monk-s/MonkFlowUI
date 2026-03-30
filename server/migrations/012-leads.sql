@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS leads (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_email_unique ON leads(email) WHERE email IS NOT NULL;
+ALTER TABLE leads ADD CONSTRAINT leads_email_unique UNIQUE (email);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_leads_batch_date ON leads(batch_date);
 CREATE INDEX IF NOT EXISTS idx_leads_unsubscribe ON leads(unsubscribe_token);
