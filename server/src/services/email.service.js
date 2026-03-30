@@ -10,26 +10,26 @@ function getResendClient() {
   return resendClient;
 }
 
-async function sendEmail({ to, subject, html }) {
+async function sendEmail({ to, subject, html, from, bcc }) {
   const client = getResendClient();
 
   if (!client) {
-    console.log(`[DEV EMAIL] To: ${to} | Subject: ${subject}`);
+    console.log(`[DEV EMAIL] To: ${to} | From: ${from || env.emailFrom} | Subject: ${subject}`);
     console.log(`[DEV EMAIL] Body: ${html.substring(0, 200)}...`);
     return { id: 'dev-' + Date.now() };
   }
 
-  // Try with configured domain first, fall back to Resend's default if domain not verified
-  const fromAddresses = [env.emailFrom, 'MonkFlow <onboarding@resend.dev>'];
+  // If a custom `from` is provided (e.g. sender rotation), use it directly with Resend default fallback
+  // Otherwise use the configured domain first, fall back to Resend's default if domain not verified
+  const fromAddresses = from
+    ? [from, 'MonkFlow <onboarding@resend.dev>']
+    : [env.emailFrom, 'MonkFlow <onboarding@resend.dev>'];
 
   for (const fromAddr of fromAddresses) {
     try {
-      const result = await client.emails.send({
-        from: fromAddr,
-        to,
-        subject,
-        html,
-      });
+      const sendPayload = { from: fromAddr, to, subject, html };
+      if (bcc) sendPayload.bcc = bcc;
+      const result = await client.emails.send(sendPayload);
 
       // Resend SDK returns { data, error } instead of throwing
       if (result?.error) {

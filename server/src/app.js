@@ -22,6 +22,7 @@ const teamRoutes = require('./routes/team.routes');
 const contactRoutes = require('./routes/contact.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const projectRoutes = require('./routes/project.routes');
+const leadgenRoutes = require('./routes/leadgen.routes');
 
 const app = express();
 
@@ -55,6 +56,7 @@ app.use('/api/v1/team', teamRoutes);
 app.use('/api/v1/contact', contactRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/projects', projectRoutes);
+app.use('/api/v1/leadgen', leadgenRoutes);
 
 // 404 handler
 app.use((req, res) => {

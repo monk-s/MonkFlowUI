@@ -16,6 +16,10 @@ const env = {
   googleServiceAccountKey: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '',
   googleCalendarId: process.env.GOOGLE_CALENDAR_ID || '',
   ownerUserId: process.env.OWNER_USER_ID || '',
+  serpApiKey: process.env.SERPAPI_KEY || '',
+  leadgenEnabled: process.env.LEADGEN_ENABLED === 'true',
+  leadgenDailyLimit: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 20,
+  leadgenFromEmail: process.env.LEADGEN_FROM_EMAIL || 'nathan@monkflow.io',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production',
 };

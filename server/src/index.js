@@ -51,6 +51,14 @@ async function runMigrations() {
 runMigrations().then(() => {
   const server = app.listen(env.port, () => {
     console.log(`MonkFlow API running on port ${env.port} [${env.nodeEnv}]`);
+
+    // Start lead generation cron
+    try {
+      const leadgenScheduler = require('./services/leadgen.scheduler');
+      leadgenScheduler.start();
+    } catch (err) {
+      console.error('Lead gen scheduler failed to start:', err.message);
+    }
   });
 
   // Graceful shutdown
@@ -68,6 +76,8 @@ runMigrations().then(() => {
       try {
         const scheduler = require('./services/workflow.scheduler');
         scheduler.stopAll();
+        const leadgenScheduler = require('./services/leadgen.scheduler');
+        leadgenScheduler.stop();
         console.log('Cron jobs stopped');
       } catch { /* scheduler not loaded yet */ }
 
