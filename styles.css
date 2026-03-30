@@ -3053,7 +3053,8 @@ tr:hover td { background: var(--bg-card); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .topbar-search { display: none; }
   .hero-title, .landing-hero-title { font-size: 28px; }
-  .hero-actions { flex-direction: column; }
+  .hero-actions { flex-direction: column; width: 100%; }
+  .hero-actions .btn { white-space: normal; }
   .dashboard-hero { padding: 28px 20px; }
   .schedule-calendar { grid-template-columns: repeat(3, 1fr); }
   .schedule-times { grid-template-columns: repeat(2, 1fr); }
@@ -3066,7 +3067,8 @@ tr:hover td { background: var(--bg-card); }
   .landing-services-grid, .landing-testimonials-grid, .landing-process-grid { grid-template-columns: 1fr; }
   .landing-hero-stats { flex-wrap: wrap; gap: 24px; }
   .landing-hero { padding: 120px 20px 60px; }
-  .landing-cta-actions { flex-direction: column; }
+  .landing-cta-actions { flex-direction: column; width: 100%; }
+  .landing-cta-actions .btn { white-space: normal; }
   .landing-footer-links { flex-direction: column; gap: 32px; }
   .notifications-panel { width: 320px; right: -60px; }
   .editor-sidebar { display: none; }
