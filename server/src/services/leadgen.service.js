@@ -84,7 +84,7 @@ function fetchUrl(url, timeout = 10000, maxRedirects = 5) {
     const parsed = new URL(url);
     const lib = parsed.protocol === 'https:' ? https : http;
     const MAX_BODY = 5 * 1024 * 1024; // 5MB limit
-    const req = lib.get(url, { timeout, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MonkFlowBot/1.0)' } }, (res) => {
+    const req = lib.get(url, { timeout, headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return fetchUrl(res.headers.location, timeout, maxRedirects - 1).then(resolve).catch(reject);
       }
@@ -103,12 +103,32 @@ function fetchUrl(url, timeout = 10000, maxRedirects = 5) {
 }
 
 function extractEmails(html) {
-  const matches = html.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [];
+  // Decode HTML entities first (&#64; = @, &#46; = ., etc.)
+  const decoded = html
+    .replace(/&#64;/g, '@').replace(/&#46;/g, '.')
+    .replace(/\[at\]/gi, '@').replace(/\[dot\]/gi, '.')
+    .replace(/ at /g, '@').replace(/ dot /g, '.');
+
+  const matches = decoded.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [];
+
+  // Also extract from mailto: links specifically
+  const mailtoMatches = html.match(/mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/g) || [];
+  for (const m of mailtoMatches) {
+    matches.push(m.replace('mailto:', ''));
+  }
+
   const filtered = [...new Set(matches)].filter(e => {
     const lower = e.toLowerCase();
     return !lower.endsWith('.png') && !lower.endsWith('.jpg') && !lower.endsWith('.gif')
+      && !lower.endsWith('.svg') && !lower.endsWith('.webp') && !lower.endsWith('.css')
+      && !lower.endsWith('.js') && !lower.endsWith('.map')
       && !lower.includes('example.com') && !lower.includes('sentry.io')
-      && !lower.includes('wixpress.com') && !lower.includes('wordpress.org');
+      && !lower.includes('wixpress.com') && !lower.includes('wordpress.org')
+      && !lower.includes('schema.org') && !lower.includes('w3.org')
+      && !lower.includes('googleapis.com') && !lower.includes('cloudflare')
+      && !lower.includes('noreply') && !lower.includes('no-reply')
+      && !lower.includes('@sentry') && !lower.includes('@email.')
+      && lower.length < 60;
   });
   return filtered;
 }
@@ -173,7 +193,7 @@ async function diagnoseWebsite(url) {
   };
 
   try {
-    const mainPage = await fetchUrl(url.startsWith('http') ? url : `https://${url}`);
+    const mainPage = await fetchUrl(url.startsWith('http') ? url : `https://${url}`, 8000);
     const html = mainPage.html.toLowerCase();
 
     // Check SSL
@@ -229,7 +249,7 @@ async function diagnoseWebsite(url) {
       const baseUrl = new URL(url.startsWith('http') ? url : `https://${url}`);
       for (const path of ['/contact', '/contact-us']) {
         const contactUrl = `${baseUrl.origin}${path}`;
-        const contactPage = await fetchUrl(contactUrl);
+        const contactPage = await fetchUrl(contactUrl, 6000);
         if (contactPage.status === 200) {
           diagnosis.emails.push(...extractEmails(contactPage.html));
           // Also check contact page for booking
@@ -401,8 +421,10 @@ async function runDailyLeadGeneration() {
 
         for (const r of results) {
           // Skip directories, yelp, facebook itself, etc.
-          if (/yelp|yellowpages|bbb\.org|findlaw|avvo|justia|facebook\.com|linkedin/i.test(r.link)) continue;
-          rawLeads.push({ ...r, city, searchQuery, firmType: firmType.type });
+          if (/yelp|yellowpages|bbb\.org|findlaw|avvo|justia|facebook\.com|linkedin|mapquest|manta\.com|chamberofcommerce/i.test(r.link)) continue;
+          // Extract email from snippet if present (Google often shows it)
+          const snippetEmails = extractEmails(r.snippet || '');
+          rawLeads.push({ ...r, snippetEmails, city, searchQuery, firmType: firmType.type });
         }
       } catch (err) {
         if (err.message.startsWith('SEARCHAPI_AUTH_FAILURE')) {
@@ -425,7 +447,23 @@ async function runDailyLeadGeneration() {
   for (const raw of rawLeads.slice(0, 500)) { // diagnose up to 500 to find ~250 with emails
     try {
       const websiteUrl = raw.link;
-      const diagnosis = await diagnoseWebsite(websiteUrl);
+      let diagnosis;
+      try {
+        diagnosis = await diagnoseWebsite(websiteUrl);
+      } catch (diagErr) {
+        // Website unreachable — still use snippet emails if available
+        diagnosis = {
+          has_ssl: websiteUrl.startsWith('https'),
+          has_booking_software: false, booking_software_name: null,
+          has_client_portal: false, has_intake_forms: false,
+          design_age_estimate: 'unknown', emails: [], issues: ['Website unreachable'],
+        };
+      }
+
+      // Merge snippet emails (from Google results) with website emails
+      if (raw.snippetEmails && raw.snippetEmails.length > 0) {
+        diagnosis.emails = [...new Set([...diagnosis.emails, ...raw.snippetEmails])];
+      }
 
       // Need at least one email
       const bestEmail = diagnosis.emails[0];
@@ -463,7 +501,14 @@ async function runDailyLeadGeneration() {
       stats.errors++;
       console.error(`[LEADGEN] Error processing ${raw.link}:`, err.message);
     }
-    await sleep(2000); // polite crawling
+
+    // Progress log every 50 sites
+    const idx = rawLeads.indexOf(raw);
+    if (idx > 0 && idx % 50 === 0) {
+      console.log(`[LEADGEN] Progress: ${idx}/${Math.min(rawLeads.length, 500)} processed, ${qualifiedLeads.length} discovered, ${stats.errors} errors`);
+    }
+
+    await sleep(1000); // polite crawling
   }
 
   console.log(`[LEADGEN] Qualified leads: ${qualifiedLeads.length}`);
