@@ -1,16 +1,16 @@
-const { google } = require('googleapis');
+const { GoogleAuth } = require('google-auth-library');
 const path = require('path');
 const fs = require('fs');
 const env = require('../config/env');
 
-let calendarClient = null;
+const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
+let authClient = null;
 
-function getCalendarClient() {
-  if (calendarClient) return calendarClient;
+async function getAuthClient() {
+  if (authClient) return authClient;
 
   let credentials;
 
-  // Try loading from env var first, then from file
   if (env.googleServiceAccountKey) {
     try {
       credentials = typeof env.googleServiceAccountKey === 'string'
@@ -22,7 +22,6 @@ function getCalendarClient() {
   }
 
   if (!credentials) {
-    // Try loading from file
     const keyPath = path.join(__dirname, '../../google-service-account.json');
     if (fs.existsSync(keyPath)) {
       credentials = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
@@ -32,23 +31,30 @@ function getCalendarClient() {
     }
   }
 
-  const auth = new google.auth.GoogleAuth({
+  const auth = new GoogleAuth({
     credentials,
     scopes: ['https://www.googleapis.com/auth/calendar'],
   });
 
-  calendarClient = google.calendar({ version: 'v3', auth });
-  return calendarClient;
+  authClient = await auth.getClient();
+  return authClient;
 }
 
-/**
- * Creates a Google Calendar event for a booked appointment.
- * @param {Object} appointment - The appointment record from the database
- * @returns {Object|null} The created event (with htmlLink) or null on failure
- */
+async function calendarFetch(method, urlPath, body) {
+  const client = await getAuthClient();
+  if (!client) return null;
+
+  const url = `${CALENDAR_API}${urlPath}`;
+  const opts = { url, method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+
+  const res = await client.request(opts);
+  return res.data;
+}
+
 async function createCalendarEvent(appointment) {
-  const calendar = getCalendarClient();
-  if (!calendar) {
+  const client = await getAuthClient();
+  if (!client) {
     console.log('[Google Calendar] Skipping — no credentials configured');
     return null;
   }
@@ -59,19 +65,16 @@ async function createCalendarEvent(appointment) {
     return null;
   }
 
-  // Build start/end datetime strings
-  // appointment.date may be a JS Date object from PostgreSQL or a 'YYYY-MM-DD' string
   let dateStr = appointment.date;
   if (dateStr instanceof Date) {
-    dateStr = dateStr.toISOString().split('T')[0]; // '2026-03-30'
+    dateStr = dateStr.toISOString().split('T')[0];
   } else if (typeof dateStr === 'string' && dateStr.includes('T')) {
     dateStr = dateStr.split('T')[0];
   }
-  // PostgreSQL time type returns 'HH:MM:SS' — use directly, don't append extra ':00'
-  // Also handle 'HH:MM' format just in case
+
   const startTime = String(appointment.start_time).split(':').length === 3
-    ? appointment.start_time   // already HH:MM:SS
-    : `${appointment.start_time}:00`;  // HH:MM → HH:MM:00
+    ? appointment.start_time
+    : `${appointment.start_time}:00`;
   const endTime = String(appointment.end_time).split(':').length === 3
     ? appointment.end_time
     : `${appointment.end_time}:00`;
@@ -97,44 +100,29 @@ async function createCalendarEvent(appointment) {
       dateTime: endDateTime,
       timeZone: appointment.timezone || 'America/Chicago',
     },
-    // Note: Service accounts can't add attendees without Domain-Wide Delegation.
-    // Attendee info is included in the description instead.
-    reminders: {
-      useDefault: true,
-    },
-    colorId: '10', // Basil green
+    reminders: { useDefault: true },
+    colorId: '10',
   };
 
   console.log(`[Google Calendar] Creating event: start=${startDateTime}, end=${endDateTime}`);
 
   try {
-    const response = await calendar.events.insert({
-      calendarId,
-      resource: event,
-      sendUpdates: 'none', // Service account — no attendee invites
-    });
-
-    console.log(`[Google Calendar] Event created: ${response.data.htmlLink}`);
-    return response.data;
+    const data = await calendarFetch('POST', `/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=none`, event);
+    console.log(`[Google Calendar] Event created: ${data.htmlLink}`);
+    return data;
   } catch (err) {
     console.error('[Google Calendar] Failed to create event:', err.message);
     return null;
   }
 }
 
-/**
- * Deletes or cancels a Google Calendar event
- */
 async function deleteCalendarEvent(eventId) {
-  const calendar = getCalendarClient();
-  if (!calendar || !eventId) return;
+  if (!eventId) return;
+  const calendarId = env.googleCalendarId;
+  if (!calendarId) return;
 
   try {
-    await calendar.events.delete({
-      calendarId: env.googleCalendarId,
-      eventId,
-      sendUpdates: 'all',
-    });
+    await calendarFetch('DELETE', `/calendars/${encodeURIComponent(calendarId)}/events/${eventId}?sendUpdates=all`);
     console.log(`[Google Calendar] Event deleted: ${eventId}`);
   } catch (err) {
     console.error('[Google Calendar] Failed to delete event:', err.message);
