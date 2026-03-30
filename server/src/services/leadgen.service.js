@@ -7,6 +7,11 @@ const { URL } = require('url');
 
 // ── Config ──────────────────────────────────────────
 const SEARCH_API_KEY = process.env.SEARCHAPI_KEY || process.env.SERPAPI_KEY || '';
+// Auto-detect which search API to use based on which env var is set
+const SEARCH_API_PROVIDER = process.env.SERPAPI_KEY && !process.env.SEARCHAPI_KEY ? 'serpapi' : 'searchapi';
+const SEARCH_API_BASE = SEARCH_API_PROVIDER === 'serpapi'
+  ? 'https://serpapi.com/search.json'
+  : 'https://www.searchapi.io/api/v1/search';
 const DAILY_LIMIT = parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 250;
 const PER_SENDER_LIMIT = parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 25;
 const UNSUBSCRIBE_BASE = (env.frontendUrl || 'https://monkflow.io').replace(/\/$/, '');
@@ -133,11 +138,11 @@ function extractEmails(html) {
   return filtered;
 }
 
-// ── SearchAPI.io Search ────────────────────────────
+// ── Google Search (supports both SearchAPI.io and SerpAPI.com) ──
 
 async function searchSerpAPI(queryStr) {
   if (!SEARCH_API_KEY) {
-    console.warn('[LEADGEN] No SEARCHAPI_KEY set, skipping search');
+    console.warn('[LEADGEN] No SEARCHAPI_KEY or SERPAPI_KEY set, skipping search');
     return [];
   }
 
@@ -151,7 +156,7 @@ async function searchSerpAPI(queryStr) {
   });
 
   try {
-    const resp = await fetchUrl(`https://www.searchapi.io/api/v1/search?${params}`, 15000);
+    const resp = await fetchUrl(`${SEARCH_API_BASE}?${params}`, 15000);
     const data = JSON.parse(resp.html);
 
     // Check for API-level errors (invalid key, rate limit, etc.)
