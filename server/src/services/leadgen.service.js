@@ -404,9 +404,9 @@ async function runDailyLeadGeneration() {
   const batchDate = new Date().toISOString().split('T')[0];
   const stats = { searched: 0, discovered: 0, emailsGenerated: 0, emailed: 0, errors: 0 };
 
-  // 1. Pick firm types and cities — budget ~450 searches/day to stay under 10k/month
-  // 10 firm types × 45 cities = 450 searches/day × 22 weekdays = 9,900/month
-  const cities = shuffle(US_CITIES).slice(0, 45);
+  // 1. Pick firm types and cities — budget ~220 searches/day to stay under 5k/month
+  // 10 firm types × 22 cities = 220 searches/day × 22 weekdays = 4,840/month
+  const cities = shuffle(US_CITIES).slice(0, 22);
   const firmTypes = shuffle(FIRM_TYPES);
 
   console.log(`[LEADGEN] Targeting: ${firmTypes.map(f => f.type).join(', ')} | Cities: ${cities.length}`);
