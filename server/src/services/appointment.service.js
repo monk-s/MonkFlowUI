@@ -37,15 +37,16 @@ async function getAvailableSlots(userId, dateStr) {
     slots.push({ startTime: slotStart, endTime: slotEnd });
   }
 
-  // Remove occupied slots
+  // Mark occupied slots
   const appointments = await appointmentModel.findByDateRange(userId, dateStr);
 
-  return slots.filter(slot => {
-    return !appointments.some(appt => {
+  return slots.map(slot => {
+    const booked = appointments.some(appt => {
       const apptStart = appt.start_time.substring(0, 5);
       const apptEnd = appt.end_time.substring(0, 5);
       return slot.startTime < apptEnd && slot.endTime > apptStart;
     });
+    return { ...slot, booked };
   });
 }
 

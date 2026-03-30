@@ -3676,14 +3676,20 @@ function showSchedulingModal() {
         <div style="width:24px;height:24px;border:3px solid rgba(255,255,255,0.15);border-top-color:#00cc6a;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
         Loading available times...
       </div>`;
-    } else if (availableSlots.length === 0) {
+    } else if (availableSlots.every(s => s.booked)) {
       slotsHtml = `<div style="text-align:center;padding:40px 0;color:rgba(255,255,255,0.5);">
         <div style="font-size:32px;margin-bottom:8px;">&#128549;</div>
-        No availability on this date. Please choose another day.
+        Fully booked on this date. Please choose another day.
       </div>`;
     } else {
       slotsHtml = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:420px;margin:0 auto;">
         ${availableSlots.map(slot => {
+          if (slot.booked) {
+            return `<button disabled
+              style="padding:10px 0;border-radius:8px;border:1px solid rgba(255,70,70,0.25);
+              background:rgba(255,70,70,0.08);color:rgba(255,70,70,0.45);
+              font-size:13px;font-weight:500;cursor:not-allowed;text-align:center;text-decoration:line-through;">${slot.start} – ${slot.end}</button>`;
+          }
           const isActive = selectedSlot && selectedSlot.start === slot.start;
           return `<button onclick="window._schedSelectSlot('${slot.start}','${slot.end}')"
             style="padding:10px 0;border-radius:8px;border:1px solid ${isActive ? '#00cc6a' : 'rgba(255,255,255,0.12)'};
@@ -3767,7 +3773,7 @@ function showSchedulingModal() {
     fetch(`${API_BASE}/appointments/availability?userId=${OWNER_USER_ID}&date=${date}`)
       .then(res => res.json())
       .then(data => {
-        availableSlots = (data.data || []).map(s => ({ start: s.startTime || s.start, end: s.endTime || s.end }));
+        availableSlots = (data.data || []).map(s => ({ start: s.startTime || s.start, end: s.endTime || s.end, booked: !!s.booked }));
         render();
       })
       .catch(() => {
@@ -3880,7 +3886,15 @@ function showSchedulingModal() {
       `);
       showToast('Consultation booked successfully!');
     } catch (err) {
-      showToast(err.message || 'Failed to book consultation', 'error');
+      const msg = err.message || 'Failed to book consultation';
+      if (msg.toLowerCase().includes('no longer available')) {
+        showToast('That slot was just booked — please pick another time.', 'error');
+        currentStep = 2;
+        selectedSlot = null;
+        fetchAvailability(selectedDate);
+        return;
+      }
+      showToast(msg, 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Book Consultation'; }
     }
   };
