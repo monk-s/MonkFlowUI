@@ -50,8 +50,15 @@ const triggerRun = async (req, res) => {
 
 const unsubscribe = async (req, res) => {
   try {
-    const lead = await leadModel.findByUnsubscribeToken(req.params.token);
-    if (!lead) return res.status(404).send('<h1>Link expired or invalid</h1>');
+    const token = req.params.token;
+    // Validate UUID format to prevent Postgres errors from malformed tokens
+    // (email link scanners often mangle/encode URLs into base64 fragments)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(token)) {
+      return res.status(400).send('<html><body style="font-family:sans-serif;text-align:center;padding:60px;"><h1>Invalid Link</h1><p>This unsubscribe link appears to be malformed. Please use the original link from your email.</p></body></html>');
+    }
+    const lead = await leadModel.findByUnsubscribeToken(token);
+    if (!lead) return res.status(404).send('<html><body style="font-family:sans-serif;text-align:center;padding:60px;"><h1>Link Expired</h1><p>This unsubscribe link is no longer valid.</p></body></html>');
     await leadModel.update(lead.id, { status: 'unsubscribed' });
     res.send('<html><body style="font-family:sans-serif;text-align:center;padding:60px;"><h1>Unsubscribed</h1><p>You won\'t receive any more emails from us.</p></body></html>');
   } catch (err) {

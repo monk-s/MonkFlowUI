@@ -124,16 +124,32 @@ function extractEmails(html) {
 
   const filtered = [...new Set(matches)].filter(e => {
     const lower = e.toLowerCase();
-    return !lower.endsWith('.png') && !lower.endsWith('.jpg') && !lower.endsWith('.gif')
-      && !lower.endsWith('.svg') && !lower.endsWith('.webp') && !lower.endsWith('.css')
-      && !lower.endsWith('.js') && !lower.endsWith('.map')
-      && !lower.includes('example.com') && !lower.includes('sentry.io')
-      && !lower.includes('wixpress.com') && !lower.includes('wordpress.org')
-      && !lower.includes('schema.org') && !lower.includes('w3.org')
-      && !lower.includes('googleapis.com') && !lower.includes('cloudflare')
-      && !lower.includes('noreply') && !lower.includes('no-reply')
-      && !lower.includes('@sentry') && !lower.includes('@email.')
-      && lower.length < 60;
+    // Filter file extensions that look like emails but aren't
+    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.gif')
+      || lower.endsWith('.svg') || lower.endsWith('.webp') || lower.endsWith('.css')
+      || lower.endsWith('.js') || lower.endsWith('.map')) return false;
+    // Filter known junk/system domains
+    if (lower.includes('example.com') || lower.includes('sentry.io')
+      || lower.includes('wixpress.com') || lower.includes('wordpress.org')
+      || lower.includes('schema.org') || lower.includes('w3.org')
+      || lower.includes('googleapis.com') || lower.includes('cloudflare')
+      || lower.includes('@sentry') || lower.includes('@email.')) return false;
+    // Filter auto-reply and system addresses
+    if (lower.includes('noreply') || lower.includes('no-reply')
+      || lower.includes('donotreply') || lower.includes('do-not-reply')
+      || lower.includes('mailer-daemon') || lower.includes('postmaster@')) return false;
+    // Filter placeholder/test emails
+    if (lower.startsWith('example@') || lower.startsWith('user@') || lower.startsWith('email@')
+      || lower.startsWith('youremail@') || lower.startsWith('your@') || lower.startsWith('name@')
+      || lower.startsWith('test@') || lower.startsWith('info@example')
+      || lower.includes('@domain.com') || lower.includes('@email.com')
+      || lower.includes('@yoursite') || lower.includes('@yourdomain')) return false;
+    // Filter large institutions (universities, hospitals, government)
+    if (lower.endsWith('.edu') || lower.endsWith('.gov') || lower.endsWith('.mil')
+      || lower.includes('ethicspoint.com') || lower.includes('hotline')) return false;
+    // Length check
+    if (lower.length < 6 || lower.length >= 60) return false;
+    return true;
   });
   return filtered;
 }
@@ -403,6 +419,42 @@ async function runDailyLeadGeneration() {
   console.log('[LEADGEN] === Starting daily lead generation ===');
   const batchDate = new Date().toISOString().split('T')[0];
   const stats = { searched: 0, discovered: 0, emailsGenerated: 0, emailed: 0, errors: 0 };
+
+  // 0. Resume any unsent leads from previous interrupted runs
+  try {
+    const { query: dbQuery } = require('../config/database');
+    const { rows: unsentLeads } = await dbQuery(
+      `SELECT * FROM leads WHERE status = 'email_generated' AND outreach_subject IS NOT NULL AND outreach_body IS NOT NULL ORDER BY created_at LIMIT 250`
+    );
+    if (unsentLeads.length > 0) {
+      console.log(`[LEADGEN] Found ${unsentLeads.length} unsent leads from previous run — sending now`);
+      const senderCounts = new Map(SENDERS.map(s => [s.email, 0]));
+      let senderIdx = 0;
+      for (const lead of unsentLeads) {
+        let sender = null;
+        for (let j = 0; j < SENDERS.length; j++) {
+          const candidate = SENDERS[(senderIdx + j) % SENDERS.length];
+          if (senderCounts.get(candidate.email) < PER_SENDER_LIMIT) {
+            sender = candidate;
+            senderIdx = (senderIdx + j + 1) % SENDERS.length;
+            break;
+          }
+        }
+        if (!sender) break;
+        const result = await sendColdEmail(lead, sender);
+        if (result.success) {
+          stats.emailed++;
+          senderCounts.set(sender.email, senderCounts.get(sender.email) + 1);
+        } else {
+          stats.errors++;
+        }
+        await sleep(1000);
+      }
+      console.log(`[LEADGEN] Resumed sending complete: ${stats.emailed} sent, ${stats.errors} errors`);
+    }
+  } catch (resumeErr) {
+    console.error('[LEADGEN] Resume unsent error:', resumeErr.message);
+  }
 
   // 1. Pick firm types and cities — budget ~220 searches/day to stay under 5k/month
   // 10 firm types × 22 cities = 220 searches/day × 22 weekdays = 4,840/month
