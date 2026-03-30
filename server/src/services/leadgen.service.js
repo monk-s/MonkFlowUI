@@ -133,6 +133,17 @@ async function searchSerpAPI(queryStr) {
   try {
     const resp = await fetchUrl(`https://serpapi.com/search.json?${params}`, 15000);
     const data = JSON.parse(resp.html);
+
+    // Check for API-level errors (invalid key, rate limit, etc.)
+    if (data.error) {
+      console.error(`[LEADGEN] SerpAPI API error: ${data.error}`);
+      // If it's an auth error, throw to stop wasting time on all 450 queries
+      if (data.error.toLowerCase().includes('invalid api key') || resp.status === 401) {
+        throw new Error(`SERPAPI_AUTH_FAILURE: ${data.error}`);
+      }
+      return [];
+    }
+
     const results = (data.organic_results || []).map(r => ({
       title: r.title || '',
       link: r.link || '',
@@ -140,6 +151,8 @@ async function searchSerpAPI(queryStr) {
     }));
     return results;
   } catch (err) {
+    // Re-throw auth failures so the main orchestrator can abort early
+    if (err.message.startsWith('SERPAPI_AUTH_FAILURE')) throw err;
     console.error('[LEADGEN] SerpAPI error:', err.message);
     return [];
   }
@@ -375,17 +388,31 @@ async function runDailyLeadGeneration() {
 
   // 2. Search for leads — cycle through firm types and cities
   const rawLeads = [];
+  let serpApiAborted = false;
   for (const firmType of firmTypes) {
+    if (serpApiAborted) break;
     const query = shuffle(firmType.queries)[0];
     for (const city of cities) {
+      if (serpApiAborted) break;
       const searchQuery = `${query} ${city} email`;
-      const results = await searchSerpAPI(searchQuery);
-      stats.searched += results.length;
+      try {
+        const results = await searchSerpAPI(searchQuery);
+        stats.searched += results.length;
 
-      for (const r of results) {
-        // Skip directories, yelp, facebook itself, etc.
-        if (/yelp|yellowpages|bbb\.org|findlaw|avvo|justia|facebook\.com|linkedin/i.test(r.link)) continue;
-        rawLeads.push({ ...r, city, searchQuery, firmType: firmType.type });
+        for (const r of results) {
+          // Skip directories, yelp, facebook itself, etc.
+          if (/yelp|yellowpages|bbb\.org|findlaw|avvo|justia|facebook\.com|linkedin/i.test(r.link)) continue;
+          rawLeads.push({ ...r, city, searchQuery, firmType: firmType.type });
+        }
+      } catch (err) {
+        if (err.message.startsWith('SERPAPI_AUTH_FAILURE')) {
+          console.error('[LEADGEN] ❌ SerpAPI authentication failed — aborting all searches. Check your SERPAPI_KEY.');
+          stats.errors++;
+          serpApiAborted = true;
+          break;
+        }
+        console.error(`[LEADGEN] Search error for "${searchQuery}":`, err.message);
+        stats.errors++;
       }
       await sleep(1500); // rate limit
     }
@@ -537,6 +564,10 @@ async function sendOwnerSummary(batchDate, stats, leads) {
             ${leadsTable}
           </table>` : ''}
         ${stats.errors ? `<p style="color: #c0392b;">Errors: ${stats.errors}</p>` : ''}
+        ${stats.searched === 0 ? `<div style="background: #ffe0e0; border-left: 4px solid #c0392b; padding: 12px 16px; margin-top: 16px; border-radius: 4px;">
+          <strong style="color: #c0392b;">⚠️ Zero search results.</strong> This usually means the SerpAPI key is invalid or expired.
+          Check your SERPAPI_KEY environment variable and verify it at <a href="https://serpapi.com/manage-api-key">serpapi.com</a>.
+        </div>` : ''}
       </div>
     `,
   });
