@@ -44,6 +44,13 @@ const FIRM_TYPES = [
   { type: 'cpa', queries: ['small CPA firm', 'accounting firm small business', 'CPA tax accountant'] },
   { type: 'law', queries: ['small law firm estate planning', 'family law attorney small firm', 'business attorney small practice'] },
   { type: 'financial', queries: ['financial advisor independent', 'wealth management small firm', 'financial planner independent'] },
+  { type: 'dental', queries: ['dental office small practice', 'family dentist private practice', 'dentist office small town'] },
+  { type: 'chiropractic', queries: ['chiropractor small practice', 'chiropractic office independent', 'chiropractor private practice'] },
+  { type: 'real_estate', queries: ['real estate agent independent', 'small real estate brokerage', 'realtor independent agent'] },
+  { type: 'insurance', queries: ['insurance agent independent', 'small insurance agency', 'insurance broker local'] },
+  { type: 'veterinary', queries: ['veterinary clinic small', 'vet office private practice', 'animal hospital small'] },
+  { type: 'contractor', queries: ['plumbing company small business', 'HVAC contractor local', 'general contractor small business'] },
+  { type: 'physical_therapy', queries: ['physical therapy private practice', 'PT clinic independent', 'physical therapist small office'] },
 ];
 
 const BOOKING_PLATFORMS = [
@@ -343,10 +350,10 @@ async function runDailyLeadGeneration() {
   const batchDate = new Date().toISOString().split('T')[0];
   const stats = { searched: 0, discovered: 0, diagnosed: 0, emailed: 0, errors: 0 };
 
-  // 1. Pick random cities and firm types — use more cities & all firm types to hit 250+ leads
-  const cities = shuffle(US_CITIES).slice(0, 15);
+  // 1. Pick firm types and cities — budget ~450 searches/day to stay under 10k/month
+  // 10 firm types × 45 cities = 450 searches/day × 22 weekdays = 9,900/month
+  const cities = shuffle(US_CITIES).slice(0, 45);
   const firmTypes = shuffle(FIRM_TYPES);
-  const queryTemplate = shuffle(firmTypes[0].queries)[0];
 
   console.log(`[LEADGEN] Targeting: ${firmTypes.map(f => f.type).join(', ')} | Cities: ${cities.length}`);
 
