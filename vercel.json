@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://monkflowui-production.up.railway.app/api/:path*"
+      "destination": "https://resourceful-abundance-production.up.railway.app/api/:path*"
     }
   ]
 }
