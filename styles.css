@@ -392,6 +392,7 @@ input:focus, textarea:focus, select:focus {
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 10px 20px;
   border-radius: var(--radius-sm);
