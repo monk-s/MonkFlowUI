@@ -10,8 +10,8 @@ function start() {
 
   const { runDailyLeadGeneration } = require('./leadgen.service');
 
-  // 9:00 AM Central Time, weekdays only (Mon-Fri)
-  job = cron.schedule('0 9 * * 1-5', async () => {
+  // 8:00 AM Central Time, weekdays only (Mon-Fri)
+  job = cron.schedule('0 8 * * 1-5', async () => {
     console.log('[LEADGEN] Cron triggered — starting daily run...');
     try {
       const stats = await runDailyLeadGeneration();
@@ -21,7 +21,7 @@ function start() {
     }
   }, { timezone: 'America/Chicago' });
 
-  console.log('[LEADGEN] Cron scheduled — weekdays at 9:00 AM CT');
+  console.log('[LEADGEN] Cron scheduled — weekdays at 8:00 AM CT');
 }
 
 function stop() {
