@@ -117,6 +117,10 @@ let logsSearchDebounceTimer = null;
 let apiKeysData = null;
 let currentWorkflowDetail = null;
 let executionPollTimer = null;
+let currentAgentId = null;
+let currentAgentDetail = null;
+let agentDetailExecutions = null;
+let agentExecutionPollTimer = null;
 
 // ── Type Mappings ──────────────────────────────────────────
 const FRONTEND_TO_BACKEND_TYPE = {
@@ -347,6 +351,7 @@ function navigateTo(page) {
   if (page === 'team') loadTeamData();
   if (page === 'analytics' && !dashboardData) loadDashboardData();
   if (page === 'workflow-detail') loadWorkflowDetail();
+  if (page === 'agent-detail') loadAgentDetail();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
@@ -1215,6 +1220,7 @@ function renderMainContent() {
     team: renderTeam,
     'workflow-editor': renderWorkflowEditor,
     'workflow-detail': renderWorkflowDetail,
+    'agent-detail': renderAgentDetail,
   };
   main.innerHTML = (pages[currentPage] || renderDashboard)();
 }
@@ -1940,7 +1946,7 @@ function renderAgents() {
     const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
     const agentIcon = a.icon || '🤖';
     return `
-      <div class="agent-card">
+      <div class="agent-card" onclick="currentAgentId='${a.id}';currentAgentDetail=null;agentDetailExecutions=null;navigateTo('agent-detail')" style="cursor:pointer;">
         <div style="display:flex;align-items:center;justify-content:space-between;">
           <div class="agent-avatar">${agentIcon}</div>
           <span class="badge-status ${status}"><span class="dot"></span> ${statusLabel}</span>
@@ -1958,8 +1964,8 @@ function renderAgents() {
           </div>
           <div class="agent-stat-item" style="flex:1;">
             <div style="display:flex;gap:4px;">
-              <button class="btn btn-ghost btn-sm" onclick="showToast('Agent configuration coming soon')" title="Configure">${icons.settings}</button>
-              <button class="btn btn-ghost btn-sm" onclick="deleteAgent('${a.id}','${(a.name || '').replace(/'/g, "\\'")}')" title="Delete">${icons.trash}</button>
+              <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();currentAgentId='${a.id}';currentAgentDetail=null;agentDetailExecutions=null;navigateTo('agent-detail')" title="Configure">${icons.settings}</button>
+              <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteAgent('${a.id}','${(a.name || '').replace(/'/g, "\\'")}')" title="Delete">${icons.trash}</button>
             </div>
           </div>
         </div>
@@ -2021,6 +2027,301 @@ async function deleteAgent(agentId, agentName) {
     await api.del('/agents/' + agentId);
     showToast('Agent deleted', 'success');
     loadAgentsData();
+  } catch (err) {
+    showToast(err.message || 'Failed to delete agent', 'error');
+  }
+}
+
+// ============================================================
+// AGENT DETAIL PAGE
+// ============================================================
+
+async function loadAgentDetail() {
+  if (!currentAgentId) { navigateTo('agents'); return; }
+  try {
+    const [agentResult, execResult] = await Promise.all([
+      api.get(`/agents/${currentAgentId}`),
+      api.get(`/agents/${currentAgentId}/executions?limit=20`).catch(() => ({ data: [] })),
+    ]);
+    currentAgentDetail = agentResult.data || agentResult;
+    agentDetailExecutions = execResult.data || execResult || [];
+    renderMainContent();
+  } catch (err) {
+    showToast(err.message || 'Failed to load agent', 'error');
+    navigateTo('agents');
+  }
+}
+
+function renderAgentDetail() {
+  if (!currentAgentDetail) {
+    return `
+      <div class="page-header"><div><h1>Agent Details</h1><p class="page-desc">Loading...</p></div></div>
+      <div class="card" style="padding:32px;text-align:center;">
+        <div style="width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px;"></div>
+        <p style="color:var(--text-secondary);font-size:13px;">Loading agent details...</p>
+      </div>
+    `;
+  }
+
+  const agent = currentAgentDetail;
+  const execs = agentDetailExecutions || [];
+  const status = agent.status || 'draft';
+  const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+
+  // Compute stats
+  const totalTasks = agent.total_runs || execs.length || 0;
+  const totalTokens = execs.reduce((sum, e) => sum + (e.tokens_used || e.total_tokens || 0), 0);
+  const durations = execs.filter(e => e.started_at && e.completed_at).map(e => (new Date(e.completed_at) - new Date(e.started_at)) / 1000);
+  const avgDuration = durations.length > 0 ? (durations.reduce((a, b) => a + b, 0) / durations.length).toFixed(1) + 's' : '\u2014';
+
+  // Model display mapping
+  const modelDisplayMap = {
+    'claude-opus-4-20250514': 'Claude Opus 4',
+    'claude-sonnet-4-20250514': 'Claude Sonnet 4',
+    'gpt-4o': 'GPT-4o',
+    'custom': 'Custom Model',
+  };
+  const modelDisplay = modelDisplayMap[agent.model] || agent.model || 'Claude Sonnet 4';
+  const tempValue = agent.temperature != null ? Math.round(agent.temperature * 100) : 30;
+
+  // Execution history rows
+  const executionRows = execs.length > 0 ? execs.map(e => {
+    const eStatus = e.status || 'pending';
+    const eStatusColor = { completed: '#00ff88', failed: '#ef4444', running: '#3b82f6', pending: '#fbbf24' };
+    const duration = e.started_at && e.completed_at ? ((new Date(e.completed_at) - new Date(e.started_at)) / 1000).toFixed(1) + 's' : e.started_at ? 'Running...' : '\u2014';
+    const inputText = e.input || e.input_text || '';
+    const outputText = e.output || e.output_text || e.result || '';
+    const inputTrunc = inputText.length > 50 ? inputText.slice(0, 47) + '...' : inputText;
+    const outputTrunc = outputText.length > 50 ? outputText.slice(0, 47) + '...' : outputText;
+    const tokens = e.tokens_used || e.total_tokens || '\u2014';
+    const escapedInput = (inputText || '').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    const escapedOutput = (outputText || '').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    return `
+      <tr style="cursor:pointer;" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'table-row':'none'">
+        <td style="font-family:monospace;font-size:11px;">${(e.id || '').slice(0, 8)}</td>
+        <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${eStatusColor[eStatus] || '#666'};"></span> ${eStatus}</span></td>
+        <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${inputText.replace(/"/g, '&quot;')}">${inputTrunc || '\u2014'}</td>
+        <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${outputText.replace(/"/g, '&quot;')}">${outputTrunc || '\u2014'}</td>
+        <td>${tokens}</td>
+        <td>${duration}</td>
+        <td>${e.started_at ? timeAgo(e.started_at) : '\u2014'}</td>
+      </tr>
+      <tr style="display:none;">
+        <td colspan="7" style="padding:12px 16px;background:var(--bg-tertiary);border-radius:8px;">
+          <div style="margin-bottom:8px;"><strong style="color:var(--text-secondary);font-size:11px;">Full Input:</strong><pre style="margin:4px 0;font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);max-height:200px;overflow-y:auto;">${inputText || 'No input'}</pre></div>
+          <div><strong style="color:var(--text-secondary);font-size:11px;">Full Output:</strong><pre style="margin:4px 0;font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);max-height:200px;overflow-y:auto;">${outputText || 'No output'}</pre></div>
+        </td>
+      </tr>
+    `;
+  }).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--text-tertiary);padding:24px;">No executions yet. Run this agent to see execution history.</td></tr>`;
+
+  return `
+    <!-- Header -->
+    <div class="page-header">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <button class="btn btn-ghost btn-sm" onclick="navigateTo('agents')">${icons.arrowLeft} Back</button>
+          <h1 style="margin:0;">${agent.name || 'Unnamed Agent'}</h1>
+          <span class="badge-status ${status}"><span class="dot"></span> ${statusLabel}</span>
+        </div>
+        <p class="page-desc">${agent.description || 'No description'}</p>
+      </div>
+      <div class="page-actions" style="display:flex;gap:8px;">
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('agent-run-section').scrollIntoView({behavior:'smooth'})">${icons.play} Run Agent</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleAgentStatus('${agent.id}','${status}')">${status === 'active' ? icons.pause + ' Pause' : icons.zap + ' Activate'}</button>
+        <button class="btn btn-ghost btn-sm" style="color:#ef4444;" onclick="deleteAgentFromDetail('${agent.id}','${(agent.name || '').replace(/'/g, "\\'")}')">${icons.trash} Delete</button>
+      </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="stats-grid" style="margin-bottom:24px;">
+      <div class="stat-card"><div class="stat-value">${totalTasks}</div><div class="stat-label">Total Tasks</div></div>
+      <div class="stat-card"><div class="stat-value">${totalTokens.toLocaleString()}</div><div class="stat-label">Total Tokens Used</div></div>
+      <div class="stat-card"><div class="stat-value">${avgDuration}</div><div class="stat-label">Avg Duration</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:${status === 'active' ? '#00ff88' : status === 'error' ? '#ef4444' : '#fbbf24'};">${statusLabel}</div><div class="stat-label">Status</div></div>
+    </div>
+
+    <!-- Configuration Panel -->
+    <div class="card" style="padding:20px;margin-bottom:24px;">
+      <div class="card-title" style="margin-bottom:16px;">Configuration</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-group">
+          <label class="form-label">Agent Name</label>
+          <input type="text" id="agent-cfg-name" value="${(agent.name || '').replace(/"/g, '&quot;')}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Agent Type</label>
+          <select id="agent-cfg-type">
+            <option value="text_generation" ${agent.agent_type === 'text_generation' ? 'selected' : ''}>Text Generation</option>
+            <option value="classification" ${agent.agent_type === 'classification' ? 'selected' : ''}>Classification</option>
+            <option value="analysis" ${agent.agent_type === 'analysis' ? 'selected' : ''}>Analysis</option>
+            <option value="custom" ${agent.agent_type === 'custom' ? 'selected' : ''}>Custom</option>
+          </select>
+        </div>
+        <div class="form-group" style="grid-column:1/-1;">
+          <label class="form-label">Description</label>
+          <textarea id="agent-cfg-desc" rows="2" style="resize:vertical;">${agent.description || ''}</textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">AI Model</label>
+          <select id="agent-cfg-model">
+            <option value="Claude Opus 4" ${modelDisplay === 'Claude Opus 4' ? 'selected' : ''}>Claude Opus 4</option>
+            <option value="Claude Sonnet 4" ${modelDisplay === 'Claude Sonnet 4' ? 'selected' : ''}>Claude Sonnet 4</option>
+            <option value="GPT-4o" ${modelDisplay === 'GPT-4o' ? 'selected' : ''}>GPT-4o</option>
+            <option value="Custom Model" ${modelDisplay === 'Custom Model' ? 'selected' : ''}>Custom Model</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Max Tokens</label>
+          <input type="number" id="agent-cfg-maxtokens" value="${agent.max_tokens || agent.maxTokens || 4096}" />
+        </div>
+        <div class="form-group" style="grid-column:1/-1;">
+          <label class="form-label">System Prompt</label>
+          <textarea id="agent-cfg-prompt" rows="5" style="resize:vertical;font-family:monospace;font-size:12px;" placeholder="Enter the system instructions for this agent...">${agent.system_prompt || agent.systemPrompt || ''}</textarea>
+        </div>
+        <div class="form-group" style="grid-column:1/-1;">
+          <label class="form-label">Temperature: <span id="agent-temp-display">${(tempValue / 100).toFixed(2)}</span></label>
+          <input type="range" id="agent-cfg-temp" min="0" max="100" value="${tempValue}" style="width:100%;background:transparent;border:none;padding:0;" oninput="document.getElementById('agent-temp-display').textContent=(this.value/100).toFixed(2)" />
+        </div>
+      </div>
+      <div style="margin-top:16px;display:flex;justify-content:flex-end;">
+        <button class="btn btn-primary btn-sm" onclick="saveAgentConfig('${agent.id}')">${icons.save} Save Configuration</button>
+      </div>
+    </div>
+
+    <!-- Run Agent Section -->
+    <div class="card" style="padding:20px;margin-bottom:24px;" id="agent-run-section">
+      <div class="card-title" style="margin-bottom:16px;">Run Agent</div>
+      <div class="form-group">
+        <label class="form-label">Input Prompt</label>
+        <textarea id="agent-run-input" rows="4" style="resize:vertical;" placeholder="Enter a prompt to send to this agent..."></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="btn btn-primary btn-sm" id="agent-execute-btn" onclick="executeAgentFromDetail('${agent.id}')">${icons.play} Execute</button>
+        <span id="agent-run-status" style="font-size:12px;color:var(--text-secondary);"></span>
+      </div>
+      <div id="agent-run-result" style="margin-top:16px;display:none;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Result:</div>
+        <pre id="agent-run-output" style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;padding:16px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto;color:var(--text-primary);"></pre>
+      </div>
+    </div>
+
+    <!-- Execution History -->
+    <div class="card" style="padding:0;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+        <div class="card-title" style="margin:0;">Execution History</div>
+        <button class="btn btn-ghost btn-sm" onclick="loadAgentDetail()">Refresh</button>
+      </div>
+      <div class="table-wrapper" style="border:0;border-radius:0;">
+        <table>
+          <thead><tr><th>ID</th><th>Status</th><th>Input</th><th>Output</th><th>Tokens</th><th>Duration</th><th>Time</th></tr></thead>
+          <tbody>${executionRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function saveAgentConfig(agentId) {
+  const name = document.getElementById('agent-cfg-name')?.value?.trim();
+  const description = document.getElementById('agent-cfg-desc')?.value?.trim();
+  const agentType = document.getElementById('agent-cfg-type')?.value;
+  const modelSelect = document.getElementById('agent-cfg-model')?.value;
+  const systemPrompt = document.getElementById('agent-cfg-prompt')?.value;
+  const temperature = (parseInt(document.getElementById('agent-cfg-temp')?.value) || 30) / 100;
+  const maxTokens = parseInt(document.getElementById('agent-cfg-maxtokens')?.value) || 4096;
+
+  const modelMap = { 'Claude Opus 4': 'claude-opus-4-20250514', 'Claude Sonnet 4': 'claude-sonnet-4-20250514', 'GPT-4o': 'gpt-4o', 'Custom Model': 'custom' };
+  const model = modelMap[modelSelect] || 'claude-sonnet-4-20250514';
+
+  if (!name) { showToast('Agent name is required', 'error'); return; }
+  try {
+    const result = await api.patch(`/agents/${agentId}`, { name, description, agentType, model, systemPrompt, temperature, maxTokens });
+    currentAgentDetail = result.data || result;
+    showToast('Agent configuration saved!', 'success');
+    renderMainContent();
+  } catch (err) {
+    showToast(err.message || 'Failed to save configuration', 'error');
+  }
+}
+
+async function executeAgentFromDetail(agentId) {
+  const input = document.getElementById('agent-run-input')?.value?.trim();
+  if (!input) { showToast('Please enter an input prompt', 'error'); return; }
+
+  const btn = document.getElementById('agent-execute-btn');
+  const statusEl = document.getElementById('agent-run-status');
+  const resultDiv = document.getElementById('agent-run-result');
+  const outputPre = document.getElementById('agent-run-output');
+
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.textContent = 'Starting execution...';
+  if (resultDiv) resultDiv.style.display = 'none';
+
+  try {
+    const result = await api.post(`/agents/${agentId}/execute`, { input });
+    const executionId = result.data?.executionId || result.executionId;
+    if (statusEl) statusEl.textContent = 'Executing... polling for result';
+
+    // Poll for completion
+    if (agentExecutionPollTimer) clearInterval(agentExecutionPollTimer);
+    let pollCount = 0;
+    agentExecutionPollTimer = setInterval(async () => {
+      pollCount++;
+      try {
+        const execResult = await api.get(`/agents/${agentId}/executions?limit=1`);
+        const latest = (execResult.data || [])[0];
+        if (latest && (latest.status === 'completed' || latest.status === 'failed')) {
+          clearInterval(agentExecutionPollTimer);
+          agentExecutionPollTimer = null;
+          if (btn) btn.disabled = false;
+
+          if (latest.status === 'completed') {
+            const output = latest.output || latest.output_text || latest.result || 'Completed (no output returned)';
+            if (statusEl) statusEl.textContent = 'Completed!';
+            if (statusEl) statusEl.style.color = '#00ff88';
+            if (outputPre) outputPre.textContent = output;
+            if (resultDiv) resultDiv.style.display = 'block';
+          } else {
+            if (statusEl) statusEl.textContent = 'Failed: ' + (latest.error_message || latest.error || 'Unknown error');
+            if (statusEl) statusEl.style.color = '#ef4444';
+          }
+          // Refresh execution history
+          loadAgentDetail();
+        } else if (pollCount >= 60) {
+          clearInterval(agentExecutionPollTimer);
+          agentExecutionPollTimer = null;
+          if (btn) btn.disabled = false;
+          if (statusEl) statusEl.textContent = 'Execution is still running. Refresh to check status.';
+        }
+      } catch (pollErr) {
+        console.error('Poll error:', pollErr);
+      }
+    }, 2000);
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    if (statusEl) statusEl.textContent = '';
+    showToast(err.message || 'Failed to execute agent', 'error');
+  }
+}
+
+async function toggleAgentStatus(agentId, currentStatus) {
+  try {
+    const newStatus = currentStatus === 'active' ? 'paused' : 'active';
+    await api.patch(`/agents/${agentId}`, { status: newStatus });
+    showToast(`Agent ${newStatus === 'active' ? 'activated' : 'paused'}`, 'success');
+    loadAgentDetail();
+  } catch (err) {
+    showToast(err.message || 'Failed to update agent status', 'error');
+  }
+}
+
+async function deleteAgentFromDetail(agentId, agentName) {
+  if (!confirm(`Are you sure you want to delete "${agentName}"? This cannot be undone.`)) return;
+  try {
+    await api.del(`/agents/${agentId}`);
+    showToast('Agent deleted', 'success');
+    navigateTo('agents');
   } catch (err) {
     showToast(err.message || 'Failed to delete agent', 'error');
   }
