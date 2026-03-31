@@ -336,46 +336,32 @@ FORMAT:
 
 Return JSON: {"subject": "...", "body": "..."}`;
 
-  try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 500,
-      messages: [{ role: 'user', content: prompt }],
-    });
+  const MAX_RETRIES = 5;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }],
+      });
 
-    const text = response.content[0].text;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      const text = response.content[0].text;
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      return { subject: `Quick question about ${lead.business_name}`, body: text };
+    } catch (err) {
+      const isRetryable = err.message.includes('529') || err.message.includes('overloaded') || err.message.includes('rate') || err.status === 529 || err.status === 429;
+      if (isRetryable && attempt < MAX_RETRIES) {
+        const backoff = attempt * 15000; // 15s, 30s, 45s, 60s
+        console.warn(`[LEADGEN] Claude API overloaded (attempt ${attempt}/${MAX_RETRIES}), retrying in ${backoff / 1000}s...`);
+        await sleep(backoff);
+        continue;
+      }
+      console.error(`[LEADGEN] Claude API error (attempt ${attempt}/${MAX_RETRIES}):`, err.message);
+      throw err; // Let the caller handle it — skip this lead rather than send a generic email
     }
-    return { subject: `Quick question about ${lead.business_name}`, body: text };
-  } catch (err) {
-    console.error('[LEADGEN] Claude API error:', err.message);
-
-    // Build a natural-sounding fallback using what we know about the lead
-    const firstName = lead.business_name.split(/[\s&,]/)[0];
-    const cityRef = lead.city ? ` in ${lead.city}` : '';
-    const typeLabels = {
-      cpa: 'accounting', law: 'law', financial: 'financial planning', dental: 'dental',
-      chiropractic: 'chiropractic', real_estate: 'real estate', insurance: 'insurance',
-      veterinary: 'veterinary', contractor: 'contracting', physical_therapy: 'physical therapy',
-    };
-    const field = typeLabels[lead.business_type] || 'professional services';
-
-    // Pick a relevant observation based on diagnosis
-    let observation = `I took a look at your site and had a couple of ideas that might help streamline how new clients find and book with you`;
-    if (lead.diagnosis_json && !lead.diagnosis_json.has_booking_software) {
-      observation = `I noticed your site doesn't have online scheduling yet — that's one of the easiest wins for ${field} practices to cut down on phone tag`;
-    } else if (lead.diagnosis_json && !lead.diagnosis_json.has_client_portal) {
-      observation = `I was poking around your site and noticed there's no client portal — a lot of ${field} firms we've talked to say that's the thing that saves them the most back-and-forth`;
-    } else if (lead.diagnosis_json && !lead.diagnosis_json.has_ssl) {
-      observation = `I came across your website and noticed it's not running on HTTPS yet — that can affect both trust and Google rankings, and it's a pretty quick fix`;
-    }
-
-    return {
-      subject: `${lead.business_name}${cityRef}`,
-      body: `Hi there,\n\nI'm Nathan — I run a small company called MonkFlow. We build web tools for ${field} practices${cityRef}.\n\n${observation}.\n\nWould you be open to a quick call sometime this week? No pitch, just wanted to share what I saw.\n\nNathan Linder\nMonkFlow | monkflow.io`,
-    };
   }
 }
 
