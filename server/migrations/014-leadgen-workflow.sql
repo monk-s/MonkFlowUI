@@ -1,8 +1,5 @@
 -- Insert the Lead Generation Pipeline workflow record.
--- Uses a unique index on (user_id, name) to make this migration idempotent.
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_workflows_user_name
-  ON workflows(user_id, name);
+-- Uses WHERE NOT EXISTS for idempotency (safe to re-run).
 
 INSERT INTO workflows (user_id, name, description, status, trigger_type, trigger_config, cron_expression, definition, total_runs, success_rate)
 SELECT
@@ -61,6 +58,8 @@ SELECT
   0,
   0
 FROM users u
+WHERE NOT EXISTS (
+  SELECT 1 FROM workflows WHERE name = 'Lead Generation Pipeline'
+)
 ORDER BY u.created_at ASC
-LIMIT 1
-ON CONFLICT (user_id, name) DO UPDATE SET updated_at = NOW();
+LIMIT 1;
