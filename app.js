@@ -2089,11 +2089,13 @@ function renderAgentDetail() {
     const eStatus = e.status || 'pending';
     const eStatusColor = { completed: '#00ff88', failed: '#ef4444', running: '#3b82f6', pending: '#fbbf24' };
     const duration = e.started_at && e.completed_at ? ((new Date(e.completed_at) - new Date(e.started_at)) / 1000).toFixed(1) + 's' : e.started_at ? 'Running...' : '\u2014';
-    const inputText = e.input || e.input_text || '';
-    const outputText = e.output || e.output_text || e.result || '';
+    const rawInput = e.input_data || e.input || e.input_text || '';
+    const inputText = typeof rawInput === 'object' ? JSON.stringify(rawInput, null, 2) : String(rawInput);
+    const rawOutput = e.output_data || e.output || e.output_text || e.result || '';
+    const outputText = typeof rawOutput === 'object' ? (rawOutput.text || JSON.stringify(rawOutput, null, 2)) : String(rawOutput);
     const inputTrunc = inputText.length > 50 ? inputText.slice(0, 47) + '...' : inputText;
     const outputTrunc = outputText.length > 50 ? outputText.slice(0, 47) + '...' : outputText;
-    const tokens = e.tokens_used || e.total_tokens || '\u2014';
+    const tokens = (e.tokens_input || 0) + (e.tokens_output || 0) || e.tokens_used || e.total_tokens || '\u2014';
     const escapedInput = (inputText || '').replace(/`/g, '\\`').replace(/\$/g, '\\$');
     const escapedOutput = (outputText || '').replace(/`/g, '\\`').replace(/\$/g, '\\$');
     return `
@@ -2277,7 +2279,8 @@ async function executeAgentFromDetail(agentId) {
           if (btn) btn.disabled = false;
 
           if (latest.status === 'completed') {
-            const output = latest.output || latest.output_text || latest.result || 'Completed (no output returned)';
+            const rawOut = latest.output_data || latest.output || latest.output_text || latest.result || '';
+            const output = typeof rawOut === 'object' ? (rawOut.text || JSON.stringify(rawOut, null, 2)) : String(rawOut) || 'Completed (no output returned)';
             if (statusEl) statusEl.textContent = 'Completed!';
             if (statusEl) statusEl.style.color = '#00ff88';
             if (outputPre) outputPre.textContent = output;
