@@ -177,6 +177,77 @@ function triggerTypeLabel(triggerType) {
   return map[triggerType] || triggerType || 'Manual';
 }
 
+function humanReadableCron(cron, tz) {
+  if (!cron) return null;
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length < 5) return cron;
+  const [min, hour, dom, mon, dow] = parts;
+  const tzLabel = tz ? tz.replace(/_/g, ' ').replace(/^America\//, '') : '';
+  const tzShort = { 'Chicago': 'CT', 'New_York': 'ET', 'Los_Angeles': 'PT', 'Denver': 'MT', 'Phoenix': 'MT' };
+  const tzAbbr = tz ? (tzShort[tz.split('/').pop()] || tzLabel) : '';
+  const h = parseInt(hour, 10);
+  const m = parseInt(min, 10);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  const timeStr = `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+  if (dow === '1-5' || dow === 'MON-FRI') return `Weekdays at ${timeStr}${tzAbbr ? ' ' + tzAbbr : ''}`;
+  if (dow === '0-6' || dow === '*') {
+    if (dom === '*' && mon === '*') return `Daily at ${timeStr}${tzAbbr ? ' ' + tzAbbr : ''}`;
+  }
+  if (dow === '0' || dow === 'SUN') return `Sundays at ${timeStr}${tzAbbr ? ' ' + tzAbbr : ''}`;
+  if (dow === '1' || dow === 'MON') return `Mondays at ${timeStr}${tzAbbr ? ' ' + tzAbbr : ''}`;
+  const dowNames = { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat' };
+  if (dowNames[dow]) return `${dowNames[dow]}s at ${timeStr}${tzAbbr ? ' ' + tzAbbr : ''}`;
+  if (dom !== '*' && mon === '*') return `Day ${dom} of each month at ${timeStr}${tzAbbr ? ' ' + tzAbbr : ''}`;
+  return `${cron}${tzAbbr ? ' (' + tzAbbr + ')' : ''}`;
+}
+
+function getNextCronRun(cron, tz) {
+  if (!cron) return null;
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length < 5) return null;
+  const [minStr, hourStr, , , dowStr] = parts;
+  const targetH = parseInt(hourStr, 10);
+  const targetM = parseInt(minStr, 10);
+  if (isNaN(targetH) || isNaN(targetM)) return null;
+  const now = new Date();
+  let candidate = new Date(now);
+  candidate.setSeconds(0, 0);
+  candidate.setHours(targetH, targetM, 0, 0);
+  if (candidate <= now) candidate.setDate(candidate.getDate() + 1);
+  const weekdaysOnly = (dowStr === '1-5' || dowStr === 'MON-FRI');
+  for (let i = 0; i < 8; i++) {
+    const day = candidate.getDay();
+    if (weekdaysOnly && (day === 0 || day === 6)) {
+      candidate.setDate(candidate.getDate() + 1);
+      continue;
+    }
+    break;
+  }
+  return candidate;
+}
+
+function renderNodeTypeIcon(type) {
+  const iconMap = {
+    search: icons.search,
+    score: icons.analytics,
+    diagnose: icons.analytics,
+    email: icons.mail,
+    generate: icons.edit,
+    send: icons.send,
+    summary: icons.logs,
+    notify: icons.bell,
+    filter: icons.filter,
+    webhook: icons.globe,
+    trigger: icons.zap,
+  };
+  const t = (type || '').toLowerCase();
+  for (const [key, icon] of Object.entries(iconMap)) {
+    if (t.includes(key)) return icon;
+  }
+  return icons.zap;
+}
+
 // ── Notifications Data ──────────────────────────────────
 let notifications = [];
 
@@ -239,25 +310,25 @@ let editorState = {
 
 const nodeTypes = [
   { category: 'Triggers', items: [
-    { type: 'webhook-trigger', label: 'Webhook', icon: 'zap', color: 'green', desc: 'HTTP endpoint' },
-    { type: 'schedule-trigger', label: 'Schedule', icon: 'clock', color: 'blue', desc: 'Cron timer' },
-    { type: 'event-trigger', label: 'Event', icon: 'bell', color: 'yellow', desc: 'System event' },
+    { type: 'webhook-trigger', label: 'Webhook', icon: 'zap', color: 'green', desc: 'HTTP endpoint', tooltip: 'Starts when an external event fires' },
+    { type: 'schedule-trigger', label: 'Schedule', icon: 'clock', color: 'blue', desc: 'Cron timer', tooltip: 'Runs your workflow on a timer' },
+    { type: 'event-trigger', label: 'Event', icon: 'bell', color: 'yellow', desc: 'System event', tooltip: 'Fires when something happens in MonkFlow' },
   ]},
   { category: 'AI', items: [
-    { type: 'ai-classifier', label: 'AI Classifier', icon: 'agents', color: 'blue', desc: 'Classify data' },
-    { type: 'ai-generator', label: 'AI Writer', icon: 'edit', color: 'purple', desc: 'Generate text' },
-    { type: 'ai-analyzer', label: 'AI Analyzer', icon: 'analytics', color: 'green', desc: 'Analyze data' },
+    { type: 'ai-classifier', label: 'AI Classifier', icon: 'agents', color: 'blue', desc: 'Classify data', tooltip: 'Categorizes input using AI' },
+    { type: 'ai-generator', label: 'AI Writer', icon: 'edit', color: 'purple', desc: 'Generate text', tooltip: 'Creates content like emails using AI' },
+    { type: 'ai-analyzer', label: 'AI Analyzer', icon: 'analytics', color: 'green', desc: 'Analyze data', tooltip: 'Extracts insights from data using AI' },
   ]},
   { category: 'Logic', items: [
-    { type: 'condition', label: 'Condition', icon: 'filter', color: 'purple', desc: 'If/else split' },
-    { type: 'delay', label: 'Delay', icon: 'clock', color: 'yellow', desc: 'Wait period' },
-    { type: 'loop', label: 'Loop', icon: 'workflow', color: 'blue', desc: 'Iterate items' },
+    { type: 'condition', label: 'Condition', icon: 'filter', color: 'purple', desc: 'If/else split', tooltip: 'Makes a yes/no decision to branch your workflow' },
+    { type: 'delay', label: 'Delay', icon: 'clock', color: 'yellow', desc: 'Wait period', tooltip: 'Pauses the workflow for a set amount of time' },
+    { type: 'loop', label: 'Loop', icon: 'workflow', color: 'blue', desc: 'Iterate items', tooltip: 'Repeats an action for each item in a list' },
   ]},
   { category: 'Actions', items: [
-    { type: 'action', label: 'Send Email', icon: 'mail', color: 'green', desc: 'Email action' },
-    { type: 'api-call', label: 'API Call', icon: 'globe', color: 'blue', desc: 'HTTP request' },
-    { type: 'notify', label: 'Notification', icon: 'bell', color: 'orange', desc: 'Send alert' },
-    { type: 'database', label: 'Database', icon: 'logs', color: 'purple', desc: 'DB operation' },
+    { type: 'action', label: 'Send Email', icon: 'mail', color: 'green', desc: 'Email action', tooltip: 'Sends an email to one or more recipients' },
+    { type: 'api-call', label: 'API Call', icon: 'globe', color: 'blue', desc: 'HTTP request', tooltip: 'Connects to an external service via API' },
+    { type: 'notify', label: 'Notification', icon: 'bell', color: 'orange', desc: 'Send alert', tooltip: 'Sends a notification to your team' },
+    { type: 'database', label: 'Database', icon: 'logs', color: 'purple', desc: 'DB operation', tooltip: 'Reads or writes data in your database' },
   ]},
 ];
 
@@ -1742,9 +1813,9 @@ function renderWorkflows() {
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">Design workflows visually with our drag-and-drop editor. Connect triggers, AI nodes, conditions, and actions.</p>
         <div style="display:flex;gap:12px;flex-wrap:wrap;">
           <button class="btn btn-secondary btn-sm" onclick="currentWorkflowId=null;editorState.nodes=[];editorState.connections=[];editorState.workflowName='Untitled Workflow';editorState.nextId=1;navigateTo('workflow-editor')">Blank Canvas</button>
-          <button class="btn btn-ghost btn-sm" onclick="navigateTo('workflow-editor')">Lead Scoring Template</button>
-          <button class="btn btn-ghost btn-sm" onclick="navigateTo('workflow-editor')">Email Automation Template</button>
-          <button class="btn btn-ghost btn-sm" onclick="navigateTo('workflow-editor')">Support Router Template</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowTemplate('lead-scoring')">Lead Scoring Template</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowTemplate('email-automation')">Email Automation Template</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowTemplate('support-router')">Support Router Template</button>
         </div>
       </div>
     </div>
@@ -2400,11 +2471,11 @@ function renderWorkflowEditor() {
     <div class="palette-category">
       <div class="palette-category-label">${cat.category}</div>
       ${cat.items.map(item => `
-        <div class="editor-palette-item" onclick="addNodeToEditor('${item.type}','${item.label}','${item.icon}','${item.color}','${item.desc}')">
+        <div class="editor-palette-item" title="${item.tooltip || item.desc}" onclick="addNodeToEditor('${item.type}','${item.label}','${item.icon}','${item.color}','${item.desc}')">
           <div class="palette-item-icon ${item.color}">${icons[item.icon]}</div>
           <div>
             <div class="palette-item-name">${item.label}</div>
-            <div class="palette-item-desc">${item.desc}</div>
+            <div class="palette-item-desc">${item.tooltip || item.desc}</div>
           </div>
         </div>
       `).join('')}
@@ -2449,15 +2520,100 @@ function renderWorkflowEditor() {
         <div class="editor-canvas" id="editor-canvas">
           <svg class="editor-connections-svg" id="editor-svg"></svg>
           <div id="editor-nodes"></div>
+          <!-- Empty canvas prompt -->
+          <div id="editor-empty-prompt" style="display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;opacity:0;transition:opacity 0.3s ease;">
+            <div style="font-size:48px;margin-bottom:12px;opacity:0.3;">&#8592;</div>
+            <div style="font-size:15px;color:rgba(255,255,255,0.5);font-weight:500;">Start by dragging a trigger node from the palette</div>
+          </div>
         </div>
+        <!-- Floating help button -->
+        <button id="editor-help-btn" onclick="showWorkflowGuide()" style="position:absolute;bottom:24px;right:24px;width:40px;height:40px;border-radius:50%;background:#00cc6a;color:#fff;border:none;font-size:18px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,204,106,0.4);z-index:100;display:flex;align-items:center;justify-content:center;transition:transform 0.2s ease,box-shadow 0.2s ease;"
+          onmouseenter="this.style.transform='scale(1.1)';this.style.boxShadow='0 6px 16px rgba(0,204,106,0.5)'"
+          onmouseleave="this.style.transform='scale(1)';this.style.boxShadow='0 4px 12px rgba(0,204,106,0.4)'"
+          title="Reopen workflow guide">?</button>
       </div>
     </div>
+    <!-- Workflow guide overlay -->
+    <div id="workflow-guide-overlay" style="display:none;"></div>
   `;
+}
+
+// ── Workflow Guide / Tooltip System ────────────────────────
+let workflowGuideStep = 0;
+const workflowGuideSteps = [
+  { title: 'Add Nodes', text: 'Drag nodes from the palette on the left onto the canvas to build your workflow.', highlight: 'palette' },
+  { title: 'Connect Nodes', text: 'Connect nodes by clicking an output connector (right side) and dragging to an input connector (left side) on another node.', highlight: 'canvas' },
+  { title: 'Configure Nodes', text: 'Click any node to configure it in the settings panel on the right.', highlight: 'canvas' },
+  { title: 'Save & Deploy', text: 'Save your workflow, then click Deploy to activate it and start processing.', highlight: 'toolbar' },
+];
+
+function showWorkflowGuide() {
+  workflowGuideStep = 0;
+  renderWorkflowGuide();
+}
+
+function dismissWorkflowGuide() {
+  localStorage.setItem('workflow_guide_dismissed', 'true');
+  const overlay = document.getElementById('workflow-guide-overlay');
+  if (overlay) {
+    overlay.style.opacity = '0';
+    setTimeout(() => { overlay.style.display = 'none'; }, 300);
+  }
+}
+
+function renderWorkflowGuide() {
+  const overlay = document.getElementById('workflow-guide-overlay');
+  if (!overlay) return;
+
+  const step = workflowGuideSteps[workflowGuideStep];
+  const isFirst = workflowGuideStep === 0;
+  const isLast = workflowGuideStep === workflowGuideSteps.length - 1;
+  const dotIndicators = workflowGuideSteps.map((_, i) =>
+    `<div style="width:8px;height:8px;border-radius:50%;background:${i === workflowGuideStep ? '#00cc6a' : 'rgba(255,255,255,0.25)'};transition:background 0.2s ease;"></div>`
+  ).join('');
+
+  overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(10,10,30,0.85);z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.3s ease;';
+  overlay.innerHTML = `
+    <div style="background:#1a1a2e;border:1px solid rgba(0,204,106,0.3);border-radius:16px;padding:40px 48px;max-width:440px;width:90%;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.5);position:relative;">
+      <div style="position:absolute;top:-20px;left:50%;transform:translateX(-50%);background:#00cc6a;color:#fff;font-size:11px;font-weight:700;padding:4px 14px;border-radius:20px;text-transform:uppercase;letter-spacing:1px;">Step ${workflowGuideStep + 1} of ${workflowGuideSteps.length}</div>
+      <div style="font-size:24px;font-weight:700;color:#fff;margin-bottom:12px;">${step.title}</div>
+      <div style="font-size:14px;color:rgba(255,255,255,0.7);line-height:1.6;margin-bottom:28px;">${step.text}</div>
+      <div style="display:flex;gap:6px;justify-content:center;margin-bottom:24px;">${dotIndicators}</div>
+      <div style="display:flex;gap:10px;justify-content:center;">
+        ${!isFirst ? '<button onclick="workflowGuideStep--;renderWorkflowGuide()" style="padding:8px 20px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#fff;font-size:13px;cursor:pointer;transition:background 0.2s ease;" onmouseenter="this.style.background=\'rgba(255,255,255,0.1)\'" onmouseleave="this.style.background=\'transparent\'">Back</button>' : ''}
+        ${!isLast
+          ? '<button onclick="workflowGuideStep++;renderWorkflowGuide()" style="padding:8px 24px;border-radius:8px;border:none;background:#00cc6a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.2s ease;" onmouseenter="this.style.background=\'#00e676\'" onmouseleave="this.style.background=\'#00cc6a\'">Next</button>'
+          : '<button onclick="dismissWorkflowGuide()" style="padding:8px 24px;border-radius:8px;border:none;background:#00cc6a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.2s ease;" onmouseenter="this.style.background=\'#00e676\'" onmouseleave="this.style.background=\'#00cc6a\'">Got it!</button>'
+        }
+      </div>
+      <button onclick="dismissWorkflowGuide()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:rgba(255,255,255,0.4);font-size:18px;cursor:pointer;padding:4px;" title="Dismiss guide">&times;</button>
+    </div>
+  `;
+  // Fade in
+  requestAnimationFrame(() => { overlay.style.opacity = '1'; });
+}
+
+function updateEmptyCanvasPrompt() {
+  const prompt = document.getElementById('editor-empty-prompt');
+  if (!prompt) return;
+  if (editorState.nodes.length === 0) {
+    prompt.style.display = 'block';
+    requestAnimationFrame(() => { prompt.style.opacity = '1'; });
+  } else {
+    prompt.style.opacity = '0';
+    setTimeout(() => { prompt.style.display = 'none'; }, 300);
+  }
 }
 
 function initWorkflowEditor() {
   renderEditorNodes();
   renderEditorConnections();
+  updateEmptyCanvasPrompt();
+
+  // Show guide if not previously dismissed
+  if (!localStorage.getItem('workflow_guide_dismissed')) {
+    showWorkflowGuide();
+  }
 
   const canvas = document.getElementById('editor-canvas');
   if (!canvas) return;
@@ -2537,6 +2693,7 @@ function editorKeyHandler(e) {
       editorState.selectedNodeId = null;
       renderEditorNodes();
       renderEditorConnections();
+      updateEmptyCanvasPrompt();
       showToast('Node deleted', 'info');
     }
   }
@@ -2614,6 +2771,7 @@ function addNodeToEditor(type, label, icon, color, desc) {
     config: getDefaultNodeConfig(type),
   });
   renderEditorNodes();
+  updateEmptyCanvasPrompt();
   showToast(`${label} node added`, 'info');
 }
 
@@ -2634,6 +2792,85 @@ function getDefaultNodeConfig(type) {
     case 'database': return { operation: 'query', query: '' };
     default: return {};
   }
+}
+
+function loadWorkflowTemplate(templateName) {
+  currentWorkflowId = null;
+
+  const templates = {
+    'lead-scoring': {
+      name: 'Lead Scoring Pipeline',
+      nodes: [
+        { id: 1, type: 'webhook-trigger', label: 'Incoming Lead', desc: 'POST /api/leads/inbound', x: 60, y: 220, color: 'green', icon: 'zap', config: { method: 'POST', path: '/api/leads/inbound' } },
+        { id: 2, type: 'ai-classifier', label: 'Score Lead', desc: 'High / Medium / Low', x: 320, y: 220, color: 'blue', icon: 'agents', config: { prompt: 'Classify the following lead as high, medium, or low value based on company size, role seniority, and engagement signals. Return JSON with score (0-100) and tier (high/medium/low).', model: 'claude-sonnet-4-20250514', temperature: 0.3, maxTokens: 512 } },
+        { id: 3, type: 'condition', label: 'Score Router', desc: 'tier == "high"?', x: 580, y: 220, color: 'purple', icon: 'filter', config: { expression: 'output.tier === "high"' } },
+        { id: 4, type: 'notify', label: 'Notify Sales', desc: 'Slack #high-value-leads', x: 840, y: 100, color: 'orange', icon: 'bell', config: { message: 'New high-value lead: {{lead.name}} ({{lead.company}}) — Score: {{output.score}}' } },
+        { id: 5, type: 'database', label: 'Save to CRM', desc: 'INSERT leads table', x: 1060, y: 100, color: 'purple', icon: 'logs', config: { operation: 'insert', query: 'INSERT INTO qualified_leads (name, email, company, score, tier, created_at) VALUES (:name, :email, :company, :score, :tier, NOW())' } },
+        { id: 6, type: 'database', label: 'Log Lead', desc: 'INSERT lead_log', x: 840, y: 340, color: 'purple', icon: 'logs', config: { operation: 'insert', query: 'INSERT INTO lead_log (email, score, tier, source, logged_at) VALUES (:email, :score, :tier, :source, NOW())' } },
+      ],
+      connections: [
+        { from: 1, to: 2 },
+        { from: 2, to: 3 },
+        { from: 3, to: 4 },
+        { from: 4, to: 5 },
+        { from: 3, to: 6 },
+      ],
+    },
+    'email-automation': {
+      name: 'Email Automation Sequence',
+      nodes: [
+        { id: 1, type: 'schedule-trigger', label: 'Daily 9 AM', desc: 'Cron: 0 9 * * *', x: 60, y: 200, color: 'blue', icon: 'clock', config: { cron: '0 9 * * *' } },
+        { id: 2, type: 'database', label: 'Fetch Recipients', desc: 'SELECT active subscribers', x: 320, y: 200, color: 'purple', icon: 'logs', config: { operation: 'query', query: 'SELECT id, name, email, preferences, last_purchase FROM subscribers WHERE status = \'active\' AND last_email_at < NOW() - INTERVAL \'7 days\' LIMIT 200' } },
+        { id: 3, type: 'loop', label: 'Each Recipient', desc: 'Iterate subscriber list', x: 580, y: 200, color: 'blue', icon: 'workflow', config: { collection: 'output.rows' } },
+        { id: 4, type: 'ai-generator', label: 'Personalize Email', desc: 'Generate email body', x: 840, y: 200, color: 'purple', icon: 'edit', config: { prompt: 'Write a personalized marketing email for {{item.name}}. Their preferences: {{item.preferences}}. Last purchase: {{item.last_purchase}}. Keep it concise (under 150 words), friendly, and include a clear CTA. Return JSON with subject and body fields.', model: 'claude-sonnet-4-20250514', temperature: 0.8, maxTokens: 1024 } },
+        { id: 5, type: 'delay', label: 'Stagger Send', desc: 'Wait 10s between sends', x: 1060, y: 200, color: 'yellow', icon: 'clock', config: { seconds: 10 } },
+        { id: 6, type: 'action', label: 'Send Email', desc: 'Deliver via SMTP', x: 1280, y: 200, color: 'green', icon: 'mail', config: { actionType: 'email', recipient: '{{item.email}}', subject: '{{output.subject}}', body: '{{output.body}}' } },
+      ],
+      connections: [
+        { from: 1, to: 2 },
+        { from: 2, to: 3 },
+        { from: 3, to: 4 },
+        { from: 4, to: 5 },
+        { from: 5, to: 6 },
+      ],
+    },
+    'support-router': {
+      name: 'Support Ticket Router',
+      nodes: [
+        { id: 1, type: 'webhook-trigger', label: 'New Ticket', desc: 'POST /api/tickets/new', x: 60, y: 240, color: 'green', icon: 'zap', config: { method: 'POST', path: '/api/tickets/new' } },
+        { id: 2, type: 'ai-classifier', label: 'Categorize Ticket', desc: 'Billing / Technical / General', x: 320, y: 240, color: 'blue', icon: 'agents', config: { prompt: 'Classify this support ticket into exactly one category: billing, technical, or general. Analyze the subject and body. Return JSON with category, confidence (0-1), and priority (low/medium/high/urgent).', model: 'claude-sonnet-4-20250514', temperature: 0.2, maxTokens: 256 } },
+        { id: 3, type: 'condition', label: 'Is Billing?', desc: 'category == "billing"', x: 580, y: 120, color: 'purple', icon: 'filter', config: { expression: 'output.category === "billing"' } },
+        { id: 4, type: 'notify', label: 'Billing Team', desc: 'Slack #billing-support', x: 840, y: 60, color: 'orange', icon: 'bell', config: { message: '[{{output.priority}}] Billing ticket from {{ticket.email}}: {{ticket.subject}}' } },
+        { id: 5, type: 'condition', label: 'Is Technical?', desc: 'category == "technical"', x: 580, y: 280, color: 'purple', icon: 'filter', config: { expression: 'output.category === "technical"' } },
+        { id: 6, type: 'notify', label: 'Engineering Team', desc: 'Slack #eng-support', x: 840, y: 220, color: 'orange', icon: 'bell', config: { message: '[{{output.priority}}] Technical ticket from {{ticket.email}}: {{ticket.subject}} — Confidence: {{output.confidence}}' } },
+        { id: 7, type: 'notify', label: 'General Support', desc: 'Slack #general-support', x: 840, y: 380, color: 'orange', icon: 'bell', config: { message: '[{{output.priority}}] General inquiry from {{ticket.email}}: {{ticket.subject}}' } },
+        { id: 8, type: 'database', label: 'Log Ticket', desc: 'INSERT ticket_routing', x: 1100, y: 240, color: 'purple', icon: 'logs', config: { operation: 'insert', query: 'INSERT INTO ticket_routing (ticket_id, category, priority, confidence, routed_to, created_at) VALUES (:ticket_id, :category, :priority, :confidence, :routed_team, NOW())' } },
+      ],
+      connections: [
+        { from: 1, to: 2 },
+        { from: 2, to: 3 },
+        { from: 3, to: 4 },
+        { from: 2, to: 5 },
+        { from: 5, to: 6 },
+        { from: 5, to: 7 },
+        { from: 4, to: 8 },
+        { from: 6, to: 8 },
+        { from: 7, to: 8 },
+      ],
+    },
+  };
+
+  const tpl = templates[templateName];
+  if (!tpl) { showToast('Template not found', 'error'); return; }
+
+  editorState.nodes = tpl.nodes.map(n => ({ ...n }));
+  editorState.connections = tpl.connections.map(c => ({ ...c }));
+  editorState.workflowName = tpl.name;
+  editorState.nextId = Math.max(...tpl.nodes.map(n => n.id)) + 1;
+  editorState.selectedNodeId = null;
+
+  navigateTo('workflow-editor');
+  showToast(`Loaded "${tpl.name}" template`, 'success');
 }
 
 function editorZoom(delta) {
@@ -2962,6 +3199,61 @@ function renderWorkflowDetail() {
   const lastRun = wf.last_run_at ? timeAgo(wf.last_run_at) : 'Never';
   const created = wf.created_at ? new Date(wf.created_at).toLocaleDateString() : '\u2014';
 
+  // Schedule info
+  const cronExpr = wf.cron_expression || (wf.trigger_config && wf.trigger_config.cron) || null;
+  const cronTz = (wf.trigger_config && wf.trigger_config.timezone) || wf.timezone || null;
+  const scheduleReadable = humanReadableCron(cronExpr, cronTz);
+  const nextRun = getNextCronRun(cronExpr, cronTz);
+  const nextRunStr = nextRun ? nextRun.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : null;
+
+  // Trigger config display
+  const triggerConfig = wf.trigger_config || {};
+  const triggerConfigKeys = Object.keys(triggerConfig);
+  const triggerConfigHtml = triggerConfigKeys.length > 0 ? triggerConfigKeys.map(k => {
+    let val = triggerConfig[k];
+    if (typeof val === 'object' && val !== null) val = JSON.stringify(val);
+    if (typeof val === 'string' && val.length > 80) val = val.slice(0, 77) + '...';
+    return `<div style="display:flex;justify-content:space-between;gap:12px;"><span style="color:var(--text-secondary);white-space:nowrap;">${k}</span><span style="text-align:right;word-break:break-all;font-family:monospace;font-size:11px;">${val}</span></div>`;
+  }).join('') : '<div style="color:var(--text-tertiary);font-size:12px;">No trigger configuration</div>';
+
+  // Pipeline node visualization
+  const nodes = wf.definition?.nodes || [];
+  const connections = wf.definition?.connections || [];
+  let orderedNodes = [];
+  if (nodes.length > 0) {
+    const targetSet = new Set(connections.map(c => c.to));
+    const fromMap = {};
+    connections.forEach(c => { fromMap[c.from] = c.to; });
+    let startNode = nodes.find(n => !targetSet.has(n.id));
+    if (!startNode) startNode = nodes[0];
+    const visited = new Set();
+    let current = startNode;
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id);
+      orderedNodes.push(current);
+      const nextId = fromMap[current.id];
+      current = nextId ? nodes.find(n => n.id === nextId) : null;
+    }
+    nodes.forEach(n => { if (!visited.has(n.id)) orderedNodes.push(n); });
+  }
+  const pipelineHtml = orderedNodes.length > 0 ? orderedNodes.map((n, i) => {
+    const icon = renderNodeTypeIcon(n.type || n.label || '');
+    const label = n.label || n.type || 'Step ' + (i + 1);
+    const desc = n.description || '';
+    const arrow = i < orderedNodes.length - 1 ? `<div style="display:flex;align-items:center;padding:0 4px;color:var(--accent);font-size:18px;flex-shrink:0;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00cc6a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+    </div>` : '';
+    return `<div style="display:flex;align-items:center;flex-shrink:0;">
+      <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:10px 14px;min-width:120px;text-align:center;position:relative;">
+        <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:4px;color:var(--accent);">${icon}</div>
+        <div style="font-size:12px;font-weight:600;color:var(--text-primary);line-height:1.3;">${label}</div>
+        ${desc ? `<div style="font-size:10px;color:var(--text-tertiary);margin-top:3px;line-height:1.3;">${desc}</div>` : ''}
+        <div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;font-size:9px;font-weight:700;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;">${i + 1}</div>
+      </div>
+      ${arrow}
+    </div>`;
+  }).join('') : '';
+
   const executionRows = execs.length > 0 ? execs.map(e => {
     const eStatus = e.status || 'pending';
     const eStatusColor = { completed: '#00ff88', failed: '#ef4444', running: '#3b82f6', pending: '#fbbf24' };
@@ -3001,7 +3293,20 @@ function renderWorkflowDetail() {
       <div class="stat-card"><div class="stat-value">${successRate}</div><div class="stat-label">Success Rate</div></div>
       <div class="stat-card"><div class="stat-value">${trigger}</div><div class="stat-label">Trigger Type</div></div>
       <div class="stat-card"><div class="stat-value">${nodeCount}</div><div class="stat-label">Nodes</div></div>
+      ${scheduleReadable ? `<div class="stat-card"><div class="stat-value" style="font-size:16px;">${scheduleReadable}</div><div class="stat-label">Schedule</div></div>` : ''}
+      ${nextRunStr ? `<div class="stat-card"><div class="stat-value" style="font-size:14px;">${nextRunStr}</div><div class="stat-label">Next Run</div></div>` : ''}
     </div>
+
+    ${orderedNodes.length > 0 ? `
+    <!-- Pipeline Visualization -->
+    <div class="card" style="padding:20px;margin-bottom:24px;">
+      <div class="card-title" style="margin-bottom:16px;">Pipeline Flow</div>
+      <div style="display:flex;align-items:center;overflow-x:auto;padding:12px 0;gap:0;">
+        ${pipelineHtml}
+      </div>
+      <div style="margin-top:12px;font-size:11px;color:var(--text-tertiary);">${orderedNodes.length} nodes, ${connectionCount} connections</div>
+    </div>
+    ` : ''}
 
     <!-- Info Grid -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
@@ -3012,6 +3317,10 @@ function renderWorkflowDetail() {
           <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Last Run</span><span>${lastRun}</span></div>
           <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Connections</span><span>${connectionCount}</span></div>
           <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Trigger</span><span>${trigger}</span></div>
+          ${cronExpr ? `<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Cron</span><span style="font-family:monospace;font-size:11px;">${cronExpr}</span></div>` : ''}
+          ${cronTz ? `<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Timezone</span><span>${cronTz}</span></div>` : ''}
+          ${scheduleReadable ? `<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Schedule</span><span style="color:var(--accent);">${scheduleReadable}</span></div>` : ''}
+          ${nextRunStr ? `<div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Next Run</span><span>${nextRunStr}</span></div>` : ''}
         </div>
       </div>
       <div class="card" style="padding:16px;">
@@ -3023,6 +3332,16 @@ function renderWorkflowDetail() {
         </div>
       </div>
     </div>
+
+    ${triggerConfigKeys.length > 0 ? `
+    <!-- Trigger Configuration -->
+    <div class="card" style="padding:16px;margin-bottom:24px;">
+      <div class="card-title" style="margin-bottom:12px;">Trigger Configuration</div>
+      <div style="font-size:13px;display:flex;flex-direction:column;gap:8px;">
+        ${triggerConfigHtml}
+      </div>
+    </div>
+    ` : ''}
 
     <!-- Execution History -->
     <div class="card" style="padding:0;">
@@ -3495,13 +3814,42 @@ function showNewWorkflowModal() {
     <div class="form-group">
       <label class="form-label">Start from</label>
       <div class="form-row" style="gap:10px;">
-        <button class="btn btn-secondary" style="flex:1;justify-content:center;" onclick="closeModal();navigateTo('workflow-editor')">Blank Canvas</button>
-        <button class="btn btn-secondary" style="flex:1;justify-content:center;" onclick="closeModal();navigateTo('workflows')">Browse Templates</button>
+        <button class="btn btn-secondary" style="flex:1;justify-content:center;" onclick="closeModal();currentWorkflowId=null;editorState.nodes=[];editorState.connections=[];editorState.workflowName='Untitled Workflow';editorState.nextId=1;navigateTo('workflow-editor')">Blank Canvas</button>
+        <button class="btn btn-secondary" style="flex:1;justify-content:center;" onclick="closeModal();showTemplatePickerModal()">Browse Templates</button>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" onclick="handleCreateWorkflow()">Create Workflow</button>
+    </div>
+  `);
+}
+
+function showTemplatePickerModal() {
+  const tpls = [
+    { key: 'lead-scoring', name: 'Lead Scoring Pipeline', desc: 'Webhook receives lead data, AI scores it, branches by tier — high-value leads get notified + saved to CRM, others logged.', icon: 'zap', nodes: 6 },
+    { key: 'email-automation', name: 'Email Automation Sequence', desc: 'Daily schedule fetches subscribers from DB, AI personalizes each email, staggers delivery with delay nodes.', icon: 'mail', nodes: 6 },
+    { key: 'support-router', name: 'Support Ticket Router', desc: 'Webhook receives tickets, AI classifies into billing/technical/general, routes notifications to the right team.', icon: 'agents', nodes: 8 },
+  ];
+  showModal(`
+    <div class="modal-header">
+      <h2 class="modal-title">Choose a Template</h2>
+      <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      ${tpls.map(t => `
+        <div class="card" style="padding:16px;cursor:pointer;transition:border-color .15s;" onclick="closeModal();loadWorkflowTemplate('${t.key}')" onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor=''">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+            <span style="color:var(--accent);">${icons[t.icon]}</span>
+            <strong style="font-size:14px;">${t.name}</strong>
+            <span class="badge badge-blue" style="margin-left:auto;">${t.nodes} nodes</span>
+          </div>
+          <p style="font-size:13px;color:var(--text-secondary);margin:0;">${t.desc}</p>
+        </div>
+      `).join('')}
+    </div>
+    <div class="modal-footer" style="margin-top:16px;">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
     </div>
   `);
 }
