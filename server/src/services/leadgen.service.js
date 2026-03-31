@@ -381,7 +381,21 @@ async function sendColdEmail(lead, sender) {
     <div style="font-family: -apple-system, sans-serif; max-width: 600px; line-height: 1.6; color: #333;">
       ${lead.outreach_body.split('\n').map(line => line.trim() ? `<p style="margin: 0 0 12px;">${escapeHtml(line)}</p>` : '<br>').join('')}
     </div>
-    <div style="margin-top: 30px; padding-top: 15px; border-top: 1px solid #eee; font-size: 11px; color: #999;">
+    <div style="margin-top: 24px; padding-top: 16px; border-top: 2px solid #00cc6a;">
+      <table cellpadding="0" cellspacing="0" style="font-family: -apple-system, sans-serif;">
+        <tr>
+          <td style="padding-right: 12px; vertical-align: top;">
+            <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #00cc6a, #0a2e1a); border-radius: 8px; text-align: center; line-height: 40px; color: white; font-weight: bold; font-size: 18px;">M</div>
+          </td>
+          <td style="vertical-align: top;">
+            <div style="font-weight: 600; color: #1a1a1a; font-size: 14px;">Nathan Linder</div>
+            <div style="color: #666; font-size: 13px;">Founder, <a href="https://monkflow.io" style="color: #00cc6a; text-decoration: none;">MonkFlow</a></div>
+            <div style="color: #999; font-size: 12px; margin-top: 2px;">AI-powered workflows for small businesses</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+    <div style="margin-top: 20px; font-size: 11px; color: #999;">
       <p>MonkFlow LLC | 1600 Sayles Blvd, Abilene, TX 79605</p>
       <p><a href="${unsubUrl}" style="color: #999;">Unsubscribe</a></p>
     </div>
@@ -457,9 +471,9 @@ async function runDailyLeadGeneration() {
     console.error('[LEADGEN] Resume unsent error:', resumeErr.message);
   }
 
-  // 1. Pick firm types and cities — budget ~220 searches/day to stay under 5k/month
-  // 10 firm types × 22 cities = 220 searches/day × 22 weekdays = 4,840/month
-  const cities = shuffle(US_CITIES).slice(0, 22);
+  // 1. Pick firm types and cities — budget ~140 searches/day to stay under remaining monthly limit
+  // 10 firm types × 14 cities = 140 searches/day × 22 weekdays = 3,080/month
+  const cities = shuffle(US_CITIES).slice(0, 14);
   const firmTypes = shuffle(FIRM_TYPES);
 
   console.log(`[LEADGEN] Targeting: ${firmTypes.map(f => f.type).join(', ')} | Cities: ${cities.length}`);
