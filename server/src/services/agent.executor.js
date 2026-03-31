@@ -154,7 +154,12 @@ async function callClaudeAPI({ prompt, systemPrompt, model, temperature, maxToke
  */
 async function executePrompt({ prompt, model, maxTokens, temperature }) {
   const result = await callClaudeAPI({ prompt, model, maxTokens, temperature });
-  return result.output;
+  return {
+    ...result.output,
+    tokensInput: result.tokensInput,
+    tokensOutput: result.tokensOutput,
+    model: model || 'claude-sonnet-4-20250514',
+  };
 }
 
 module.exports = { executeAgent, executePrompt };

@@ -181,6 +181,67 @@ function triggerTypeLabel(triggerType) {
   return map[triggerType] || triggerType || 'Manual';
 }
 
+// ── Token Cost Calculator (Claude API pricing + 10% service fee) ──
+const TOKEN_PRICING = {
+  'claude-opus-4-20250514':   { input: 15.00,  output: 75.00  }, // per 1M tokens
+  'claude-sonnet-4-20250514': { input: 3.00,   output: 15.00  },
+  'gpt-4o':                   { input: 2.50,   output: 10.00  },
+  'custom':                   { input: 3.00,   output: 15.00  },
+};
+const SERVICE_FEE_RATE = 0.10; // 10% markup
+
+function calculateTokenCost(tokensInput, tokensOutput, model) {
+  const pricing = TOKEN_PRICING[model] || TOKEN_PRICING['claude-sonnet-4-20250514'];
+  const baseCost = (tokensInput / 1_000_000) * pricing.input + (tokensOutput / 1_000_000) * pricing.output;
+  const fee = baseCost * SERVICE_FEE_RATE;
+  return { baseCost, fee, total: baseCost + fee };
+}
+
+function formatCost(amount) {
+  if (amount < 0.001) return '< $0.001';
+  if (amount < 0.01) return '$' + amount.toFixed(4);
+  if (amount < 1) return '$' + amount.toFixed(3);
+  return '$' + amount.toFixed(2);
+}
+
+function calculateExecsCost(execs, model) {
+  let totalInput = 0, totalOutput = 0;
+  for (const e of execs) {
+    totalInput += e.tokens_input || 0;
+    totalOutput += e.tokens_output || 0;
+  }
+  return { ...calculateTokenCost(totalInput, totalOutput, model), totalInput, totalOutput };
+}
+
+function calculateWorkflowExecCost(execution) {
+  let totalInput = 0, totalOutput = 0;
+  let model = 'claude-sonnet-4-20250514';
+  const nodeResults = execution.node_results || [];
+  for (const nr of nodeResults) {
+    if (nr.output && typeof nr.output === 'object') {
+      totalInput += nr.output.tokensInput || 0;
+      totalOutput += nr.output.tokensOutput || 0;
+      if (nr.output.model) model = nr.output.model;
+    }
+  }
+  // Also check top-level tokens (for future-proofed executions)
+  totalInput += execution.tokens_input || 0;
+  totalOutput += execution.tokens_output || 0;
+  return { ...calculateTokenCost(totalInput, totalOutput, model), totalInput, totalOutput, model };
+}
+
+function calculateWorkflowExecsCost(execs) {
+  let totalInput = 0, totalOutput = 0;
+  let model = 'claude-sonnet-4-20250514';
+  for (const e of execs) {
+    const c = calculateWorkflowExecCost(e);
+    totalInput += c.totalInput;
+    totalOutput += c.totalOutput;
+    if (c.model) model = c.model;
+  }
+  return { ...calculateTokenCost(totalInput, totalOutput, model), totalInput, totalOutput };
+}
+
 function humanReadableCron(cron, tz) {
   if (!cron) return null;
   const parts = cron.trim().split(/\s+/);
@@ -2073,6 +2134,7 @@ function renderAgentDetail() {
   const totalTokens = execs.reduce((sum, e) => sum + (e.tokens_used || e.total_tokens || 0), 0);
   const durations = execs.filter(e => e.started_at && e.completed_at).map(e => (new Date(e.completed_at) - new Date(e.started_at)) / 1000);
   const avgDuration = durations.length > 0 ? (durations.reduce((a, b) => a + b, 0) / durations.length).toFixed(1) + 's' : '\u2014';
+  const agentCost = calculateExecsCost(execs, agent.model);
 
   // Model display mapping
   const modelDisplayMap = {
@@ -2096,6 +2158,8 @@ function renderAgentDetail() {
     const inputTrunc = inputText.length > 50 ? inputText.slice(0, 47) + '...' : inputText;
     const outputTrunc = outputText.length > 50 ? outputText.slice(0, 47) + '...' : outputText;
     const tokens = (e.tokens_input || 0) + (e.tokens_output || 0) || e.tokens_used || e.total_tokens || '\u2014';
+    const execCost = calculateTokenCost(e.tokens_input || 0, e.tokens_output || 0, agent.model);
+    const costStr = typeof tokens === 'number' && tokens > 0 ? formatCost(execCost.total) : '\u2014';
     const escapedInput = (inputText || '').replace(/`/g, '\\`').replace(/\$/g, '\\$');
     const escapedOutput = (outputText || '').replace(/`/g, '\\`').replace(/\$/g, '\\$');
     return `
@@ -2105,17 +2169,19 @@ function renderAgentDetail() {
         <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${inputText.replace(/"/g, '&quot;')}">${inputTrunc || '\u2014'}</td>
         <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${outputText.replace(/"/g, '&quot;')}">${outputTrunc || '\u2014'}</td>
         <td>${tokens}</td>
+        <td style="color:#00cc6a;font-size:11px;">${costStr}</td>
         <td>${duration}</td>
         <td>${e.started_at ? timeAgo(e.started_at) : '\u2014'}</td>
       </tr>
       <tr style="display:none;">
-        <td colspan="7" style="padding:12px 16px;background:var(--bg-tertiary);border-radius:8px;">
+        <td colspan="8" style="padding:12px 16px;background:var(--bg-tertiary);border-radius:8px;">
           <div style="margin-bottom:8px;"><strong style="color:var(--text-secondary);font-size:11px;">Full Input:</strong><pre style="margin:4px 0;font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);max-height:200px;overflow-y:auto;">${inputText || 'No input'}</pre></div>
-          <div><strong style="color:var(--text-secondary);font-size:11px;">Full Output:</strong><pre style="margin:4px 0;font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);max-height:200px;overflow-y:auto;">${outputText || 'No output'}</pre></div>
+          <div style="margin-bottom:8px;"><strong style="color:var(--text-secondary);font-size:11px;">Full Output:</strong><pre style="margin:4px 0;font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);max-height:200px;overflow-y:auto;">${outputText || 'No output'}</pre></div>
+          <div style="font-size:11px;color:var(--text-tertiary);">Tokens: ${e.tokens_input || 0} in / ${e.tokens_output || 0} out | Base: ${formatCost(execCost.baseCost)} + Fee: ${formatCost(execCost.fee)} = <strong style="color:#00cc6a;">${formatCost(execCost.total)}</strong></div>
         </td>
       </tr>
     `;
-  }).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--text-tertiary);padding:24px;">No executions yet. Run this agent to see execution history.</td></tr>`;
+  }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary);padding:24px;">No executions yet. Run this agent to see execution history.</td></tr>`;
 
   return `
     <!-- Header -->
@@ -2139,6 +2205,7 @@ function renderAgentDetail() {
     <div class="stats-grid" style="margin-bottom:24px;">
       <div class="stat-card"><div class="stat-value">${totalTasks}</div><div class="stat-label">Total Tasks</div></div>
       <div class="stat-card"><div class="stat-value">${totalTokens.toLocaleString()}</div><div class="stat-label">Total Tokens Used</div></div>
+      <div class="stat-card" style="border:1px solid rgba(0,204,106,0.2);"><div class="stat-value" style="color:#00cc6a;">${formatCost(agentCost.total)}</div><div class="stat-label">Est. Cost (incl. 10% fee)</div></div>
       <div class="stat-card"><div class="stat-value">${avgDuration}</div><div class="stat-label">Avg Duration</div></div>
       <div class="stat-card"><div class="stat-value" style="color:${status === 'active' ? '#00ff88' : status === 'error' ? '#ef4444' : '#fbbf24'};">${statusLabel}</div><div class="stat-label">Status</div></div>
     </div>
@@ -2216,7 +2283,7 @@ function renderAgentDetail() {
       </div>
       <div class="table-wrapper" style="border:0;border-radius:0;">
         <table>
-          <thead><tr><th>ID</th><th>Status</th><th>Input</th><th>Output</th><th>Tokens</th><th>Duration</th><th>Time</th></tr></thead>
+          <thead><tr><th>ID</th><th>Status</th><th>Input</th><th>Output</th><th>Tokens</th><th>Cost</th><th>Duration</th><th>Time</th></tr></thead>
           <tbody>${executionRows}</tbody>
         </table>
       </div>
@@ -3503,6 +3570,9 @@ function renderWorkflowDetail() {
   const lastRun = wf.last_run_at ? timeAgo(wf.last_run_at) : 'Never';
   const created = wf.created_at ? new Date(wf.created_at).toLocaleDateString() : '\u2014';
 
+  // Cost calculation
+  const wfCost = calculateWorkflowExecsCost(execs);
+
   // Schedule info
   const cronExpr = wf.cron_expression || (wf.trigger_config && wf.trigger_config.cron) || null;
   const cronTz = (wf.trigger_config && wf.trigger_config.timezone) || wf.timezone || null;
@@ -3562,16 +3632,19 @@ function renderWorkflowDetail() {
     const eStatus = e.status || 'pending';
     const eStatusColor = { completed: '#00ff88', failed: '#ef4444', running: '#3b82f6', pending: '#fbbf24' };
     const duration = e.started_at && e.completed_at ? ((new Date(e.completed_at) - new Date(e.started_at)) / 1000).toFixed(1) + 's' : e.started_at ? 'Running...' : '\u2014';
+    const execCost = calculateWorkflowExecCost(e);
+    const costStr = (execCost.totalInput + execCost.totalOutput) > 0 ? formatCost(execCost.total) : '\u2014';
     return `
       <tr>
         <td style="font-family:monospace;font-size:11px;">${(e.id || '').slice(0, 8)}</td>
         <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${eStatusColor[eStatus] || '#666'};"></span> ${eStatus}</span></td>
         <td>${e.started_at ? new Date(e.started_at).toLocaleString() : '\u2014'}</td>
         <td>${duration}</td>
+        <td style="font-size:11px;color:#00cc6a;">${costStr}</td>
         <td style="font-size:11px;color:var(--text-secondary);">${e.error_message ? e.error_message.slice(0, 60) : '\u2014'}</td>
       </tr>
     `;
-  }).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:24px;">No executions yet. Deploy and run this workflow to see execution history.</td></tr>`;
+  }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text-tertiary);padding:24px;">No executions yet. Deploy and run this workflow to see execution history.</td></tr>`;
 
   return `
     <div class="page-header">
@@ -3599,6 +3672,7 @@ function renderWorkflowDetail() {
       <div class="stat-card"><div class="stat-value">${nodeCount}</div><div class="stat-label">Nodes</div></div>
       ${scheduleReadable ? `<div class="stat-card"><div class="stat-value" style="font-size:16px;">${scheduleReadable}</div><div class="stat-label">Schedule</div></div>` : ''}
       ${nextRunStr ? `<div class="stat-card"><div class="stat-value" style="font-size:14px;">${nextRunStr}</div><div class="stat-label">Next Run</div></div>` : ''}
+      <div class="stat-card" style="border:1px solid rgba(0,204,106,0.2);"><div class="stat-value" style="color:#00cc6a;">${formatCost(wfCost.total)}</div><div class="stat-label">Est. Cost (incl. 10% fee)</div></div>
     </div>
 
     ${orderedNodes.length > 0 ? `
@@ -3655,7 +3729,7 @@ function renderWorkflowDetail() {
       </div>
       <div class="table-wrapper" style="border:0;border-radius:0;">
         <table>
-          <thead><tr><th>ID</th><th>Status</th><th>Started</th><th>Duration</th><th>Error</th></tr></thead>
+          <thead><tr><th>ID</th><th>Status</th><th>Started</th><th>Duration</th><th>Cost</th><th>Error</th></tr></thead>
           <tbody>${executionRows}</tbody>
         </table>
       </div>
