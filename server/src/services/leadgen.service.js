@@ -1,6 +1,7 @@
 const env = require('../config/env');
 const leadModel = require('../models/leadgen.model');
 const { sendEmail } = require('./email.service');
+const { query: dbQuery } = require('../config/database');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
@@ -303,7 +304,7 @@ async function diagnoseWebsite(url) {
 
 // ── Claude API: Generate Outreach Email ─────────────
 
-async function generateOutreachEmail(lead, diagnosis) {
+async function generateOutreachEmail(lead, diagnosis, onRetry) {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
@@ -356,6 +357,7 @@ Return JSON: {"subject": "...", "body": "..."}`;
       if (isRetryable && attempt < MAX_RETRIES) {
         const backoff = attempt * 15000; // 15s, 30s, 45s, 60s
         console.warn(`[LEADGEN] Claude API overloaded (attempt ${attempt}/${MAX_RETRIES}), retrying in ${backoff / 1000}s...`);
+        if (onRetry) try { onRetry(attempt, MAX_RETRIES, err.message); } catch (_) {}
         await sleep(backoff);
         continue;
       }
@@ -439,17 +441,56 @@ async function sendColdEmail(lead, sender) {
 
 async function runDailyLeadGeneration() {
   console.log('[LEADGEN] === Starting daily lead generation ===');
+  const pipelineStartTime = Date.now();
   const batchDate = new Date().toISOString().split('T')[0];
   const stats = { searched: 0, discovered: 0, emailsGenerated: 0, emailed: 0, errors: 0 };
 
+  // ── Workflow execution tracking (graceful — never breaks the pipeline) ──
+  let workflowId = null;
+  let executionId = null;
+  let workflowUserId = null;
+
+  async function logExec(level, message, metadata = {}) {
+    if (!executionId || !workflowUserId) return;
+    try {
+      await dbQuery(
+        `INSERT INTO execution_logs (user_id, workflow_execution_id, agent_execution_id, level, message, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [workflowUserId, executionId, null, level, message, JSON.stringify(metadata)]
+      );
+    } catch (_) { /* never break pipeline for logging */ }
+  }
+
+  try {
+    const { rows } = await dbQuery(
+      `SELECT * FROM workflows WHERE name = $1 LIMIT 1`,
+      ['Lead Generation Pipeline']
+    );
+    if (rows.length > 0) {
+      const workflow = rows[0];
+      workflowId = workflow.id;
+      workflowUserId = workflow.user_id;
+      const { rows: execRows } = await dbQuery(
+        `INSERT INTO workflow_executions (workflow_id, trigger_type, trigger_payload, status)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [workflowId, 'schedule', JSON.stringify({ batch_date: batchDate }), 'running']
+      );
+      executionId = execRows[0].id;
+      console.log(`[LEADGEN] Workflow execution ${executionId} started for workflow ${workflowId}`);
+    }
+  } catch (wfErr) {
+    console.warn('[LEADGEN] Workflow tracking init skipped:', wfErr.message);
+  }
+
+  try {
   // 0. Resume any unsent leads from previous interrupted runs
   try {
-    const { query: dbQuery } = require('../config/database');
     const { rows: unsentLeads } = await dbQuery(
       `SELECT * FROM leads WHERE status = 'email_generated' AND outreach_subject IS NOT NULL AND outreach_body IS NOT NULL ORDER BY created_at LIMIT 250`
     );
     if (unsentLeads.length > 0) {
       console.log(`[LEADGEN] Found ${unsentLeads.length} unsent leads from previous run — sending now`);
+      await logExec('info', `Resuming ${unsentLeads.length} unsent leads from previous run`, { count: unsentLeads.length });
       const senderCounts = new Map(SENDERS.map(s => [s.email, 0]));
       let senderIdx = 0;
       for (const lead of unsentLeads) {
@@ -476,6 +517,7 @@ async function runDailyLeadGeneration() {
     }
   } catch (resumeErr) {
     console.error('[LEADGEN] Resume unsent error:', resumeErr.message);
+    await logExec('error', `Resume unsent leads failed: ${resumeErr.message}`, { error: resumeErr.message });
   }
 
   // 1. Pick firm types and cities — budget ~140 searches/day to stay under remaining monthly limit
@@ -484,6 +526,11 @@ async function runDailyLeadGeneration() {
   const firmTypes = shuffle(FIRM_TYPES);
 
   console.log(`[LEADGEN] Targeting: ${firmTypes.map(f => f.type).join(', ')} | Cities: ${cities.length}`);
+  await logExec('info', `Search phase starting`, {
+    firmTypes: firmTypes.map(f => f.type),
+    cityCount: cities.length,
+    cities: cities.slice(0, 5),
+  });
 
   // 2. Search for leads — cycle through firm types and cities
   const rawLeads = [];
@@ -508,11 +555,13 @@ async function runDailyLeadGeneration() {
       } catch (err) {
         if (err.message.startsWith('SEARCHAPI_AUTH_FAILURE')) {
           console.error('[LEADGEN] ❌ SearchAPI authentication failed — aborting all searches. Check your SEARCHAPI_KEY.');
+          await logExec('error', 'SearchAPI authentication failed — aborting searches', { error: err.message });
           stats.errors++;
           serpApiAborted = true;
           break;
         }
         console.error(`[LEADGEN] Search error for "${searchQuery}":`, err.message);
+        await logExec('error', `Search error: ${err.message}`, { searchQuery, error: err.message });
         stats.errors++;
       }
       await sleep(1500); // rate limit
@@ -520,6 +569,7 @@ async function runDailyLeadGeneration() {
   }
 
   console.log(`[LEADGEN] Raw search results: ${rawLeads.length}`);
+  await logExec('info', `Search phase complete`, { rawResultCount: rawLeads.length, searched: stats.searched });
 
   // 3. Diagnose each website, extract emails, dedup
   const qualifiedLeads = [];
@@ -579,12 +629,23 @@ async function runDailyLeadGeneration() {
     } catch (err) {
       stats.errors++;
       console.error(`[LEADGEN] Error processing ${raw.link}:`, err.message);
+      await logExec('error', `Error processing lead: ${err.message}`, { url: raw.link, error: err.message });
     }
 
     // Progress log every 50 sites
     const idx = rawLeads.indexOf(raw);
     if (idx > 0 && idx % 50 === 0) {
       console.log(`[LEADGEN] Progress: ${idx}/${Math.min(rawLeads.length, 500)} processed, ${qualifiedLeads.length} discovered, ${stats.errors} errors`);
+    }
+
+    // Execution log every 100 leads
+    if (idx > 0 && idx % 100 === 0) {
+      await logExec('info', `Processing progress: ${idx}/${Math.min(rawLeads.length, 500)}`, {
+        processed: idx,
+        total: Math.min(rawLeads.length, 500),
+        discovered: qualifiedLeads.length,
+        errors: stats.errors,
+      });
     }
 
     await sleep(1000); // polite crawling
@@ -597,15 +658,19 @@ async function runDailyLeadGeneration() {
   const toEmail = qualifiedLeads.slice(0, DAILY_LIMIT);
 
   // 5. Generate personalized outreach via Claude API
+  await logExec('info', `Email generation starting for ${toEmail.length} leads`, { leadCount: toEmail.length });
   for (const lead of toEmail) {
     try {
-      const { subject, body } = await generateOutreachEmail(lead, lead.diagnosis_json);
+      const { subject, body } = await generateOutreachEmail(lead, lead.diagnosis_json, (attempt, maxRetries, errMsg) => {
+        logExec('warn', `Claude API retry attempt ${attempt}/${maxRetries}: ${errMsg}`, { attempt, maxRetries, email: lead.email, error: errMsg });
+      });
       await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated' });
       lead.outreach_subject = subject;
       lead.outreach_body = body;
       stats.emailsGenerated++;
     } catch (err) {
       console.error(`[LEADGEN] Email generation error for ${lead.email}:`, err.message);
+      await logExec('error', `Email generation failed for ${lead.email}: ${err.message}`, { email: lead.email, error: err.message });
       stats.errors++;
     }
     await sleep(500);
@@ -649,7 +714,63 @@ async function runDailyLeadGeneration() {
   }
 
   console.log(`[LEADGEN] === Complete: ${JSON.stringify(stats)} ===`);
+
+  // ── Mark workflow execution as completed ──
+  await logExec('info', `Pipeline complete`, stats);
+  try {
+    if (executionId) {
+      const durationMs = Date.now() - pipelineStartTime;
+      await dbQuery(
+        `UPDATE workflow_executions SET status = $1, result = $2, completed_at = $3, duration_ms = $4 WHERE id = $5`,
+        ['completed', JSON.stringify(stats), new Date(), durationMs, executionId]
+      );
+    }
+    if (workflowId) {
+      await dbQuery(`
+        UPDATE workflows SET
+          total_runs = (SELECT COUNT(*) FROM workflow_executions WHERE workflow_id = $1),
+          success_rate = COALESCE(
+            (SELECT ROUND(COUNT(*) FILTER (WHERE status = 'completed')::decimal / NULLIF(COUNT(*), 0) * 100, 2)
+             FROM workflow_executions WHERE workflow_id = $1), 0),
+          last_run_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+      `, [workflowId]);
+    }
+  } catch (wfCompleteErr) {
+    console.warn('[LEADGEN] Workflow execution completion tracking failed:', wfCompleteErr.message);
+  }
+
   return stats;
+
+  } catch (pipelineErr) {
+    // ── Mark workflow execution as failed ──
+    try {
+      if (executionId) {
+        const durationMs = Date.now() - pipelineStartTime;
+        await dbQuery(
+          `UPDATE workflow_executions SET status = $1, error_message = $2, completed_at = $3, duration_ms = $4 WHERE id = $5`,
+          ['failed', pipelineErr.message, new Date(), durationMs, executionId]
+        );
+      }
+      if (workflowId) {
+        await dbQuery(`
+          UPDATE workflows SET
+            total_runs = (SELECT COUNT(*) FROM workflow_executions WHERE workflow_id = $1),
+            success_rate = COALESCE(
+              (SELECT ROUND(COUNT(*) FILTER (WHERE status = 'completed')::decimal / NULLIF(COUNT(*), 0) * 100, 2)
+               FROM workflow_executions WHERE workflow_id = $1), 0),
+            last_run_at = NOW(),
+            updated_at = NOW()
+          WHERE id = $1
+        `, [workflowId]);
+      }
+    } catch (wfFailErr) {
+      console.warn('[LEADGEN] Workflow execution failure tracking failed:', wfFailErr.message);
+    }
+    // Re-throw so callers still see the error
+    throw pipelineErr;
+  }
 }
 
 async function sendOwnerSummary(batchDate, stats, leads) {
