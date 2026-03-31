@@ -3869,8 +3869,17 @@ function showNewAgentModal() {
       <textarea rows="3" placeholder="Describe what this agent should do..." style="resize:vertical;"></textarea>
     </div>
     <div class="form-group">
+      <label class="form-label">Agent Type</label>
+      <select id="agent-type-select">
+        <option value="text_generation">Text Generation</option>
+        <option value="classification">Classification</option>
+        <option value="analysis">Analysis</option>
+        <option value="custom">Custom</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label class="form-label">AI Model</label>
-      <select>
+      <select id="agent-model-select">
         <option>Claude Opus 4</option>
         <option>Claude Sonnet 4</option>
         <option>GPT-4o</option>
@@ -4276,16 +4285,18 @@ async function handleCreateAgent() {
   const modal = document.getElementById('modal-content');
   const inputs = modal.querySelectorAll('input');
   const textarea = modal.querySelector('textarea');
-  const select = modal.querySelector('select');
+  const agentTypeSelect = document.getElementById('agent-type-select');
+  const modelSelect = document.getElementById('agent-model-select');
   const name = inputs[0]?.value?.trim();
   const description = textarea?.value?.trim();
+  const agentType = agentTypeSelect?.value || 'text_generation';
   const modelMap = { 'Claude Opus 4': 'claude-opus-4-20250514', 'Claude Sonnet 4': 'claude-sonnet-4-20250514', 'GPT-4o': 'gpt-4o', 'Custom Model': 'custom' };
-  const model = modelMap[select?.value] || 'claude-sonnet-4-20250514';
+  const model = modelMap[modelSelect?.value] || 'claude-sonnet-4-20250514';
   const temperature = (inputs[1]?.value || 30) / 100;
   const maxTokens = parseInt(inputs[2]?.value) || 4096;
   if (!name) { showToast('Please enter an agent name', 'error'); return; }
   try {
-    await api.post('/agents', { name, description, model, temperature, maxTokens });
+    await api.post('/agents', { name, description, agentType, model, temperature, maxTokens });
     closeModal();
     showToast('AI Agent created!');
     navigateTo('agents');
