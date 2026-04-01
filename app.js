@@ -5606,7 +5606,7 @@ let outreachStats = null;
 async function loadOutreachData() {
   try {
     const [leadsRes, statsRes] = await Promise.all([
-      api.get('/outreach?limit=100'),
+      api.get('/outreach?limit=500'),
       api.get('/outreach/stats'),
     ]);
     outreachData = leadsRes.data || [];

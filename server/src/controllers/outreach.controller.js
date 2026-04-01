@@ -115,7 +115,7 @@ const createLead = catchAsync(async (req, res) => {
 });
 
 const getLeads = catchAsync(async (req, res) => {
-  const { status, limit = 50 } = req.query;
+  const { status, limit = 500 } = req.query;
   let sql = `SELECT * FROM outreach_leads`;
   const params = [];
 
