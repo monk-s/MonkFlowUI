@@ -4758,7 +4758,8 @@ async function loadAdminData() {
     adminAccounts = accountsRes.data || accountsRes;
     // Also load QBO status for admin
     try {
-      adminQboStatus = await api.get('/quickbooks/status');
+      const qboRes = await api.get('/quickbooks/status');
+      adminQboStatus = qboRes.data || qboRes;
     } catch { adminQboStatus = null; }
     renderMainContent();
   } catch (err) {
@@ -5150,14 +5151,15 @@ async function loadBillingData() {
 async function loadQboStatus() {
   try {
     const res = await api.get('/quickbooks/status');
-    qboConnected = res.connected || false;
+    qboConnected = res.data?.connected || false;
   } catch { qboConnected = false; }
 }
 
 async function connectQuickBooks() {
   try {
     const res = await api.get('/quickbooks/auth-url');
-    if (res.authUrl) window.open(res.authUrl, '_blank');
+    const authUrl = res.data?.url || res.authUrl;
+    if (authUrl) window.open(authUrl, '_blank');
     else showToast('Failed to get auth URL', 'error');
   } catch (e) { showToast('QuickBooks connection failed: ' + e.message, 'error'); }
 }
@@ -5169,7 +5171,7 @@ async function disconnectQuickBooks() {
 async function loadBillingInvoices() {
   try {
     const res = await api.get('/billing/invoices');
-    billingInvoices = res.invoices || [];
+    billingInvoices = res.data || [];
   } catch { billingInvoices = []; }
 }
 
@@ -5177,7 +5179,7 @@ async function adminSyncAllCustomers() {
   try {
     showToast('Syncing customers to QuickBooks...', 'info');
     const res = await api.post('/quickbooks/sync-all-customers');
-    showToast(`Synced ${res.synced || 0} customers to QuickBooks`, 'success');
+    showToast(`Synced ${res.data?.synced || 0} customers to QuickBooks`, 'success');
   } catch (e) { showToast('Sync failed: ' + e.message, 'error'); }
 }
 
