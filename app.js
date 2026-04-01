@@ -121,6 +121,10 @@ let currentAgentId = null;
 let currentAgentDetail = null;
 let agentDetailExecutions = null;
 let agentExecutionPollTimer = null;
+let adminData = null;
+let adminAccounts = null;
+let adminSelectedAccount = null;
+let adminAccountDetail = null;
 
 // ── Type Mappings ──────────────────────────────────────────
 const FRONTEND_TO_BACKEND_TYPE = {
@@ -413,6 +417,7 @@ function navigateTo(page) {
   if (page === 'analytics' && !dashboardData) loadDashboardData();
   if (page === 'workflow-detail') loadWorkflowDetail();
   if (page === 'agent-detail') loadAgentDetail();
+  if (page === 'admin') loadAdminData();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
@@ -1000,6 +1005,13 @@ function renderSidebar() {
         ${icons.logs} Logs
       </div>
 
+      ${currentUser?.role === 'superadmin' ? `
+      <div class="nav-section-label">Admin</div>
+      <div class="nav-item" data-page="admin" onclick="navigateTo('admin')">
+        ${icons.shield} Admin Dashboard
+      </div>
+      ` : ''}
+
       <div class="nav-section-label">Account</div>
       <div class="nav-item" data-page="help" onclick="navigateTo('help')">
         ${icons.help} Help Center
@@ -1040,6 +1052,8 @@ function renderTopbar() {
     settings: 'Settings',
     team: 'Team Management',
     'workflow-editor': 'Workflow Editor',
+    admin: 'Admin Dashboard',
+    'admin-account': 'Account Detail',
   };
   const unreadCount = notifications.filter(n => !n.read).length;
   const topbar = document.getElementById('topbar');
@@ -1282,6 +1296,8 @@ function renderMainContent() {
     'workflow-editor': renderWorkflowEditor,
     'workflow-detail': renderWorkflowDetail,
     'agent-detail': renderAgentDetail,
+    'admin': renderAdminDashboard,
+    'admin-account': renderAdminAccountDetail,
   };
   main.innerHTML = (pages[currentPage] || renderDashboard)();
 }
@@ -4697,4 +4713,345 @@ async function handleSendInvite() {
   } catch (err) {
     showToast(err.message || 'Failed to send invitation', 'error');
   }
+}
+
+// ============================================================
+// ADMIN DASHBOARD
+// ============================================================
+
+async function loadAdminData() {
+  try {
+    const [statsRes, accountsRes, alertsRes] = await Promise.all([
+      api.get('/admin/stats'),
+      api.get('/admin/accounts?limit=100'),
+      api.get('/admin/alerts').catch(() => ({ data: [] })),
+    ]);
+    adminData = statsRes.data || statsRes;
+    adminAccounts = accountsRes.data || accountsRes;
+    renderMainContent();
+  } catch (err) {
+    if (err.message && err.message.includes('403')) {
+      showToast('Access denied — superadmin only', 'error');
+      navigateTo('dashboard');
+      return;
+    }
+    showToast(err.message || 'Failed to load admin data', 'error');
+  }
+}
+
+async function loadAdminAccountDetail(userId) {
+  try {
+    const res = await api.get(`/admin/accounts/${userId}`);
+    adminAccountDetail = res.data || res;
+    adminSelectedAccount = userId;
+    currentPage = 'admin-account';
+    renderMainContent();
+  } catch (err) {
+    showToast(err.message || 'Failed to load account', 'error');
+  }
+}
+
+function renderAdminDashboard() {
+  if (!adminData) {
+    return `
+      <div class="page-header"><div><h1>Admin Dashboard</h1><p class="page-desc">Loading platform data...</p></div></div>
+      <div class="card" style="padding:32px;text-align:center;">
+        <div style="width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px;"></div>
+        <p style="color:var(--text-secondary);font-size:13px;">Loading admin data...</p>
+      </div>
+    `;
+  }
+
+  const stats = adminData;
+  const accounts = adminAccounts || [];
+
+  // Platform cost from tokenTotals (baseCost only — what we pay)
+  const tokenTotals = stats.tokenTotals || {};
+  const platformCost = calculateTokenCost(
+    tokenTotals.total_input || 0,
+    tokenTotals.total_output || 0,
+    'claude-sonnet-4-20250514'
+  );
+
+  const wfExecs = stats.workflowExecutions || {};
+  const agentExecs = stats.agentExecutions || {};
+
+  // Daily activity chart (last 30 days)
+  const dailyActivity = stats.dailyActivity || [];
+  const maxDailyCount = Math.max(...dailyActivity.map(d => d.count || 0), 1);
+  const dailyBars = dailyActivity.length > 0
+    ? dailyActivity.map(d => {
+        const pct = Math.round(((d.count || 0) / maxDailyCount) * 100);
+        const label = d.date ? new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+        return `<div class="chart-bar" style="height:${pct}%"><span class="bar-value">${d.count || 0}</span><span class="bar-label">${label}</span></div>`;
+      }).join('')
+    : '';
+
+  // Accounts table rows
+  const accountRows = accounts.length > 0 ? accounts.map(account => {
+    const acctCost = calculateTokenCost(
+      account.total_tokens_input || 0,
+      account.total_tokens_output || 0,
+      'claude-sonnet-4-20250514'
+    );
+    const roleBadgeColor = account.role === 'superadmin' ? '#ef4444' : account.role === 'admin' ? '#f59e0b' : '#3b82f6';
+    return `
+      <tr style="cursor:pointer;" onclick="loadAdminAccountDetail('${account.id}')">
+        <td>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="avatar" style="width:32px;height:32px;font-size:11px;">${(account.first_name?.[0] || '').toUpperCase()}${(account.last_name?.[0] || '').toUpperCase()}</div>
+            <div>
+              <div style="font-weight:500;">${account.first_name || ''} ${account.last_name || ''}</div>
+            </div>
+          </div>
+        </td>
+        <td style="font-size:12px;color:var(--text-secondary);">${account.email || ''}</td>
+        <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${roleBadgeColor}22;color:${roleBadgeColor};">${account.role || 'user'}</span></td>
+        <td>${account.workflow_count ?? 0}</td>
+        <td>${account.agent_count ?? 0}</td>
+        <td>${account.runs_30d ?? 0}</td>
+        <td>${account.tasks_30d ?? 0}</td>
+        <td style="color:#00cc6a;font-size:12px;">${formatCost(acctCost.baseCost)}</td>
+        <td style="font-size:12px;color:var(--text-secondary);">${timeAgo(account.updated_at)}</td>
+      </tr>
+    `;
+  }).join('') : `<tr><td colspan="9" style="text-align:center;color:var(--text-tertiary);padding:24px;">No accounts found.</td></tr>`;
+
+  return `
+    <!-- Header -->
+    <div class="page-header">
+      <div>
+        <h1>Admin Dashboard</h1>
+        <p class="page-desc">Platform-wide metrics, accounts, and activity</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-ghost btn-sm" onclick="loadAdminData()">Refresh</button>
+      </div>
+    </div>
+
+    <!-- Platform Stats -->
+    <div class="stats-grid" style="margin-bottom:24px;">
+      <div class="stat-card">
+        <div class="stat-value">${stats.totalUsers ?? 0}</div>
+        <div class="stat-label">Total Users</div>
+        ${stats.newUsersThisMonth ? `<div style="font-size:11px;color:var(--accent);margin-top:4px;">+${stats.newUsersThisMonth} this month</div>` : ''}
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${stats.totalWorkflows ?? 0}</div>
+        <div class="stat-label">Total Workflows</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${stats.totalAgents ?? 0}</div>
+        <div class="stat-label">Total Agents</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${wfExecs.total ?? 0}</div>
+        <div class="stat-label">Workflow Executions</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">${wfExecs.completed ?? 0} completed / ${wfExecs.failed ?? 0} failed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${agentExecs.total ?? 0}</div>
+        <div class="stat-label">Agent Executions</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">${agentExecs.completed ?? 0} completed / ${agentExecs.failed ?? 0} failed</div>
+      </div>
+      <div class="stat-card" style="border:1px solid rgba(0,204,106,0.2);">
+        <div class="stat-value" style="color:#00cc6a;">${formatCost(platformCost.baseCost)}</div>
+        <div class="stat-label">Platform Cost</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">Base cost (excl. fee)</div>
+      </div>
+    </div>
+
+    <!-- Accounts Table -->
+    <div class="card" style="padding:0;margin-bottom:24px;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div class="card-title" style="margin:0;">All Accounts</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">${accounts.length} account${accounts.length !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+      <div class="table-wrapper" style="border:0;border-radius:0;">
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Workflows</th>
+              <th>Agents</th>
+              <th>Runs (30d)</th>
+              <th>Tasks (30d)</th>
+              <th>Est. Cost</th>
+              <th>Last Active</th>
+            </tr>
+          </thead>
+          <tbody>${accountRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Daily Activity Chart -->
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Daily Activity</div>
+          <div class="card-subtitle">Workflow executions over the last 30 days</div>
+        </div>
+      </div>
+      <div class="chart-bar-group" style="margin-bottom:30px;">
+        ${dailyBars || '<div style="padding:20px;color:var(--text-secondary);font-size:13px;">No daily activity data yet</div>'}
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminAccountDetail() {
+  if (!adminAccountDetail) {
+    return `
+      <div class="page-header"><div><h1>Account Detail</h1><p class="page-desc">Loading...</p></div></div>
+      <div class="card" style="padding:32px;text-align:center;">
+        <div style="width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px;"></div>
+        <p style="color:var(--text-secondary);font-size:13px;">Loading account details...</p>
+      </div>
+    `;
+  }
+
+  const acct = adminAccountDetail;
+  const user = acct.user || acct;
+  const workflows = acct.workflows || [];
+  const agents = acct.agents || [];
+  const executions = acct.recentExecutions || acct.executions || [];
+
+  const totalTokens = (user.total_tokens_input || 0) + (user.total_tokens_output || 0);
+  const acctCost = calculateTokenCost(
+    user.total_tokens_input || 0,
+    user.total_tokens_output || 0,
+    'claude-sonnet-4-20250514'
+  );
+
+  // Workflows table
+  const workflowRows = workflows.length > 0 ? workflows.map(wf => {
+    const wfStatus = wf.status || 'draft';
+    const statusColor = { active: '#00ff88', draft: '#fbbf24', paused: '#f59e0b', error: '#ef4444' };
+    return `
+      <tr>
+        <td style="font-weight:500;">${wf.name || 'Unnamed'}</td>
+        <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${statusColor[wfStatus] || '#666'};"></span> ${wfStatus}</span></td>
+        <td>${triggerTypeLabel(wf.trigger_type)}</td>
+        <td>${wf.total_runs ?? 0}</td>
+        <td style="font-size:12px;color:var(--text-secondary);">${timeAgo(wf.last_run_at || wf.updated_at)}</td>
+      </tr>
+    `;
+  }).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:24px;">No workflows.</td></tr>`;
+
+  // Agents table
+  const agentRows = agents.length > 0 ? agents.map(ag => {
+    const agStatus = ag.status || 'draft';
+    const statusColor = { active: '#00ff88', draft: '#fbbf24', paused: '#f59e0b', error: '#ef4444' };
+    const modelDisplayMap = {
+      'claude-opus-4-20250514': 'Claude Opus 4',
+      'claude-sonnet-4-20250514': 'Claude Sonnet 4',
+      'gpt-4o': 'GPT-4o',
+      'custom': 'Custom',
+    };
+    const agTokens = (ag.total_tokens_input || 0) + (ag.total_tokens_output || 0) + (ag.tokens_used || 0);
+    return `
+      <tr>
+        <td style="font-weight:500;">${ag.name || 'Unnamed'}</td>
+        <td>${ag.agent_type || 'text_generation'}</td>
+        <td style="font-size:12px;">${modelDisplayMap[ag.model] || ag.model || 'Sonnet 4'}</td>
+        <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${statusColor[agStatus] || '#666'};"></span> ${agStatus}</span></td>
+        <td>${ag.total_runs ?? ag.total_tasks ?? 0}</td>
+        <td>${agTokens.toLocaleString()}</td>
+      </tr>
+    `;
+  }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text-tertiary);padding:24px;">No agents.</td></tr>`;
+
+  // Recent executions table
+  const execRows = executions.length > 0 ? executions.map(ex => {
+    const eStatus = ex.status || 'pending';
+    const statusColor = { completed: '#00ff88', failed: '#ef4444', running: '#3b82f6', pending: '#fbbf24' };
+    const duration = ex.started_at && ex.completed_at ? ((new Date(ex.completed_at) - new Date(ex.started_at)) / 1000).toFixed(1) + 's' : ex.started_at ? 'Running...' : '\u2014';
+    const errorText = ex.error ? `<span style="color:#ef4444;font-size:11px;" title="${(ex.error || '').replace(/"/g, '&quot;')}">${(ex.error || '').slice(0, 40)}${ex.error.length > 40 ? '...' : ''}</span>` : '\u2014';
+    return `
+      <tr>
+        <td style="font-weight:500;font-size:12px;">${ex.workflow_name || ex.agent_name || 'Unknown'}</td>
+        <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${statusColor[eStatus] || '#666'};"></span> ${eStatus}</span></td>
+        <td style="font-size:12px;color:var(--text-secondary);">${ex.started_at ? timeAgo(ex.started_at) : '\u2014'}</td>
+        <td>${duration}</td>
+        <td>${errorText}</td>
+      </tr>
+    `;
+  }).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:24px;">No recent executions.</td></tr>`;
+
+  return `
+    <!-- Header -->
+    <div class="page-header">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <button class="btn btn-ghost btn-sm" onclick="navigateTo('admin')">${icons.arrowLeft} Back to Admin</button>
+        </div>
+        <h1 style="margin:0;">${user.first_name || ''} ${user.last_name || ''}</h1>
+        <p class="page-desc">${user.email || ''} &mdash; ${user.role || 'user'}</p>
+      </div>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="stats-grid" style="margin-bottom:24px;">
+      <div class="stat-card">
+        <div class="stat-value">${workflows.length}</div>
+        <div class="stat-label">Workflows</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${agents.length}</div>
+        <div class="stat-label">Agents</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${totalTokens.toLocaleString()}</div>
+        <div class="stat-label">Total Tokens Used</div>
+      </div>
+      <div class="stat-card" style="border:1px solid rgba(0,204,106,0.2);">
+        <div class="stat-value" style="color:#00cc6a;">${formatCost(acctCost.baseCost)}</div>
+        <div class="stat-label">Est. Cost (base)</div>
+      </div>
+    </div>
+
+    <!-- Workflows Table -->
+    <div class="card" style="padding:0;margin-bottom:24px;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div class="card-title" style="margin:0;">Workflows</div>
+      </div>
+      <div class="table-wrapper" style="border:0;border-radius:0;">
+        <table>
+          <thead><tr><th>Name</th><th>Status</th><th>Trigger</th><th>Total Runs</th><th>Last Run</th></tr></thead>
+          <tbody>${workflowRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Agents Table -->
+    <div class="card" style="padding:0;margin-bottom:24px;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div class="card-title" style="margin:0;">Agents</div>
+      </div>
+      <div class="table-wrapper" style="border:0;border-radius:0;">
+        <table>
+          <thead><tr><th>Name</th><th>Type</th><th>Model</th><th>Status</th><th>Total Tasks</th><th>Tokens Used</th></tr></thead>
+          <tbody>${agentRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Recent Executions Table -->
+    <div class="card" style="padding:0;margin-bottom:24px;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div class="card-title" style="margin:0;">Recent Executions</div>
+      </div>
+      <div class="table-wrapper" style="border:0;border-radius:0;">
+        <table>
+          <thead><tr><th>Workflow Name</th><th>Status</th><th>Started</th><th>Duration</th><th>Error</th></tr></thead>
+          <tbody>${execRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
