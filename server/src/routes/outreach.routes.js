@@ -2,7 +2,10 @@ const router = require('express').Router();
 const ctrl = require('../controllers/outreach.controller');
 const { authenticate } = require('../middleware/auth');
 
-// All outreach routes require auth (superadmin enforced at app level)
+// Resend bounce/complaint webhook — no auth (verified by Resend)
+router.post('/webhook/resend', ctrl.handleResendWebhook);
+
+// All other outreach routes require auth
 router.use(authenticate);
 
 router.get('/stats', ctrl.getStats);

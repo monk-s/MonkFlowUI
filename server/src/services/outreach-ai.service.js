@@ -266,18 +266,93 @@ async function sendAiEmail(leadId) {
 
 // ── Email verification ─────────────────────────────────────
 
+const net = require('net');
+
 const BAD_PATTERNS = [
   /^test@/i, /^admin@example/i, /^user@/i, /^noreply@/i,
   /^filler@/i, /^johndoe@/i, /^jsmith@/i, /^demo@/i,
   /@example\.(com|org|net)$/i, /@test\./i, /@invalid$/i,
   /^.{60,}@/,  // Extremely long local parts (garbled data)
   /[+=%].*@/,  // Encoded characters in local part
+  /^u0022/i,   // Unicode-encoded quote prefix (malformed scrape data)
+  /^insurers@/i, // Generic role addresses that bounce
 ];
 
 const DISPOSABLE_DOMAINS = new Set([
   'mailinator.com', 'guerrillamail.com', 'tempmail.com', 'throwaway.email',
   'yopmail.com', '10minutemail.com', 'trashmail.com',
 ]);
+
+// SMTP RCPT TO verification — checks if the mailbox actually exists
+function smtpVerify(email, mxHost, timeout = 10000) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(25, mxHost);
+    let step = 0;
+    let response = '';
+    let resolved = false;
+
+    const done = (valid, reason) => {
+      if (resolved) return;
+      resolved = true;
+      try { socket.end('QUIT\r\n'); } catch {}
+      try { socket.destroy(); } catch {}
+      resolve({ valid, reason });
+    };
+
+    const timer = setTimeout(() => done(true, 'SMTP timeout — assuming valid'), timeout);
+
+    socket.setEncoding('utf-8');
+    socket.on('data', (data) => {
+      response += data;
+      const code = parseInt(response.substring(0, 3));
+
+      if (step === 0 && code >= 200 && code < 300) {
+        // Connected, send HELO
+        step = 1;
+        response = '';
+        socket.write('HELO monkflow.io\r\n');
+      } else if (step === 1 && code === 250) {
+        // HELO accepted, send MAIL FROM
+        step = 2;
+        response = '';
+        socket.write('MAIL FROM:<verify@monkflow.io>\r\n');
+      } else if (step === 2 && code === 250) {
+        // MAIL FROM accepted, send RCPT TO
+        step = 3;
+        response = '';
+        socket.write(`RCPT TO:<${email}>\r\n`);
+      } else if (step === 3) {
+        clearTimeout(timer);
+        if (code === 250 || code === 251) {
+          done(true, 'SMTP verified — mailbox exists');
+        } else if (code === 550 || code === 551 || code === 552 || code === 553) {
+          done(false, 'SMTP rejected — mailbox does not exist');
+        } else if (code === 450 || code === 451 || code === 452) {
+          // Temporary error — be optimistic (greylisting etc.)
+          done(true, 'SMTP temporary error — assuming valid');
+        } else {
+          done(true, `SMTP code ${code} — assuming valid`);
+        }
+      } else if (step < 3 && code >= 400) {
+        clearTimeout(timer);
+        // Server rejected early — can't verify, assume valid
+        done(true, `SMTP early rejection (code ${code}) — assuming valid`);
+      }
+    });
+
+    socket.on('error', () => {
+      clearTimeout(timer);
+      done(true, 'SMTP connection failed — assuming valid');
+    });
+
+    socket.on('timeout', () => {
+      clearTimeout(timer);
+      done(true, 'SMTP socket timeout — assuming valid');
+    });
+
+    socket.setTimeout(timeout);
+  });
+}
 
 async function verifyEmail(email) {
   if (!email || typeof email !== 'string') {
@@ -304,26 +379,29 @@ async function verifyEmail(email) {
   }
 
   // MX record check
+  let mxRecords;
   try {
-    const records = await Promise.race([
+    mxRecords = await Promise.race([
       resolveMx(domain),
       new Promise((_, reject) => setTimeout(() => reject(new Error('MX timeout')), 5000)),
     ]);
-    if (!records || records.length === 0) {
+    if (!mxRecords || mxRecords.length === 0) {
       return { valid: false, reason: 'No MX records — domain cannot receive email' };
     }
   } catch (err) {
     if (err.message === 'MX timeout') {
-      // Optimistic: treat timeout as valid
       return { valid: true, reason: 'MX lookup timed out — assuming valid' };
     }
     if (err.code === 'ENOTFOUND' || err.code === 'ENODATA') {
       return { valid: false, reason: 'Domain does not exist' };
     }
-    // Other DNS errors — be optimistic
     return { valid: true, reason: `DNS check inconclusive: ${err.message}` };
   }
 
+  // MX records exist — email domain is valid
+  // Note: mailbox-level verification (SMTP RCPT TO) is not reliable from
+  // cloud environments (port 25 blocked). Bounce protection is handled
+  // reactively via the Resend webhook at /api/v1/outreach/webhook/resend
   return { valid: true, reason: 'OK' };
 }
 

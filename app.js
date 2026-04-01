@@ -5605,13 +5605,15 @@ let outreachStats = null;
 let outreachPage = 1;
 let outreachPagination = null;
 let outreachFilterPriority = false;
+let outreachSearchQuery = '';
 
 async function loadOutreachData(page) {
   if (page !== undefined) outreachPage = page;
   try {
     const priorityParam = outreachFilterPriority ? '&priority=true' : '';
+    const searchParam = outreachSearchQuery ? `&search=${encodeURIComponent(outreachSearchQuery)}` : '';
     const [leadsRes, statsRes] = await Promise.all([
-      api.get(`/outreach?page=${outreachPage}&limit=50${priorityParam}`),
+      api.get(`/outreach?page=${outreachPage}&limit=50${priorityParam}${searchParam}`),
       api.get('/outreach/stats'),
     ]);
     outreachData = leadsRes.data || [];
@@ -5719,6 +5721,17 @@ function renderOutreachPage() {
         <div><strong style="color:var(--text-primary);">Touch 2:</strong> Day 3 — casual bump</div>
         <div><strong style="color:var(--text-primary);">Touch 3:</strong> Day 7 — value add</div>
         <div><strong style="color:var(--text-primary);">Touch 4:</strong> Day 14 — breakup</div>
+      </div>
+    </div>
+
+    <!-- Search Bar -->
+    <div style="margin-bottom:16px;">
+      <div style="position:relative;">
+        <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-tertiary);">${icons.search}</span>
+        <input class="input" type="text" placeholder="Search by name, email, or company..."
+          value="${outreachSearchQuery}"
+          oninput="clearTimeout(window._outreachSearchTimer); window._outreachSearchTimer = setTimeout(() => { outreachSearchQuery = this.value; loadOutreachData(1); }, 300);"
+          style="width:100%;padding-left:36px;" />
       </div>
     </div>
 

@@ -122,7 +122,7 @@ const createLead = catchAsync(async (req, res) => {
 });
 
 const getLeads = catchAsync(async (req, res) => {
-  const { status, priority, page = 1, limit = 50 } = req.query;
+  const { status, priority, search, page = 1, limit = 50 } = req.query;
   const pg = parseInt(page);
   const lim = parseInt(limit);
   const offset = (pg - 1) * lim;
@@ -136,6 +136,10 @@ const getLeads = catchAsync(async (req, res) => {
   }
   if (priority === 'true') {
     conditions.push('priority = true');
+  }
+  if (search) {
+    params.push(`%${search.toLowerCase()}%`);
+    conditions.push(`(LOWER(contact_name) LIKE $${params.length} OR LOWER(contact_email) LIKE $${params.length} OR LOWER(company) LIKE $${params.length})`);
   }
 
   const whereSql = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
@@ -407,6 +411,38 @@ const sendAiEmailEndpoint = catchAsync(async (req, res) => {
   res.json({ data: result, message: 'AI email sent' });
 });
 
+// ── Resend bounce/complaint webhook ────────────────────────
+
+const handleResendWebhook = catchAsync(async (req, res) => {
+  const { type, data } = req.body;
+
+  // Resend webhook events: email.bounced, email.complained, email.delivered
+  if (type === 'email.bounced' || type === 'email.complained') {
+    const toEmail = data?.to?.[0] || data?.email_id;
+
+    if (toEmail) {
+      // Find the lead and remove from active sequence
+      const { rows } = await query(
+        `UPDATE outreach_leads
+         SET status = 'closed',
+             next_followup_at = NULL,
+             notes = COALESCE(notes, '') || $2,
+             updated_at = NOW()
+         WHERE contact_email = $1 AND status = 'active'
+         RETURNING id, contact_email`,
+        [toEmail, `\n[Auto-removed: ${type} on ${new Date().toISOString().split('T')[0]}]`]
+      );
+
+      if (rows.length > 0) {
+        console.log(`[OUTREACH] ${type}: removed ${toEmail} from sequence`);
+      }
+    }
+  }
+
+  // Always respond 200 to acknowledge
+  res.json({ received: true });
+});
+
 module.exports = {
   createLead,
   getLeads,
@@ -423,4 +459,5 @@ module.exports = {
   generateAllAiEmails,
   previewAiEmail,
   sendAiEmailEndpoint,
+  handleResendWebhook,
 };
