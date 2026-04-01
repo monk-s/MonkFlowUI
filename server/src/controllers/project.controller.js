@@ -56,9 +56,9 @@ exports.getProject = async (req, res, next) => {
     );
     if (!project) return res.status(404).json({ error: { message: 'Project not found' } });
 
-    // Check access: owner can see all, client can only see their own
-    const isOwner = req.user.userId === process.env.OWNER_USER_ID;
-    if (!isOwner && project.user_id !== req.user.userId) {
+    // Check access: superadmin/owner can see all, client can only see their own
+    const isAdmin = req.user.role === 'superadmin' || req.user.userId === process.env.OWNER_USER_ID;
+    if (!isAdmin && project.user_id !== req.user.userId) {
       return res.status(403).json({ error: { message: 'Access denied' } });
     }
 
@@ -227,8 +227,8 @@ exports.downloadFile = async (req, res, next) => {
     if (!file) return res.status(404).json({ error: { message: 'File not found' } });
 
     // Check access
-    const isOwner = req.user.userId === process.env.OWNER_USER_ID;
-    if (!isOwner && file.user_id !== req.user.userId) {
+    const isAdmin = req.user.role === 'superadmin' || req.user.userId === process.env.OWNER_USER_ID;
+    if (!isAdmin && file.user_id !== req.user.userId) {
       return res.status(403).json({ error: { message: 'Access denied' } });
     }
 

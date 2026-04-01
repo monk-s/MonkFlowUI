@@ -4784,6 +4784,208 @@ async function loadAdminAccountDetail(userId) {
   }
 }
 
+function renderAdminProjectsSection(projects, user) {
+  const statusColors = { discovery: '#6366f1', in_progress: '#f59e0b', review: '#3b82f6', delivered: '#10b981', completed: '#22c55e' };
+  const statusLabels = { discovery: 'Discovery', in_progress: 'In Progress', review: 'Review', delivered: 'Delivered', completed: 'Completed' };
+
+  const projectRows = projects.length > 0 ? projects.map(p => `
+    <tr>
+      <td style="font-weight:500;">${p.name}</td>
+      <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${statusColors[p.status] || '#666'};"></span> ${statusLabels[p.status] || p.status}</span></td>
+      <td>${p.file_count || 0} files</td>
+      <td style="font-size:12px;color:var(--text-secondary);">${timeAgo(p.updated_at)}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="adminViewProject('${p.id}')">View</button>
+        <button class="btn btn-ghost btn-sm" onclick="adminUploadToProject('${p.id}')">Upload</button>
+      </td>
+    </tr>
+  `).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:24px;">No projects yet.</td></tr>`;
+
+  return `
+    <div class="card" style="padding:0;margin-bottom:24px;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+        <div class="card-title" style="margin:0;">Projects</div>
+        <button class="btn btn-primary btn-sm" onclick="adminCreateProject('${user.id}')">+ New Project</button>
+      </div>
+      <div class="table-wrapper" style="border:0;border-radius:0;">
+        <table>
+          <thead><tr><th>Name</th><th>Status</th><th>Files</th><th>Updated</th><th>Actions</th></tr></thead>
+          <tbody>${projectRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Drop Zone -->
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-title">Quick File Drop</div>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Create a new project and upload files in one step. Drag files here or click to select.</p>
+      <div id="admin-dropzone"
+        style="border:2px dashed var(--border);border-radius:12px;padding:40px;text-align:center;cursor:pointer;transition:all 0.2s;"
+        ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='rgba(0,204,106,0.05)';"
+        ondragleave="this.style.borderColor='var(--border)';this.style.background='transparent';"
+        ondrop="handleAdminFileDrop(event,'${user.id}')"
+        onclick="document.getElementById('admin-file-input').click()">
+        <div style="font-size:32px;margin-bottom:8px;">+</div>
+        <div style="font-weight:500;margin-bottom:4px;">Drop files here</div>
+        <div style="font-size:12px;color:var(--text-tertiary);">or click to browse (max 50MB per file)</div>
+      </div>
+      <input type="file" id="admin-file-input" multiple style="display:none;" onchange="handleAdminFileSelect(event,'${user.id}')">
+    </div>
+  `;
+}
+
+async function adminCreateProject(userId) {
+  const name = prompt('Project name:');
+  if (!name) return;
+  const desc = prompt('Description (optional):') || '';
+  try {
+    const res = await api.post('/projects', { name, description: desc, userId, status: 'delivered' });
+    showToast('Project created', 'success');
+    loadAdminAccountDetail(userId);
+  } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+
+async function adminViewProject(projectId) {
+  try {
+    const res = await api.get(`/projects/${projectId}`);
+    const p = res;
+    const files = p.files || [];
+    const updates = p.updates || [];
+    const statusLabels = { discovery: 'Discovery', in_progress: 'In Progress', review: 'Review', delivered: 'Delivered', completed: 'Completed' };
+
+    const fileList = files.length > 0
+      ? files.map(f => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+          <div>
+            <div style="font-weight:500;font-size:13px;">${f.original_name}</div>
+            <div style="font-size:11px;color:var(--text-tertiary);">${(f.file_size / 1024).toFixed(1)} KB &middot; ${new Date(f.created_at).toLocaleDateString()}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="downloadProjectFile('${p.id}','${f.id}','${f.original_name}')">Download</button>
+        </div>`).join('')
+      : '<p style="color:var(--text-tertiary);font-size:13px;">No files uploaded yet.</p>';
+
+    const timeline = updates.map(u => `
+      <div style="display:flex;gap:10px;padding:8px 0;">
+        <div style="width:8px;height:8px;border-radius:50%;background:${u.status ? '#10b981' : 'var(--border)'};margin-top:5px;flex-shrink:0;"></div>
+        <div>
+          <div style="font-size:13px;">${u.message}</div>
+          <div style="font-size:11px;color:var(--text-tertiary);">${timeAgo(u.created_at)}</div>
+        </div>
+      </div>
+    `).join('');
+
+    showModal(`
+      <h3 style="margin:0 0 4px;">${p.name}</h3>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">${statusLabels[p.status] || p.status} &middot; ${p.description || 'No description'}</p>
+
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <select id="admin-project-status" style="padding:6px 10px;border-radius:6px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);font-size:13px;">
+          ${Object.entries(statusLabels).map(([k,v]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${v}</option>`).join('')}
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="adminUpdateProjectStatus('${p.id}','${p.user_id}')">Update Status</button>
+        <button class="btn btn-secondary btn-sm" onclick="adminUploadToProject('${p.id}')">Upload Files</button>
+      </div>
+
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px;">Files (${files.length})</div>
+      ${fileList}
+
+      <div style="font-weight:600;font-size:13px;margin:16px 0 8px;">Timeline</div>
+      ${timeline}
+    `);
+  } catch (e) { showToast('Failed to load project: ' + e.message, 'error'); }
+}
+
+async function adminUpdateProjectStatus(projectId, userId) {
+  const status = document.getElementById('admin-project-status')?.value;
+  if (!status) return;
+  try {
+    await api.patch(`/projects/${projectId}`, { status });
+    showToast('Status updated', 'success');
+    closeModal();
+    loadAdminAccountDetail(userId);
+  } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+
+function adminUploadToProject(projectId) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.onchange = async (e) => {
+    const files = e.target.files;
+    for (const file of files) {
+      if (file.size > 50 * 1024 * 1024) { showToast(`${file.name} exceeds 50MB limit`, 'error'); continue; }
+      try {
+        const data = await fileToBase64(file);
+        await api.post(`/projects/${projectId}/files`, { filename: file.name, data, mimeType: file.type });
+        showToast(`Uploaded: ${file.name}`, 'success');
+      } catch (err) { showToast(`Failed to upload ${file.name}: ${err.message}`, 'error'); }
+    }
+    if (adminSelectedAccount) loadAdminAccountDetail(adminSelectedAccount);
+  };
+  input.click();
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleAdminFileDrop(event, userId) {
+  event.preventDefault();
+  const dropzone = document.getElementById('admin-dropzone');
+  if (dropzone) { dropzone.style.borderColor = 'var(--border)'; dropzone.style.background = 'transparent'; }
+
+  const files = event.dataTransfer.files;
+  if (!files.length) return;
+
+  // Create a new project from the first file's name or prompt
+  const projectName = files.length === 1
+    ? files[0].name.replace(/\.[^.]+$/, '')
+    : prompt('Project name for these files:') || `Delivery ${new Date().toLocaleDateString()}`;
+
+  try {
+    const res = await api.post('/projects', { name: projectName, description: `${files.length} file(s) delivered`, userId, status: 'delivered' });
+    const projectId = res.id;
+
+    for (const file of files) {
+      if (file.size > 50 * 1024 * 1024) { showToast(`${file.name} exceeds 50MB limit`, 'error'); continue; }
+      const data = await fileToBase64(file);
+      await api.post(`/projects/${projectId}/files`, { filename: file.name, data, mimeType: file.type });
+    }
+
+    showToast(`Project "${projectName}" created with ${files.length} file(s)`, 'success');
+    loadAdminAccountDetail(userId);
+  } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+
+async function handleAdminFileSelect(event, userId) {
+  const files = event.target.files;
+  if (!files.length) return;
+
+  const projectName = files.length === 1
+    ? files[0].name.replace(/\.[^.]+$/, '')
+    : prompt('Project name for these files:') || `Delivery ${new Date().toLocaleDateString()}`;
+
+  try {
+    const res = await api.post('/projects', { name: projectName, description: `${files.length} file(s) delivered`, userId, status: 'delivered' });
+    const projectId = res.id;
+
+    for (const file of files) {
+      if (file.size > 50 * 1024 * 1024) { showToast(`${file.name} exceeds 50MB limit`, 'error'); continue; }
+      const data = await fileToBase64(file);
+      await api.post(`/projects/${projectId}/files`, { filename: file.name, data, mimeType: file.type });
+    }
+
+    showToast(`Project "${projectName}" created with ${files.length} file(s)`, 'success');
+    loadAdminAccountDetail(userId);
+  } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+  event.target.value = '';
+}
+
 function renderAdminDashboard() {
   if (!adminData) {
     return `
@@ -5116,6 +5318,9 @@ function renderAdminAccountDetail() {
         </table>
       </div>
     </div>
+
+    <!-- Projects Section -->
+    ${renderAdminProjectsSection(acct.projects || [], user)}
   `;
 }
 

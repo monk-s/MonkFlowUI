@@ -87,7 +87,7 @@ const getAccounts = catchAsync(async (req, res) => {
 const getAccountDetail = catchAsync(async (req, res) => {
   const { userId } = req.params;
 
-  const [userResult, workflowsResult, agentsResult, execsResult] = await Promise.all([
+  const [userResult, workflowsResult, agentsResult, execsResult, projectsResult] = await Promise.all([
     query(`SELECT * FROM users WHERE id = $1`, [userId]),
     query(
       `SELECT id, name, status, trigger_type, total_runs, success_rate, last_run_at, created_at
@@ -107,6 +107,15 @@ const getAccountDetail = catchAsync(async (req, res) => {
        ORDER BY we.started_at DESC LIMIT 20`,
       [userId]
     ),
+    query(
+      `SELECT p.*,
+        (SELECT COUNT(*) FROM project_files pf WHERE pf.project_id = p.id) as file_count,
+        (SELECT pu.message FROM project_updates pu WHERE pu.project_id = p.id ORDER BY pu.created_at DESC LIMIT 1) as latest_update
+       FROM projects p
+       WHERE p.user_id = $1
+       ORDER BY p.updated_at DESC`,
+      [userId]
+    ),
   ]);
 
   if (userResult.rows.length === 0) {
@@ -119,6 +128,7 @@ const getAccountDetail = catchAsync(async (req, res) => {
       workflows: workflowsResult.rows,
       agents: agentsResult.rows,
       recentExecutions: execsResult.rows,
+      projects: projectsResult.rows,
     },
   });
 });
