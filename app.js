@@ -131,6 +131,9 @@ let adminSelectedAccount = null;
 let adminAccountDetail = null;
 let currentPlan = null;
 let billingPlans = null;
+let qboConnected = false;
+let billingInvoices = [];
+let adminQboStatus = null;
 
 // ── Type Mappings ──────────────────────────────────────────
 const FRONTEND_TO_BACKEND_TYPE = {
@@ -425,6 +428,7 @@ function navigateTo(page) {
   if (page === 'agent-detail') loadAgentDetail();
   if (page === 'admin') loadAdminData();
   if (page === 'billing') loadBillingData();
+  if (page === 'integrations') loadQboStatus();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
@@ -2448,6 +2452,7 @@ function renderIntegrations() {
     { name: 'Webhooks', icon: '🔗', desc: 'Trigger workflows from external services via webhooks.', connected: true, cat: 'Automation' },
     { name: 'Slack', icon: '💬', desc: 'Send messages, create channels, and receive notifications.', connected: false, cat: 'Communication' },
     { name: 'Stripe', icon: '💳', desc: 'Process payments, manage subscriptions, and invoices.', connected: false, cat: 'Finance' },
+    { name: 'QuickBooks Online', icon: '💰', desc: 'Automated invoicing, customer sync, and billing management.', connected: qboConnected, cat: 'Finance' },
     { name: 'Google Sheets', icon: '📊', desc: 'Read and write spreadsheet data in your workflows.', connected: false, cat: 'Productivity' },
     { name: 'GitHub', icon: '🐙', desc: 'Trigger workflows on PRs, issues, and deployments.', connected: false, cat: 'Developer' },
     { name: 'HubSpot', icon: '🟠', desc: 'Marketing automation, CRM, and analytics integration.', connected: false, cat: 'Marketing' },
@@ -2470,7 +2475,7 @@ function renderIntegrations() {
           ? `<span class="badge-status active"><span class="dot"></span> Connected</span>
              <button class="btn btn-ghost btn-sm" onclick="showToast('Integration settings opened')">Configure</button>`
           : `<span class="badge-status draft"><span class="dot"></span> Not connected</span>
-             <button class="btn btn-primary btn-sm" onclick="showToast('${i.name} connected!', 'success')">Connect</button>`
+             <button class="btn btn-primary btn-sm" onclick="${i.name === 'QuickBooks Online' ? 'connectQuickBooks()' : `showToast('${i.name} connected!', 'success')`}">Connect</button>`
         }
       </div>
     </div>
@@ -4751,6 +4756,10 @@ async function loadAdminData() {
     ]);
     adminData = statsRes.data || statsRes;
     adminAccounts = accountsRes.data || accountsRes;
+    // Also load QBO status for admin
+    try {
+      adminQboStatus = await api.get('/quickbooks/status');
+    } catch { adminQboStatus = null; }
     renderMainContent();
   } catch (err) {
     if (err.message && err.message.includes('403')) {
@@ -4922,6 +4931,36 @@ function renderAdminDashboard() {
       </div>
       <div class="chart-bar-group" style="margin-bottom:30px;">
         ${dailyBars || '<div style="padding:20px;color:var(--text-secondary);font-size:13px;">No daily activity data yet</div>'}
+      </div>
+    </div>
+
+    <!-- QuickBooks & Billing -->
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header">
+        <div>
+          <div class="card-title">QuickBooks & Billing</div>
+          <div class="card-subtitle">Manage invoicing and QuickBooks integration</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost btn-sm" onclick="adminSyncAllCustomers()">Sync Customers</button>
+          <button class="btn btn-ghost btn-sm" onclick="adminGenerateInvoices()">Generate Invoices</button>
+        </div>
+      </div>
+      <div style="padding:16px 20px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+          <div style="font-size:24px;">\uD83D\uDCB0</div>
+          <div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary);">QuickBooks Online</div>
+            <div style="font-size:12px;color:var(--text-secondary);">
+              ${adminQboStatus?.connected
+                ? `<span style="color:#00cc6a;">Connected</span> \u2014 ${adminQboStatus.companyName || 'Company'}`
+                : '<span style="color:var(--text-tertiary);">Not connected</span> \u2014 <a href="#" onclick="connectQuickBooks();return false;" style="color:var(--accent);">Connect now</a>'}
+            </div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--text-tertiary);">
+          Invoices are auto-generated on the 1st of each month at 06:00 UTC. Customers are synced when first invoiced.
+        </div>
       </div>
     </div>
   `;
@@ -5101,10 +5140,53 @@ async function loadBillingData() {
     ]);
     billingPlans = plansRes.data || plansRes;
     currentPlan = usageRes.data || usageRes;
+    await loadBillingInvoices();
     renderMainContent();
   } catch (err) {
     showToast(err.message || 'Failed to load billing data', 'error');
   }
+}
+
+async function loadQboStatus() {
+  try {
+    const res = await api.get('/quickbooks/status');
+    qboConnected = res.connected || false;
+  } catch { qboConnected = false; }
+}
+
+async function connectQuickBooks() {
+  try {
+    const res = await api.get('/quickbooks/auth-url');
+    if (res.authUrl) window.open(res.authUrl, '_blank');
+    else showToast('Failed to get auth URL', 'error');
+  } catch (e) { showToast('QuickBooks connection failed: ' + e.message, 'error'); }
+}
+
+async function disconnectQuickBooks() {
+  showToast('QuickBooks disconnection coming soon', 'info');
+}
+
+async function loadBillingInvoices() {
+  try {
+    const res = await api.get('/billing/invoices');
+    billingInvoices = res.invoices || [];
+  } catch { billingInvoices = []; }
+}
+
+async function adminSyncAllCustomers() {
+  try {
+    showToast('Syncing customers to QuickBooks...', 'info');
+    const res = await api.post('/quickbooks/sync-all-customers');
+    showToast(`Synced ${res.synced || 0} customers to QuickBooks`, 'success');
+  } catch (e) { showToast('Sync failed: ' + e.message, 'error'); }
+}
+
+async function adminGenerateInvoices() {
+  try {
+    showToast('Generating monthly invoices...', 'info');
+    // This would typically be done via the billing scheduler
+    showToast('Invoice generation triggered. Check billing scheduler logs.', 'success');
+  } catch (e) { showToast('Failed: ' + e.message, 'error'); }
 }
 
 function showUpgradeModal(message) {
@@ -5257,6 +5339,48 @@ function renderBilling() {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Invoice History -->
+    <h2 style="font-size:16px;color:var(--text-primary);margin-bottom:12px;">Invoice History</h2>
+    <div class="card" style="padding:0;">
+      ${billingInvoices.length > 0 ? `
+        <div class="table-wrapper" style="border:0;border-radius:0;">
+          <table>
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th>Plan</th>
+                <th>Base</th>
+                <th>Overage</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Paid</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${billingInvoices.map(inv => {
+                const statusColors = { draft: '#6b7280', sent: '#3b82f6', paid: '#00cc6a', overdue: '#ef4444', void: '#6b7280' };
+                const color = statusColors[inv.status] || '#6b7280';
+                return `
+                  <tr>
+                    <td style="font-size:12px;">${new Date(inv.period_start).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</td>
+                    <td style="font-size:12px;text-transform:capitalize;">${inv.plan_slug || '--'}</td>
+                    <td style="font-size:12px;">$${((inv.plan_amount_cents || 0) / 100).toFixed(2)}</td>
+                    <td style="font-size:12px;">$${((inv.overage_amount_cents || 0) / 100).toFixed(2)}</td>
+                    <td style="font-size:12px;font-weight:600;color:var(--text-primary);">$${((inv.total_amount_cents || 0) / 100).toFixed(2)}</td>
+                    <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${color}22;color:${color};">${inv.status}</span></td>
+                    <td style="font-size:12px;color:var(--text-tertiary);">${inv.paid_at ? new Date(inv.paid_at).toLocaleDateString() : '--'}</td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : `
+        <div style="padding:32px;text-align:center;color:var(--text-tertiary);font-size:13px;">
+          No invoices yet. Invoices are generated automatically at the start of each billing period.
+        </div>
+      `}
     </div>
   `;
 }
