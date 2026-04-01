@@ -24,16 +24,15 @@ function getWarmingLimits() {
     // Days 0-2: 15 per sender × 10 senders = 150/day
     return { daily: 150, perSender: 15, phase: 'warm-1' };
   } else if (daysSinceLaunch < 7) {
-    // Days 3-6: 25 per sender × 10 senders = 250/day
-    return { daily: 250, perSender: 25, phase: 'warm-2' };
-  } else if (daysSinceLaunch < 14) {
-    // Days 7-13: 40 per sender × 10 senders = 400/day
-    return { daily: 400, perSender: 40, phase: 'warm-3' };
+    // Days 3-6: 20 per sender × 10 senders = 200/day
+    return { daily: 200, perSender: 20, phase: 'warm-2' };
   } else {
-    // Day 14+: full volume from env vars
+    // Day 7+: full volume — 25 per sender × 10 = 250/day
+    // Capped at 250 to stay within SerpAPI 5k/month budget
+    // (140 searches/day × 22 weekdays = 3,080 searches → ~200-250 qualified leads/day)
     return {
-      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 500,
-      perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 50,
+      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 250,
+      perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 25,
       phase: 'full',
     };
   }
