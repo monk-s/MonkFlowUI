@@ -1,0 +1,310 @@
+const catchAsync = require('../utils/catchAsync');
+const { query } = require('../config/database');
+const ApiError = require('../utils/ApiError');
+const { sendEmail } = require('../services/email.service');
+
+// ── Follow-up templates ────────────────────────────────────
+// Touch 1 = original cold email (sent manually / externally)
+// Touch 2 = Day 3 bump
+// Touch 3 = Day 7 value-add
+// Touch 4 = Day 14 breakup
+
+function getFollowupTemplate(touchNumber, lead) {
+  const firstName = (lead.contact_name || '').split(' ')[0] || 'there';
+  const company = lead.company ? ` at ${lead.company}` : '';
+
+  switch (touchNumber) {
+    case 2:
+      return {
+        subject: `Re: Quick question`,
+        body: `<div style="font-family:sans-serif;max-width:600px;">
+          <p>Hey ${firstName},</p>
+          <p>Just floating this back up in case it got buried. Would love to chat if you're open to it.</p>
+          <p>Let me know either way — happy to answer any questions.</p>
+          <p>Best,<br/>Nathan</p>
+        </div>`,
+      };
+    case 3:
+      return {
+        subject: `Re: Quick question`,
+        body: `<div style="font-family:sans-serif;max-width:600px;">
+          <p>Hi ${firstName},</p>
+          <p>Wanted to share a quick thought — I've been looking at how businesses${company} handle their workflows, and there's usually a lot of room to automate the repetitive stuff.</p>
+          <p>If you're curious, I'd be happy to walk through a couple ideas. No pressure at all.</p>
+          <p>Cheers,<br/>Nathan</p>
+        </div>`,
+      };
+    case 4:
+      return {
+        subject: `Re: Quick question`,
+        body: `<div style="font-family:sans-serif;max-width:600px;">
+          <p>Hey ${firstName},</p>
+          <p>Totally understand if the timing's off — just didn't want to drop the ball on my end.</p>
+          <p>If things change down the road, my door's always open. Wishing you and the team${company} all the best.</p>
+          <p>Take care,<br/>Nathan</p>
+        </div>`,
+      };
+    default:
+      return null;
+  }
+}
+
+// Calculate next follow-up date (business days only)
+function addBusinessDays(from, days) {
+  const date = new Date(from);
+  let added = 0;
+  while (added < days) {
+    date.setDate(date.getDate() + 1);
+    const dow = date.getDay();
+    if (dow !== 0 && dow !== 6) added++;
+  }
+  return date;
+}
+
+function getNextFollowupDate(touchCount, lastSentAt) {
+  const from = lastSentAt ? new Date(lastSentAt) : new Date();
+  switch (touchCount) {
+    case 0: return addBusinessDays(from, 3);  // After initial: 3 business days
+    case 1: return addBusinessDays(from, 3);  // After touch 1 (initial): 3 biz days → touch 2
+    case 2: return addBusinessDays(from, 4);  // After touch 2: +4 biz days (~Day 7)
+    case 3: return addBusinessDays(from, 5);  // After touch 3: +5 biz days (~Day 14)
+    default: return null; // Sequence complete after touch 4
+  }
+}
+
+// ── OOO / auto-reply detection ─────────────────────────────
+const OOO_PATTERNS = [
+  /out of (the )?office/i,
+  /auto[- ]?reply/i,
+  /automatic reply/i,
+  /away from (my )?desk/i,
+  /on (annual |paid )?leave/i,
+  /on vacation/i,
+  /on holiday/i,
+  /currently (out|away|unavailable)/i,
+  /will (be back|return|respond|get back)/i,
+  /limited access to email/i,
+  /thank you for (your )?(email|message|reaching out).*will (get back|respond|reply)/i,
+  /i('m| am) (currently )?(out|away|traveling|travelling)/i,
+];
+
+function isAutoReply(subject, body) {
+  const text = `${subject || ''} ${body || ''}`.toLowerCase();
+  return OOO_PATTERNS.some(p => p.test(text));
+}
+
+// ── CRUD Endpoints ─────────────────────────────────────────
+
+const createLead = catchAsync(async (req, res) => {
+  const { contact_name, contact_email, company, notes, initial_email_date } = req.body;
+  if (!contact_name || !contact_email) {
+    throw ApiError.badRequest('Contact name and email are required');
+  }
+
+  // Touch 0 = initial cold email (already sent), so we set touch_count=1
+  const sentDate = initial_email_date ? new Date(initial_email_date) : new Date();
+  const nextFollowup = getNextFollowupDate(1, sentDate);
+
+  const { rows } = await query(
+    `INSERT INTO outreach_leads (contact_name, contact_email, company, notes, touch_count, last_sent_at, next_followup_at)
+     VALUES ($1, $2, $3, $4, 1, $5, $6) RETURNING *`,
+    [contact_name, contact_email, company || null, notes || null, sentDate, nextFollowup]
+  );
+
+  res.status(201).json({ data: rows[0], message: 'Lead added to sequence' });
+});
+
+const getLeads = catchAsync(async (req, res) => {
+  const { status, limit = 50 } = req.query;
+  let sql = `SELECT * FROM outreach_leads`;
+  const params = [];
+
+  if (status) {
+    sql += ` WHERE status = $1`;
+    params.push(status);
+  }
+  sql += ` ORDER BY next_followup_at ASC NULLS LAST, created_at DESC LIMIT $${params.length + 1}`;
+  params.push(parseInt(limit));
+
+  const { rows } = await query(sql, params);
+  res.json({ data: rows });
+});
+
+const getLead = catchAsync(async (req, res) => {
+  const [leadResult, emailsResult] = await Promise.all([
+    query('SELECT * FROM outreach_leads WHERE id = $1', [req.params.id]),
+    query('SELECT * FROM outreach_emails WHERE lead_id = $1 ORDER BY touch_number ASC', [req.params.id]),
+  ]);
+
+  if (!leadResult.rows[0]) throw ApiError.notFound('Lead not found');
+
+  res.json({
+    data: {
+      ...leadResult.rows[0],
+      emails: emailsResult.rows,
+    },
+  });
+});
+
+const updateLead = catchAsync(async (req, res) => {
+  const { contact_name, contact_email, company, notes, status } = req.body;
+  const { rows } = await query(
+    `UPDATE outreach_leads
+     SET contact_name = COALESCE($1, contact_name),
+         contact_email = COALESCE($2, contact_email),
+         company = COALESCE($3, company),
+         notes = COALESCE($4, notes),
+         status = COALESCE($5, status),
+         updated_at = NOW()
+     WHERE id = $6 RETURNING *`,
+    [contact_name, contact_email, company, notes, status, req.params.id]
+  );
+
+  if (!rows[0]) throw ApiError.notFound('Lead not found');
+  res.json({ data: rows[0] });
+});
+
+const deleteLead = catchAsync(async (req, res) => {
+  const { rows } = await query('DELETE FROM outreach_leads WHERE id = $1 RETURNING id', [req.params.id]);
+  if (!rows[0]) throw ApiError.notFound('Lead not found');
+  res.json({ message: 'Lead removed from sequence' });
+});
+
+// ── Stats ──────────────────────────────────────────────────
+
+const getStats = catchAsync(async (req, res) => {
+  const { rows } = await query(`
+    SELECT
+      COUNT(*)::int as total,
+      COUNT(*) FILTER (WHERE status = 'active')::int as active,
+      COUNT(*) FILTER (WHERE status = 'replied')::int as replied,
+      COUNT(*) FILTER (WHERE status = 'closed')::int as closed,
+      COUNT(*) FILTER (WHERE next_followup_at <= NOW() AND status = 'active')::int as due_now
+    FROM outreach_leads
+  `);
+  res.json({ data: rows[0] });
+});
+
+// ── Mark reply ─────────────────────────────────────────────
+
+const markReply = catchAsync(async (req, res) => {
+  const { is_ooo, reply_snippet } = req.body;
+  const ooo = is_ooo || isAutoReply(reply_snippet || '', reply_snippet || '');
+
+  if (ooo) {
+    // OOO — keep in sequence, just note it
+    const { rows } = await query(
+      `UPDATE outreach_leads
+       SET reply_is_ooo = true, notes = COALESCE(notes, '') || E'\n[OOO auto-reply detected]', updated_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    res.json({ data: rows[0], message: 'OOO detected — lead stays in sequence' });
+  } else {
+    // Real reply — stop sequence
+    const { rows } = await query(
+      `UPDATE outreach_leads
+       SET status = 'replied', replied_at = NOW(), next_followup_at = NULL, updated_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    res.json({ data: rows[0], message: 'Lead marked as replied — sequence stopped' });
+  }
+});
+
+// ── Process due follow-ups ─────────────────────────────────
+
+const processDueFollowups = catchAsync(async (req, res) => {
+  const { rows: dueLeads } = await query(
+    `SELECT * FROM outreach_leads
+     WHERE status = 'active'
+       AND next_followup_at <= NOW()
+       AND touch_count < 4
+     ORDER BY next_followup_at ASC`
+  );
+
+  const results = { sent: 0, skipped: 0, completed: 0, errors: [] };
+
+  for (const lead of dueLeads) {
+    const nextTouch = lead.touch_count + 1;
+    const template = getFollowupTemplate(nextTouch, lead);
+
+    if (!template) {
+      // Sequence complete
+      await query(
+        `UPDATE outreach_leads SET status = 'closed', next_followup_at = NULL, updated_at = NOW() WHERE id = $1`,
+        [lead.id]
+      );
+      results.completed++;
+      continue;
+    }
+
+    try {
+      const emailResult = await sendEmail({
+        to: lead.contact_email,
+        subject: template.subject,
+        html: template.body,
+      });
+
+      const gmailId = emailResult?.data?.id || emailResult?.id || null;
+
+      // Record the email
+      await query(
+        `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [lead.id, nextTouch, template.subject, template.body, gmailId]
+      );
+
+      // Update lead
+      const nextFollowup = getNextFollowupDate(nextTouch, new Date());
+      await query(
+        `UPDATE outreach_leads
+         SET touch_count = $1, last_sent_at = NOW(), next_followup_at = $2, updated_at = NOW()
+         WHERE id = $3`,
+        [nextTouch, nextFollowup, lead.id]
+      );
+
+      results.sent++;
+    } catch (err) {
+      results.errors.push({ lead_id: lead.id, email: lead.contact_email, error: err.message });
+    }
+  }
+
+  res.json({ data: results, message: `Processed ${dueLeads.length} leads: ${results.sent} sent, ${results.completed} completed` });
+});
+
+// ── Send preview (dry run) ─────────────────────────────────
+
+const previewFollowup = catchAsync(async (req, res) => {
+  const { rows } = await query('SELECT * FROM outreach_leads WHERE id = $1', [req.params.id]);
+  if (!rows[0]) throw ApiError.notFound('Lead not found');
+
+  const lead = rows[0];
+  const nextTouch = lead.touch_count + 1;
+  const template = getFollowupTemplate(nextTouch, lead);
+
+  if (!template) {
+    return res.json({ data: null, message: 'Sequence complete — no more follow-ups' });
+  }
+
+  res.json({
+    data: {
+      touch_number: nextTouch,
+      to: lead.contact_email,
+      subject: template.subject,
+      body: template.body,
+    },
+  });
+});
+
+module.exports = {
+  createLead,
+  getLeads,
+  getLead,
+  updateLead,
+  deleteLead,
+  getStats,
+  markReply,
+  processDueFollowups,
+  previewFollowup,
+};

@@ -428,6 +428,7 @@ function navigateTo(page) {
   if (page === 'agent-detail') loadAgentDetail();
   if (page === 'admin') loadAdminData();
   if (page === 'billing') loadBillingData();
+  if (page === 'outreach') loadOutreachData();
   if (page === 'integrations') loadQboStatus();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
@@ -1022,6 +1023,9 @@ function renderSidebar() {
       <div class="nav-item" data-page="admin" onclick="navigateTo('admin')">
         ${icons.shield} Admin Dashboard
       </div>
+      <div class="nav-item" data-page="outreach" onclick="navigateTo('outreach')">
+        ${icons.send} Outreach
+      </div>
       ` : ''}
 
       <div class="nav-section-label">Account</div>
@@ -1324,6 +1328,7 @@ function renderMainContent() {
     'agent-detail': renderAgentDetail,
     'admin': renderAdminDashboard,
     'admin-account': renderAdminAccountDetail,
+    'outreach': renderOutreachPage,
     'billing': renderBilling,
   };
   main.innerHTML = (pages[currentPage] || renderDashboard)();
@@ -5548,7 +5553,7 @@ function renderBilling() {
       </div>
     </div>
 
-    <!-- Invoice History -->
+    <!-- Invoice History  -->
     <h2 style="font-size:16px;color:var(--text-primary);margin-bottom:12px;">Invoice History</h2>
     <div class="card" style="padding:0;">
       ${billingInvoices.length > 0 ? `
@@ -5590,4 +5595,392 @@ function renderBilling() {
       `}
     </div>
   `;
+}
+
+// ============================================================
+// OUTREACH — Automated Email Follow-up Sequences
+// ============================================================
+let outreachData = null;
+let outreachStats = null;
+
+async function loadOutreachData() {
+  try {
+    const [leadsRes, statsRes] = await Promise.all([
+      api.get('/outreach?limit=100'),
+      api.get('/outreach/stats'),
+    ]);
+    outreachData = leadsRes.data || [];
+    outreachStats = statsRes.data || {};
+    renderMainContent();
+  } catch (err) {
+    showToast(err.message || 'Failed to load outreach data', 'error');
+  }
+}
+
+function renderOutreachPage() {
+  if (!outreachData) {
+    return `<div class="card" style="padding:40px;text-align:center;">
+      <div class="spinner"></div>
+      <p style="color:var(--text-tertiary);margin-top:12px;">Loading outreach data...</p>
+    </div>`;
+  }
+
+  const stats = outreachStats || {};
+  const statCards = [
+    { label: 'Total Leads', value: stats.total || 0, color: '#6b7280' },
+    { label: 'Active Sequences', value: stats.active || 0, color: '#3b82f6' },
+    { label: 'Replied', value: stats.replied || 0, color: '#00cc6a' },
+    { label: 'Due Now', value: stats.due_now || 0, color: stats.due_now > 0 ? '#f59e0b' : '#6b7280' },
+  ];
+
+  const statusColors = {
+    active: { bg: '#3b82f622', fg: '#3b82f6' },
+    replied: { bg: '#00cc6a22', fg: '#00cc6a' },
+    closed: { bg: '#6b728022', fg: '#6b7280' },
+    unsubscribed: { bg: '#ef444422', fg: '#ef4444' },
+  };
+
+  const touchLabels = { 1: 'Initial', 2: 'Bump', 3: 'Value-add', 4: 'Breakup' };
+
+  const rows = outreachData.map(lead => {
+    const sc = statusColors[lead.status] || statusColors.active;
+    const nextDate = lead.next_followup_at ? new Date(lead.next_followup_at) : null;
+    const isOverdue = nextDate && nextDate <= new Date() && lead.status === 'active';
+    const nextStr = nextDate
+      ? `<span style="color:${isOverdue ? '#f59e0b' : 'var(--text-tertiary)'};font-weight:${isOverdue ? '600' : '400'};">${isOverdue ? 'Due now' : nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`
+      : '<span style="color:var(--text-tertiary);">—</span>';
+
+    return `
+      <tr onclick="viewOutreachLead('${lead.id}')" style="cursor:pointer;">
+        <td>
+          <div style="font-weight:500;color:var(--text-primary);">${lead.contact_name}</div>
+          <div style="font-size:11px;color:var(--text-tertiary);">${lead.company || ''}</div>
+        </td>
+        <td style="font-size:12px;color:var(--text-secondary);">${lead.contact_email}</td>
+        <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${sc.bg};color:${sc.fg};">${lead.status}</span></td>
+        <td style="font-size:12px;color:var(--text-secondary);">${touchLabels[lead.touch_count] || lead.touch_count}/4</td>
+        <td style="font-size:12px;">${nextStr}</td>
+        <td style="font-size:12px;color:var(--text-tertiary);">${timeAgo(lead.created_at)}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="page-header">
+      <div>
+        <h1>Outreach Sequences</h1>
+        <p class="page-desc">Automated follow-up emails on a 3-touch cadence (Day 3, Day 7, Day 14)</p>
+      </div>
+      <div class="page-actions" style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="processOutreachFollowups()">
+          ${icons.play} Process Due
+        </button>
+        <button class="btn btn-primary" onclick="showAddLeadModal()">
+          ${icons.plus} Add Lead
+        </button>
+      </div>
+    </div>
+
+    <!-- Stats Row -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
+      ${statCards.map(s => `
+        <div class="card" style="padding:16px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">${s.label}</div>
+          <div style="font-size:28px;font-weight:700;color:${s.color};">${s.value}</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- Sequence Info -->
+    <div class="card" style="padding:16px;margin-bottom:24px;border-left:3px solid #3b82f6;">
+      <div style="display:flex;gap:32px;font-size:13px;color:var(--text-secondary);">
+        <div><strong style="color:var(--text-primary);">Touch 1:</strong> Your initial cold email (logged when you add the lead)</div>
+        <div><strong style="color:var(--text-primary);">Touch 2:</strong> Day 3 — casual bump</div>
+        <div><strong style="color:var(--text-primary);">Touch 3:</strong> Day 7 — value add</div>
+        <div><strong style="color:var(--text-primary);">Touch 4:</strong> Day 14 — breakup</div>
+      </div>
+    </div>
+
+    <!-- Leads Table -->
+    <div class="card" style="padding:0;">
+      ${outreachData.length > 0 ? `
+        <div class="table-wrapper" style="border:0;border-radius:0;">
+          <table>
+            <thead>
+              <tr>
+                <th>Contact</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Touch</th>
+                <th>Next Follow-up</th>
+                <th>Added</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      ` : `
+        <div style="padding:48px;text-align:center;">
+          <div style="font-size:40px;margin-bottom:12px;">&#9993;</div>
+          <p style="color:var(--text-secondary);margin-bottom:16px;">No outreach leads yet. Add your first lead to start the sequence.</p>
+          <button class="btn btn-primary" onclick="showAddLeadModal()">
+            ${icons.plus} Add Your First Lead
+          </button>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function showAddLeadModal() {
+  showModal(`
+    <div class="modal-header">
+      <h2 class="modal-title">Add Lead to Sequence</h2>
+      <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+    </div>
+    <div style="padding:24px;">
+      <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:20px;">
+        Add a contact after you've sent them your initial cold email. The system will automatically follow up on Day 3, Day 7, and Day 14 — skipping anyone who replies (unless it's an OOO auto-reply).
+      </p>
+      <div style="display:grid;gap:16px;">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Contact Name *</label>
+          <input id="ol-name" class="input" placeholder="Jane Smith" style="width:100%;" />
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Email *</label>
+          <input id="ol-email" class="input" type="email" placeholder="jane@company.com" style="width:100%;" />
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Company</label>
+          <input id="ol-company" class="input" placeholder="Acme Inc" style="width:100%;" />
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Date Initial Email Sent</label>
+          <input id="ol-date" class="input" type="date" value="${new Date().toISOString().split('T')[0]}" style="width:100%;" />
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Notes</label>
+          <textarea id="ol-notes" class="input" rows="2" placeholder="Context about the lead..." style="width:100%;resize:vertical;"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitNewLead()">Add to Sequence</button>
+      </div>
+    </div>
+  `);
+}
+
+async function submitNewLead() {
+  const name = document.getElementById('ol-name')?.value?.trim();
+  const email = document.getElementById('ol-email')?.value?.trim();
+  const company = document.getElementById('ol-company')?.value?.trim();
+  const date = document.getElementById('ol-date')?.value;
+  const notes = document.getElementById('ol-notes')?.value?.trim();
+
+  if (!name || !email) {
+    showToast('Name and email are required', 'error');
+    return;
+  }
+
+  try {
+    await api.post('/outreach', {
+      contact_name: name,
+      contact_email: email,
+      company: company || undefined,
+      notes: notes || undefined,
+      initial_email_date: date || undefined,
+    });
+    closeModal();
+    showToast('Lead added — first follow-up scheduled', 'success');
+    loadOutreachData();
+  } catch (err) {
+    showToast(err.message || 'Failed to add lead', 'error');
+  }
+}
+
+async function viewOutreachLead(id) {
+  try {
+    const res = await api.get(`/outreach/${id}`);
+    const lead = res.data;
+
+    const statusColors = {
+      active: { bg: '#3b82f622', fg: '#3b82f6' },
+      replied: { bg: '#00cc6a22', fg: '#00cc6a' },
+      closed: { bg: '#6b728022', fg: '#6b7280' },
+      unsubscribed: { bg: '#ef444422', fg: '#ef4444' },
+    };
+    const sc = statusColors[lead.status] || statusColors.active;
+    const touchLabels = { 1: 'Initial Cold Email', 2: 'Day 3 — Bump', 3: 'Day 7 — Value Add', 4: 'Day 14 — Breakup' };
+
+    const timeline = (lead.emails || []).map(em => `
+      <div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
+        <div style="width:8px;height:8px;border-radius:50%;background:#00cc6a;margin-top:6px;flex-shrink:0;"></div>
+        <div style="flex:1;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-weight:600;font-size:13px;color:var(--text-primary);">${touchLabels[em.touch_number] || 'Touch ' + em.touch_number}</span>
+            <span style="font-size:11px;color:var(--text-tertiary);">${new Date(em.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px;">Subject: ${em.subject}</div>
+        </div>
+      </div>
+    `).join('');
+
+    const nextDate = lead.next_followup_at ? new Date(lead.next_followup_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'None';
+
+    showModal(`
+      <div class="modal-header">
+        <h2 class="modal-title">${lead.contact_name}</h2>
+        <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+      </div>
+      <div style="padding:24px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+          <div>
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Email</div>
+            <div style="font-size:14px;color:var(--text-primary);margin-top:2px;">${lead.contact_email}</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Company</div>
+            <div style="font-size:14px;color:var(--text-primary);margin-top:2px;">${lead.company || '—'}</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Status</div>
+            <div style="margin-top:4px;"><span style="display:inline-block;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:600;background:${sc.bg};color:${sc.fg};">${lead.status}</span></div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Next Follow-up</div>
+            <div style="font-size:14px;color:var(--text-primary);margin-top:2px;">${nextDate}</div>
+          </div>
+        </div>
+
+        ${lead.notes ? `<div style="background:var(--bg-secondary);padding:12px;border-radius:8px;font-size:13px;color:var(--text-secondary);margin-bottom:20px;white-space:pre-wrap;">${lead.notes}</div>` : ''}
+
+        <h3 style="font-size:14px;margin-bottom:12px;color:var(--text-primary);">Sequence Timeline</h3>
+        <div style="margin-bottom:20px;">
+          <div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
+            <div style="width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-top:6px;flex-shrink:0;"></div>
+            <div style="flex:1;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-weight:600;font-size:13px;color:var(--text-primary);">Initial Cold Email</span>
+                <span style="font-size:11px;color:var(--text-tertiary);">${new Date(lead.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              </div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px;">Sent by you (logged on add)</div>
+            </div>
+          </div>
+          ${timeline}
+          ${lead.status === 'active' && lead.touch_count < 4 ? `
+            <div style="display:flex;gap:12px;padding:12px 0;opacity:0.5;">
+              <div style="width:8px;height:8px;border-radius:50%;border:2px dashed var(--text-tertiary);margin-top:6px;flex-shrink:0;"></div>
+              <div style="font-size:13px;color:var(--text-tertiary);">Touch ${lead.touch_count + 1} scheduled for ${nextDate}</div>
+            </div>
+          ` : ''}
+        </div>
+
+        <div style="display:flex;gap:8px;justify-content:space-between;border-top:1px solid var(--border);padding-top:16px;">
+          <div style="display:flex;gap:8px;">
+            ${lead.status === 'active' ? `
+              <button class="btn btn-primary btn-sm" onclick="markLeadReplied('${lead.id}', false)">Mark as Replied</button>
+              <button class="btn btn-ghost btn-sm" onclick="markLeadReplied('${lead.id}', true)">OOO Reply</button>
+            ` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="previewNextFollowup('${lead.id}')">Preview Next</button>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <select class="input" style="font-size:12px;padding:4px 8px;" onchange="updateLeadStatus('${lead.id}', this.value)">
+              <option value="active" ${lead.status === 'active' ? 'selected' : ''}>Active</option>
+              <option value="replied" ${lead.status === 'replied' ? 'selected' : ''}>Replied</option>
+              <option value="closed" ${lead.status === 'closed' ? 'selected' : ''}>Closed</option>
+              <option value="unsubscribed" ${lead.status === 'unsubscribed' ? 'selected' : ''}>Unsubscribed</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" style="color:#ef4444;" onclick="deleteOutreachLead('${lead.id}')">
+              ${icons.trash}
+            </button>
+          </div>
+        </div>
+      </div>
+    `);
+  } catch (err) {
+    showToast(err.message || 'Failed to load lead', 'error');
+  }
+}
+
+async function markLeadReplied(id, isOoo) {
+  try {
+    const res = await api.post(`/outreach/${id}/mark-reply`, { is_ooo: isOoo });
+    showToast(res.message || (isOoo ? 'OOO noted — lead stays in sequence' : 'Lead marked as replied'), 'success');
+    closeModal();
+    loadOutreachData();
+  } catch (err) {
+    showToast(err.message || 'Failed to update', 'error');
+  }
+}
+
+async function updateLeadStatus(id, status) {
+  try {
+    await api.put(`/outreach/${id}`, { status });
+    showToast(`Status updated to ${status}`, 'success');
+    closeModal();
+    loadOutreachData();
+  } catch (err) {
+    showToast(err.message || 'Failed to update', 'error');
+  }
+}
+
+async function deleteOutreachLead(id) {
+  if (!confirm('Remove this lead from the sequence?')) return;
+  try {
+    await api.delete(`/outreach/${id}`);
+    showToast('Lead removed', 'success');
+    closeModal();
+    loadOutreachData();
+  } catch (err) {
+    showToast(err.message || 'Failed to delete', 'error');
+  }
+}
+
+async function previewNextFollowup(id) {
+  try {
+    const res = await api.get(`/outreach/${id}/preview`);
+    const preview = res.data;
+    if (!preview) {
+      showToast('Sequence complete — no more follow-ups', 'info');
+      return;
+    }
+    showModal(`
+      <div class="modal-header">
+        <h2 class="modal-title">Preview: Touch ${preview.touch_number}</h2>
+        <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+      </div>
+      <div style="padding:24px;">
+        <div style="margin-bottom:16px;">
+          <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px;">To</div>
+          <div style="font-size:14px;color:var(--text-primary);">${preview.to}</div>
+        </div>
+        <div style="margin-bottom:16px;">
+          <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px;">Subject</div>
+          <div style="font-size:14px;color:var(--text-primary);">${preview.subject}</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px;">Body</div>
+          <div style="background:var(--bg-secondary);padding:16px;border-radius:8px;font-size:13px;color:var(--text-secondary);">${preview.body}</div>
+        </div>
+        <div style="margin-top:16px;text-align:right;">
+          <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    `);
+  } catch (err) {
+    showToast(err.message || 'Failed to preview', 'error');
+  }
+}
+
+async function processOutreachFollowups() {
+  try {
+    showToast('Processing due follow-ups...', 'info');
+    const res = await api.post('/outreach/process');
+    const data = res.data;
+    showToast(`Done: ${data.sent} sent, ${data.completed} completed`, 'success');
+    loadOutreachData();
+  } catch (err) {
+    showToast(err.message || 'Failed to process follow-ups', 'error');
+  }
 }

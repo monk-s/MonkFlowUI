@@ -75,6 +75,14 @@ runMigrations().then(() => {
     } catch (err) {
       console.error('Billing scheduler failed to start:', err.message);
     }
+
+    // Start outreach follow-up cron
+    try {
+      const outreachScheduler = require('./services/outreach.scheduler');
+      outreachScheduler.start();
+    } catch (err) {
+      console.error('Outreach scheduler failed to start:', err.message);
+    }
   });
 
   // Graceful shutdown
@@ -98,6 +106,8 @@ runMigrations().then(() => {
         usageScheduler.stop();
         const billingScheduler = require('./services/billing.scheduler');
         billingScheduler.stop();
+        const outreachScheduler = require('./services/outreach.scheduler');
+        outreachScheduler.stop();
         console.log('Cron jobs stopped');
       } catch { /* scheduler not loaded yet */ }
 
