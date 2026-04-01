@@ -123,6 +123,11 @@ async function executeWorkflow(workflow, triggerPayload = {}) {
     // Update workflow stats
     await updateWorkflowStats(workflow.id);
 
+    // Increment monthly usage counter
+    try {
+      await query('UPDATE users SET monthly_workflow_runs = COALESCE(monthly_workflow_runs, 0) + 1 WHERE id = $1', [workflow.user_id]);
+    } catch (e) { console.error('[UsageCounter] workflow increment failed:', e.message); }
+
     return { status: 'completed', executionId: execution.id, nodeResults, durationMs };
 
   } catch (err) {

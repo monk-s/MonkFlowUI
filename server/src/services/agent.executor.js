@@ -77,6 +77,11 @@ async function processExecution(agent, execution, inputData, userId) {
       total_tokens_used: (parseInt(agent.total_tokens_used) || 0) + result.tokensInput + result.tokensOutput,
     });
 
+    // Increment monthly usage counter
+    try {
+      await query('UPDATE users SET monthly_agent_tasks = COALESCE(monthly_agent_tasks, 0) + 1 WHERE id = $1', [userId]);
+    } catch (e) { console.error('[UsageCounter] agent increment failed:', e.message); }
+
     // Log
     await query(
       `INSERT INTO execution_logs (user_id, agent_execution_id, level, message, metadata) VALUES ($1, $2, $3, $4, $5)`,

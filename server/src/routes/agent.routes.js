@@ -12,7 +12,8 @@ router.post('/', validate(agentValidator.create), agentController.create);
 router.get('/:id', agentController.getById);
 router.patch('/:id', validate(agentValidator.update), agentController.update);
 router.delete('/:id', agentController.remove);
-router.post('/:id/execute', rateLimiter.agentExecute, validate(agentValidator.execute), agentController.execute);
+const { checkAgentTaskLimit } = require('../middleware/checkUsage');
+router.post('/:id/execute', rateLimiter.agentExecute, checkAgentTaskLimit, validate(agentValidator.execute), agentController.execute);
 router.get('/:id/executions', agentController.listExecutions);
 
 module.exports = router;

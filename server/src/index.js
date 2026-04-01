@@ -59,6 +59,14 @@ runMigrations().then(() => {
     } catch (err) {
       console.error('Lead gen scheduler failed to start:', err.message);
     }
+
+    // Start usage reset cron
+    try {
+      const usageScheduler = require('./services/usage.scheduler');
+      usageScheduler.start();
+    } catch (err) {
+      console.error('Usage scheduler failed to start:', err.message);
+    }
   });
 
   // Graceful shutdown
@@ -78,6 +86,8 @@ runMigrations().then(() => {
         scheduler.stopAll();
         const leadgenScheduler = require('./services/leadgen.scheduler');
         leadgenScheduler.stop();
+        const usageScheduler = require('./services/usage.scheduler');
+        usageScheduler.stop();
         console.log('Cron jobs stopped');
       } catch { /* scheduler not loaded yet */ }
 

@@ -11,7 +11,8 @@ router.post('/', validate(workflowValidator.create), workflowController.create);
 router.get('/:id', workflowController.getById);
 router.patch('/:id', validate(workflowValidator.update), workflowController.update);
 router.delete('/:id', workflowController.remove);
-router.post('/:id/execute', workflowController.execute);
+const { checkWorkflowRunLimit } = require('../middleware/checkUsage');
+router.post('/:id/execute', checkWorkflowRunLimit, workflowController.execute);
 router.get('/:id/executions', workflowController.listExecutions);
 
 module.exports = router;

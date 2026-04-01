@@ -91,7 +91,11 @@ const api = {
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: 'Request failed' } }));
-      throw new Error(err.error?.message || 'Request failed');
+      const errMsg = err.error?.message || 'Request failed';
+      if (res.status === 429 && /plan|limit/i.test(errMsg)) {
+        showUpgradeModal(errMsg);
+      }
+      throw new Error(errMsg);
     }
     return res.json();
   },
@@ -125,6 +129,8 @@ let adminData = null;
 let adminAccounts = null;
 let adminSelectedAccount = null;
 let adminAccountDetail = null;
+let currentPlan = null;
+let billingPlans = null;
 
 // ── Type Mappings ──────────────────────────────────────────
 const FRONTEND_TO_BACKEND_TYPE = {
@@ -418,6 +424,7 @@ function navigateTo(page) {
   if (page === 'workflow-detail') loadWorkflowDetail();
   if (page === 'agent-detail') loadAgentDetail();
   if (page === 'admin') loadAdminData();
+  if (page === 'billing') loadBillingData();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
@@ -516,6 +523,7 @@ function showApp() {
   renderMainContent();
   loadDashboardData();
   fetchNotifications().then(() => renderTopbar());
+  loadCurrentPlan();
 }
 
 // ── Auth Handlers ──────────────────────────────────────
@@ -1013,6 +1021,9 @@ function renderSidebar() {
       ` : ''}
 
       <div class="nav-section-label">Account</div>
+      <div class="nav-item" data-page="billing" onclick="navigateTo('billing')">
+        ${icons.zap} Plans & Billing
+      </div>
       <div class="nav-item" data-page="help" onclick="navigateTo('help')">
         ${icons.help} Help Center
       </div>
@@ -1028,7 +1039,17 @@ function renderSidebar() {
         <div class="avatar">${currentUser ? (currentUser.first_name?.[0] || '') + (currentUser.last_name?.[0] || '') : 'NL'}</div>
         <div class="user-info">
           <div class="user-name">${currentUser ? `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() : 'Nathan Linder'}</div>
-          <div class="user-plan">Curated Software Solutions</div>
+          <div class="user-plan">${currentPlan?.plan_name || 'Free'} Plan</div>
+${currentPlan ? `<div style="margin-top:6px;">
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-tertiary);margin-bottom:2px;">
+    <span>Runs: ${currentPlan.monthly_workflow_runs || 0}/${currentPlan.plan_workflow_limit || '\u221e'}</span>
+    <span>Tasks: ${currentPlan.monthly_agent_tasks || 0}/${currentPlan.plan_task_limit || '\u221e'}</span>
+  </div>
+  <div style="height:3px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden;display:flex;gap:1px;">
+    <div style="width:50%;position:relative;"><div style="position:absolute;inset:0;background:${(currentPlan.monthly_workflow_runs || 0) / (currentPlan.plan_workflow_limit || 1) > 0.9 ? '#ef4444' : (currentPlan.monthly_workflow_runs || 0) / (currentPlan.plan_workflow_limit || 1) > 0.7 ? '#fbbf24' : '#00cc6a'};width:${Math.min(100, ((currentPlan.monthly_workflow_runs || 0) / (currentPlan.plan_workflow_limit || 1)) * 100)}%;border-radius:2px;"></div></div>
+    <div style="width:50%;position:relative;"><div style="position:absolute;inset:0;background:${(currentPlan.monthly_agent_tasks || 0) / (currentPlan.plan_task_limit || 1) > 0.9 ? '#ef4444' : (currentPlan.monthly_agent_tasks || 0) / (currentPlan.plan_task_limit || 1) > 0.7 ? '#fbbf24' : '#00cc6a'};width:${Math.min(100, ((currentPlan.monthly_agent_tasks || 0) / (currentPlan.plan_task_limit || 1)) * 100)}%;border-radius:2px;"></div></div>
+  </div>
+</div>` : ''}
         </div>
       </div>
       <button class="sidebar-logout-btn" onclick="handleLogout()">
@@ -1054,6 +1075,7 @@ function renderTopbar() {
     'workflow-editor': 'Workflow Editor',
     admin: 'Admin Dashboard',
     'admin-account': 'Account Detail',
+    billing: 'Plans & Billing',
   };
   const unreadCount = notifications.filter(n => !n.read).length;
   const topbar = document.getElementById('topbar');
@@ -1298,6 +1320,7 @@ function renderMainContent() {
     'agent-detail': renderAgentDetail,
     'admin': renderAdminDashboard,
     'admin-account': renderAdminAccountDetail,
+    'billing': renderBilling,
   };
   main.innerHTML = (pages[currentPage] || renderDashboard)();
 }
@@ -5051,6 +5074,188 @@ function renderAdminAccountDetail() {
           <thead><tr><th>Workflow Name</th><th>Status</th><th>Started</th><th>Duration</th><th>Error</th></tr></thead>
           <tbody>${execRows}</tbody>
         </table>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================
+// PLANS & BILLING
+// ============================================================
+
+async function loadCurrentPlan() {
+  try {
+    const res = await api.get('/plans/my-usage');
+    currentPlan = res.data || res;
+    renderSidebar();
+  } catch (err) {
+    console.warn('Could not load plan data:', err.message);
+  }
+}
+
+async function loadBillingData() {
+  try {
+    const [plansRes, usageRes] = await Promise.all([
+      api.get('/plans'),
+      api.get('/plans/my-usage'),
+    ]);
+    billingPlans = plansRes.data || plansRes;
+    currentPlan = usageRes.data || usageRes;
+    renderMainContent();
+  } catch (err) {
+    showToast(err.message || 'Failed to load billing data', 'error');
+  }
+}
+
+function showUpgradeModal(message) {
+  showModal(`
+    <div class="modal-header">
+      <h2 class="modal-title">Plan Limit Reached</h2>
+      <button class="modal-close" onclick="closeModal()">${icons.x}</button>
+    </div>
+    <div style="padding:24px;text-align:center;">
+      <div style="font-size:48px;margin-bottom:16px;">&#9889;</div>
+      <p style="color:var(--text-secondary);margin-bottom:20px;font-size:14px;">${message}</p>
+      <button class="btn btn-primary" onclick="closeModal();navigateTo('billing');">View Plans & Upgrade</button>
+      <button class="btn btn-ghost" onclick="closeModal()" style="margin-left:8px;">Dismiss</button>
+    </div>
+  `);
+}
+
+function renderBilling() {
+  const plan = currentPlan;
+  const plans = Array.isArray(billingPlans) ? billingPlans : [];
+
+  const now = new Date();
+  const renewalDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const renewalStr = renewalDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  const runPct = plan ? Math.min(100, ((plan.monthly_workflow_runs || 0) / (plan.plan_workflow_limit || 1)) * 100) : 0;
+  const taskPct = plan ? Math.min(100, ((plan.monthly_agent_tasks || 0) / (plan.plan_task_limit || 1)) * 100) : 0;
+
+  function barColor(pct) {
+    if (pct > 90) return '#ef4444';
+    if (pct > 70) return '#fbbf24';
+    return '#00cc6a';
+  }
+
+  const tierDefaults = [
+    { name: 'Starter', price: 29, workflow_run_limit: 500, agent_task_limit: 200, models: 'GPT-4o, Claude Sonnet', overage_run: '$0.05', overage_task: '$0.08' },
+    { name: 'Pro', price: 79, workflow_run_limit: 2000, agent_task_limit: 1000, models: 'GPT-4o, Claude Opus, Gemini', overage_run: '$0.04', overage_task: '$0.06' },
+    { name: 'Business', price: 199, workflow_run_limit: 10000, agent_task_limit: 5000, models: 'All models + priority', overage_run: '$0.03', overage_task: '$0.04' },
+  ];
+
+  const displayPlans = plans.length >= 3 ? plans.map((p, i) => ({
+    name: p.name || tierDefaults[i]?.name || p.plan_name,
+    price: p.price ?? p.monthly_price ?? tierDefaults[i]?.price,
+    workflow_run_limit: p.workflow_run_limit ?? p.plan_workflow_limit ?? tierDefaults[i]?.workflow_run_limit,
+    agent_task_limit: p.agent_task_limit ?? p.plan_task_limit ?? tierDefaults[i]?.agent_task_limit,
+    models: p.models || tierDefaults[i]?.models || 'Standard',
+    overage_run: p.overage_run || tierDefaults[i]?.overage_run || '--',
+    overage_task: p.overage_task || tierDefaults[i]?.overage_task || '--',
+  })) : tierDefaults;
+
+  const planCards = displayPlans.map(p => {
+    const isCurrent = plan && (plan.plan_name || '').toLowerCase() === (p.name || '').toLowerCase();
+    return `
+      <div class="card" style="flex:1;min-width:220px;position:relative;${isCurrent ? 'border:1px solid #00cc6a;' : ''}">
+        ${isCurrent ? '<div style="position:absolute;top:12px;right:12px;background:#00cc6a;color:#000;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;">Current Plan</div>' : ''}
+        <div style="padding:20px;">
+          <h3 style="margin:0 0 4px;font-size:18px;color:var(--text-primary);">${p.name}</h3>
+          <div style="font-size:32px;font-weight:700;color:var(--text-primary);margin-bottom:16px;">$${p.price}<span style="font-size:14px;font-weight:400;color:var(--text-tertiary);">/mo</span></div>
+          <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--text-secondary);">
+            <div style="display:flex;justify-content:space-between;"><span>Workflow Runs</span><span style="color:var(--text-primary);font-weight:600;">${p.workflow_run_limit.toLocaleString()}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>Agent Tasks</span><span style="color:var(--text-primary);font-weight:600;">${p.agent_task_limit.toLocaleString()}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>Models</span><span style="color:var(--text-primary);font-weight:600;text-align:right;max-width:140px;">${p.models}</span></div>
+            <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+              <div style="display:flex;justify-content:space-between;"><span>Overage / run</span><span style="color:var(--text-primary);">${p.overage_run}</span></div>
+              <div style="display:flex;justify-content:space-between;margin-top:4px;"><span>Overage / task</span><span style="color:var(--text-primary);">${p.overage_task}</span></div>
+            </div>
+          </div>
+          <div style="margin-top:16px;">
+            ${isCurrent
+              ? '<button class="btn btn-ghost" style="width:100%;cursor:default;" disabled>Current Plan</button>'
+              : '<button class="btn btn-primary" style="width:100%;" onclick="showToast(\'Contact support to change plans\', \'info\')">Upgrade</button>'}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="page-header">
+      <div>
+        <h1>Plans & Billing</h1>
+        <p class="page-desc">Manage your subscription and monitor usage.</p>
+      </div>
+    </div>
+
+    <!-- Current Plan Overview -->
+    <div class="card" style="margin-bottom:24px;">
+      <div style="padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <div>
+            <h3 style="margin:0 0 4px;font-size:16px;color:var(--text-primary);">${plan?.plan_name || 'Free'} Plan</h3>
+            <span style="font-size:13px;color:var(--text-tertiary);">Renews ${renewalStr}</span>
+          </div>
+          <div style="font-size:24px;font-weight:700;color:#00cc6a;">
+            ${plan?.plan_price != null ? '$' + plan.plan_price : '--'}<span style="font-size:13px;font-weight:400;color:var(--text-tertiary);">/mo</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-tertiary);margin-bottom:4px;">
+              <span>Workflow Runs</span>
+              <span>${plan?.monthly_workflow_runs || 0} / ${plan?.plan_workflow_limit || '\u221e'}</span>
+            </div>
+            <div style="height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
+              <div style="height:100%;width:${runPct}%;background:${barColor(runPct)};border-radius:3px;transition:width .3s;"></div>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-tertiary);margin-bottom:4px;">
+              <span>Agent Tasks</span>
+              <span>${plan?.monthly_agent_tasks || 0} / ${plan?.plan_task_limit || '\u221e'}</span>
+            </div>
+            <div style="height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
+              <div style="height:100%;width:${taskPct}%;background:${barColor(taskPct)};border-radius:3px;transition:width .3s;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Plan Comparison Grid -->
+    <h2 style="font-size:16px;color:var(--text-primary);margin-bottom:12px;">Compare Plans</h2>
+    <div style="display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap;">
+      ${planCards}
+    </div>
+
+    <!-- Usage This Period -->
+    <h2 style="font-size:16px;color:var(--text-primary);margin-bottom:12px;">Usage This Period</h2>
+    <div class="card" style="margin-bottom:24px;">
+      <div style="padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            ${icons.workflow}
+            <span style="font-size:14px;font-weight:600;color:var(--text-primary);">Workflow Runs</span>
+          </div>
+          <div style="font-size:28px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">${plan?.monthly_workflow_runs || 0}</div>
+          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px;">of ${plan?.plan_workflow_limit || '\u221e'} included</div>
+          <div style="height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden;">
+            <div style="height:100%;width:${runPct}%;background:${barColor(runPct)};border-radius:4px;transition:width .3s;"></div>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            ${icons.agents}
+            <span style="font-size:14px;font-weight:600;color:var(--text-primary);">Agent Tasks</span>
+          </div>
+          <div style="font-size:28px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">${plan?.monthly_agent_tasks || 0}</div>
+          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px;">of ${plan?.plan_task_limit || '\u221e'} included</div>
+          <div style="height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden;">
+            <div style="height:100%;width:${taskPct}%;background:${barColor(taskPct)};border-radius:4px;transition:width .3s;"></div>
+          </div>
+        </div>
       </div>
     </div>
   `;

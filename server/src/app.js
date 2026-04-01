@@ -24,6 +24,7 @@ const dashboardRoutes = require('./routes/dashboard.routes');
 const projectRoutes = require('./routes/project.routes');
 const leadgenRoutes = require('./routes/leadgen.routes');
 const adminRoutes = require('./routes/admin.routes');
+const planRoutes = require('./routes/plan.routes');
 
 const app = express();
 
@@ -59,6 +60,7 @@ app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/projects', projectRoutes);
 app.use('/api/v1/leadgen', leadgenRoutes);
 app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/plans', planRoutes);
 
 // 404 handler
 app.use((req, res) => {
