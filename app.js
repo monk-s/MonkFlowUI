@@ -5604,12 +5604,14 @@ let outreachData = null;
 let outreachStats = null;
 let outreachPage = 1;
 let outreachPagination = null;
+let outreachFilterPriority = false;
 
 async function loadOutreachData(page) {
   if (page !== undefined) outreachPage = page;
   try {
+    const priorityParam = outreachFilterPriority ? '&priority=true' : '';
     const [leadsRes, statsRes] = await Promise.all([
-      api.get(`/outreach?page=${outreachPage}&limit=50`),
+      api.get(`/outreach?page=${outreachPage}&limit=50${priorityParam}`),
       api.get('/outreach/stats'),
     ]);
     outreachData = leadsRes.data || [];
@@ -5633,6 +5635,7 @@ function renderOutreachPage() {
   const statCards = [
     { label: 'Total Leads', value: stats.total || 0, color: '#6b7280' },
     { label: 'Active Sequences', value: stats.active || 0, color: '#3b82f6' },
+    { label: 'Priority', value: stats.priority_count || 0, color: '#f59e0b' },
     { label: 'Replied', value: stats.replied || 0, color: '#00cc6a' },
     { label: 'Due Now', value: stats.due_now || 0, color: stats.due_now > 0 ? '#f59e0b' : '#6b7280' },
   ];
@@ -5654,16 +5657,25 @@ function renderOutreachPage() {
       ? `<span style="color:${isOverdue ? '#f59e0b' : 'var(--text-tertiary)'};font-weight:${isOverdue ? '600' : '400'};">${isOverdue ? 'Due now' : nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`
       : '<span style="color:var(--text-tertiary);">—</span>';
 
+    const aiStatus = lead.ai_email_sent_at
+      ? '<span style="padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#00cc6a22;color:#00cc6a;">Sent</span>'
+      : lead.ai_email_body
+        ? '<span style="padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#a855f722;color:#a855f7;">Ready</span>'
+        : lead.priority
+          ? '<span style="padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#6b728022;color:#6b7280;">Pending</span>'
+          : '';
+
     return `
       <tr onclick="viewOutreachLead('${lead.id}')" style="cursor:pointer;">
         <td>
-          <div style="font-weight:500;color:var(--text-primary);">${lead.contact_name}</div>
+          <div style="font-weight:500;color:var(--text-primary);">${lead.priority ? '<span style="color:#f59e0b;margin-right:4px;" title="Priority">&#9733;</span>' : ''}${lead.contact_name}</div>
           <div style="font-size:11px;color:var(--text-tertiary);">${lead.company || ''}</div>
         </td>
         <td style="font-size:12px;color:var(--text-secondary);">${lead.contact_email}</td>
         <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${sc.bg};color:${sc.fg};">${lead.status}</span></td>
         <td style="font-size:12px;color:var(--text-secondary);">${touchLabels[lead.touch_count] || lead.touch_count}/4</td>
         <td style="font-size:12px;">${nextStr}</td>
+        <td style="font-size:12px;">${aiStatus}</td>
         <td style="font-size:12px;color:var(--text-tertiary);">${timeAgo(lead.created_at)}</td>
       </tr>`;
   }).join('');
@@ -5675,6 +5687,12 @@ function renderOutreachPage() {
         <p class="page-desc">Automated follow-up emails on a 3-touch cadence (Day 3, Day 7, Day 14)</p>
       </div>
       <div class="page-actions" style="display:flex;gap:8px;">
+        <button class="btn ${outreachFilterPriority ? 'btn-primary' : 'btn-ghost'}" onclick="toggleOutreachPriorityFilter()" style="${outreachFilterPriority ? '' : 'color:#f59e0b;'}">
+          &#9733; ${outreachFilterPriority ? 'Show All' : 'Priority Only'}
+        </button>
+        ${outreachFilterPriority ? `<button class="btn btn-ghost" onclick="generateAllAiEmails()" style="color:#a855f7;">
+          &#10024; AI Generate All
+        </button>` : ''}
         <button class="btn btn-ghost" onclick="processOutreachFollowups()">
           ${icons.play} Process Due
         </button>
@@ -5685,7 +5703,7 @@ function renderOutreachPage() {
     </div>
 
     <!-- Stats Row -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px;">
       ${statCards.map(s => `
         <div class="card" style="padding:16px;">
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">${s.label}</div>
@@ -5716,6 +5734,7 @@ function renderOutreachPage() {
                 <th>Status</th>
                 <th>Touch</th>
                 <th>Next Follow-up</th>
+                <th>AI Email</th>
                 <th>Added</th>
               </tr>
             </thead>
@@ -5906,8 +5925,37 @@ async function viewOutreachLead(id) {
           ` : ''}
         </div>
 
+        <!-- AI Email Section -->
+        ${lead.priority ? `
+        <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <h3 style="font-size:14px;margin:0;color:var(--text-primary);">&#10024; AI Personalized Email</h3>
+            ${lead.ai_email_body
+              ? `<span style="font-size:11px;color:var(--text-tertiary);">Generated ${new Date(lead.ai_email_generated_at).toLocaleDateString()}</span>`
+              : ''}
+          </div>
+          ${lead.ai_email_body ? `
+            <div style="background:var(--bg-secondary);padding:12px;border-radius:8px;margin-bottom:12px;">
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px;">Subject: ${lead.ai_email_subject}</div>
+              <div style="font-size:13px;color:var(--text-secondary);">${lead.ai_email_body}</div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              ${!lead.ai_email_sent_at ? `
+                <button class="btn btn-primary btn-sm" onclick="sendOutreachAiEmail('${lead.id}')" style="background:#a855f7;">Send AI Email</button>
+                <button class="btn btn-ghost btn-sm" onclick="generateOutreachAiEmail('${lead.id}')">Regenerate</button>
+              ` : '<span style="font-size:12px;color:#00cc6a;font-weight:600;">&#10003; AI email sent</span>'}
+            </div>
+          ` : `
+            <button class="btn btn-ghost btn-sm" onclick="generateOutreachAiEmail('${lead.id}')" style="color:#a855f7;">&#10024; Generate AI Email</button>
+          `}
+        </div>
+        ` : ''}
+
         <div style="display:flex;gap:8px;justify-content:space-between;border-top:1px solid var(--border);padding-top:16px;">
-          <div style="display:flex;gap:8px;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-ghost btn-sm" onclick="toggleLeadPriority('${lead.id}')" style="color:#f59e0b;" title="${lead.priority ? 'Remove priority' : 'Mark as priority'}">
+              ${lead.priority ? '&#9733; Priority' : '&#9734; Set Priority'}
+            </button>
             ${lead.status === 'active' ? `
               <button class="btn btn-primary btn-sm" onclick="markLeadReplied('${lead.id}', false)">Mark as Replied</button>
               <button class="btn btn-ghost btn-sm" onclick="markLeadReplied('${lead.id}', true)">OOO Reply</button>
@@ -6012,5 +6060,57 @@ async function processOutreachFollowups() {
     loadOutreachData();
   } catch (err) {
     showToast(err.message || 'Failed to process follow-ups', 'error');
+  }
+}
+
+function toggleOutreachPriorityFilter() {
+  outreachFilterPriority = !outreachFilterPriority;
+  loadOutreachData(1);
+}
+
+async function toggleLeadPriority(id) {
+  try {
+    const res = await api.post(`/outreach/${id}/toggle-priority`);
+    showToast(res.message || 'Priority updated', 'success');
+    closeModal();
+    loadOutreachData();
+  } catch (err) {
+    showToast(err.message || 'Failed to update priority', 'error');
+  }
+}
+
+async function generateOutreachAiEmail(id) {
+  try {
+    showToast('Analyzing website & generating AI email...', 'info');
+    await api.post(`/outreach/${id}/ai-generate`);
+    showToast('AI email generated!', 'success');
+    closeModal();
+    viewOutreachLead(id); // Re-open modal with AI email
+  } catch (err) {
+    showToast(err.message || 'Failed to generate AI email', 'error');
+  }
+}
+
+async function generateAllAiEmails() {
+  try {
+    showToast('Generating AI emails for all priority leads... this may take a minute', 'info');
+    const res = await api.post('/outreach/generate-all');
+    const data = res.data;
+    showToast(`Generated ${data.generated} AI emails${data.errors ? `, ${data.errors} errors` : ''}`, 'success');
+    loadOutreachData();
+  } catch (err) {
+    showToast(err.message || 'Failed to generate AI emails', 'error');
+  }
+}
+
+async function sendOutreachAiEmail(id) {
+  try {
+    showToast('Sending AI email...', 'info');
+    await api.post(`/outreach/${id}/ai-send`);
+    showToast('AI email sent!', 'success');
+    closeModal();
+    loadOutreachData();
+  } catch (err) {
+    showToast(err.message || 'Failed to send AI email', 'error');
   }
 }

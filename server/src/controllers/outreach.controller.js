@@ -2,6 +2,7 @@ const catchAsync = require('../utils/catchAsync');
 const { query } = require('../config/database');
 const ApiError = require('../utils/ApiError');
 const { sendEmail } = require('../services/email.service');
+const outreachAI = require('../services/outreach-ai.service');
 
 // ── Follow-up templates ────────────────────────────────────
 // Touch 1 = original cold email (sent manually / externally)
@@ -96,9 +97,15 @@ function isAutoReply(subject, body) {
 // ── CRUD Endpoints ─────────────────────────────────────────
 
 const createLead = catchAsync(async (req, res) => {
-  const { contact_name, contact_email, company, notes, initial_email_date } = req.body;
+  const { contact_name, contact_email, company, notes, initial_email_date, priority } = req.body;
   if (!contact_name || !contact_email) {
     throw ApiError.badRequest('Contact name and email are required');
+  }
+
+  // Verify email before adding
+  const verification = await outreachAI.verifyEmail(contact_email);
+  if (!verification.valid) {
+    throw ApiError.badRequest(`Invalid email: ${verification.reason}`);
   }
 
   // Touch 0 = initial cold email (already sent), so we set touch_count=1
@@ -106,27 +113,32 @@ const createLead = catchAsync(async (req, res) => {
   const nextFollowup = getNextFollowupDate(1, sentDate);
 
   const { rows } = await query(
-    `INSERT INTO outreach_leads (contact_name, contact_email, company, notes, touch_count, last_sent_at, next_followup_at)
-     VALUES ($1, $2, $3, $4, 1, $5, $6) RETURNING *`,
-    [contact_name, contact_email, company || null, notes || null, sentDate, nextFollowup]
+    `INSERT INTO outreach_leads (contact_name, contact_email, company, notes, touch_count, last_sent_at, next_followup_at, priority)
+     VALUES ($1, $2, $3, $4, 1, $5, $6, $7) RETURNING *`,
+    [contact_name, contact_email, company || null, notes || null, sentDate, nextFollowup, priority || false]
   );
 
   res.status(201).json({ data: rows[0], message: 'Lead added to sequence' });
 });
 
 const getLeads = catchAsync(async (req, res) => {
-  const { status, page = 1, limit = 50 } = req.query;
+  const { status, priority, page = 1, limit = 50 } = req.query;
   const pg = parseInt(page);
   const lim = parseInt(limit);
   const offset = (pg - 1) * lim;
 
-  let whereSql = '';
+  const conditions = [];
   const params = [];
 
   if (status) {
-    whereSql = ` WHERE status = $1`;
     params.push(status);
+    conditions.push(`status = $${params.length}`);
   }
+  if (priority === 'true') {
+    conditions.push('priority = true');
+  }
+
+  const whereSql = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
 
   const [dataResult, countResult] = await Promise.all([
     query(
@@ -163,7 +175,7 @@ const getLead = catchAsync(async (req, res) => {
 });
 
 const updateLead = catchAsync(async (req, res) => {
-  const { contact_name, contact_email, company, notes, status } = req.body;
+  const { contact_name, contact_email, company, notes, status, priority } = req.body;
   const { rows } = await query(
     `UPDATE outreach_leads
      SET contact_name = COALESCE($1, contact_name),
@@ -171,9 +183,10 @@ const updateLead = catchAsync(async (req, res) => {
          company = COALESCE($3, company),
          notes = COALESCE($4, notes),
          status = COALESCE($5, status),
+         priority = COALESCE($6, priority),
          updated_at = NOW()
-     WHERE id = $6 RETURNING *`,
-    [contact_name, contact_email, company, notes, status, req.params.id]
+     WHERE id = $7 RETURNING *`,
+    [contact_name, contact_email, company, notes, status, priority, req.params.id]
   );
 
   if (!rows[0]) throw ApiError.notFound('Lead not found');
@@ -195,7 +208,8 @@ const getStats = catchAsync(async (req, res) => {
       COUNT(*) FILTER (WHERE status = 'active')::int as active,
       COUNT(*) FILTER (WHERE status = 'replied')::int as replied,
       COUNT(*) FILTER (WHERE status = 'closed')::int as closed,
-      COUNT(*) FILTER (WHERE next_followup_at <= NOW() AND status = 'active')::int as due_now
+      COUNT(*) FILTER (WHERE next_followup_at <= NOW() AND status = 'active')::int as due_now,
+      COUNT(*) FILTER (WHERE priority = true)::int as priority_count
     FROM outreach_leads
   `);
   res.json({ data: rows[0] });
@@ -357,6 +371,42 @@ const bulkImport = catchAsync(async (req, res) => {
   });
 });
 
+// ── Priority toggle ────────────────────────────────────────
+
+const togglePriority = catchAsync(async (req, res) => {
+  const { rows } = await query(
+    `UPDATE outreach_leads SET priority = NOT COALESCE(priority, false), updated_at = NOW()
+     WHERE id = $1 RETURNING *`,
+    [req.params.id]
+  );
+  if (!rows[0]) throw ApiError.notFound('Lead not found');
+  res.json({ data: rows[0], message: rows[0].priority ? 'Marked as priority' : 'Removed from priority' });
+});
+
+// ── AI email endpoints ─────────────────────────────────────
+
+const generateAiEmail = catchAsync(async (req, res) => {
+  const result = await outreachAI.generateForLead(req.params.id);
+  res.json({ data: result, message: 'AI email generated' });
+});
+
+const generateAllAiEmails = catchAsync(async (req, res) => {
+  const results = await outreachAI.generateForAllPriority();
+  res.json({ data: results, message: `Generated ${results.generated} AI emails` });
+});
+
+const previewAiEmail = catchAsync(async (req, res) => {
+  const { rows } = await query('SELECT ai_email_subject, ai_email_body, ai_email_generated_at, ai_email_sent_at FROM outreach_leads WHERE id = $1', [req.params.id]);
+  if (!rows[0]) throw ApiError.notFound('Lead not found');
+  if (!rows[0].ai_email_body) throw ApiError.badRequest('No AI email generated yet');
+  res.json({ data: rows[0] });
+});
+
+const sendAiEmailEndpoint = catchAsync(async (req, res) => {
+  const result = await outreachAI.sendAiEmail(req.params.id);
+  res.json({ data: result, message: 'AI email sent' });
+});
+
 module.exports = {
   createLead,
   getLeads,
@@ -368,4 +418,9 @@ module.exports = {
   processDueFollowups,
   previewFollowup,
   bulkImport,
+  togglePriority,
+  generateAiEmail,
+  generateAllAiEmails,
+  previewAiEmail,
+  sendAiEmailEndpoint,
 };
