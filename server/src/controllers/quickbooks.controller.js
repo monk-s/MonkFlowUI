@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const catchAsync = require('../utils/catchAsync');
 const ApiError = require('../utils/ApiError');
 const qboService = require('../services/quickbooks.service');
@@ -141,19 +142,75 @@ const sendInvoice = catchAsync(async (req, res) => {
 });
 
 const handleWebhook = catchAsync(async (req, res) => {
-  // Intuit webhook verification would go here (HMAC-SHA256)
-  // For now, process payment notifications
+  // Verify HMAC-SHA256 signature from Intuit
+  const signature = req.headers['intuit-signature'];
+  if (!signature || !env.qboWebhookVerifierToken) {
+    return res.status(401).json({ error: 'Missing signature or verifier token' });
+  }
+
+  const hash = crypto
+    .createHmac('sha256', env.qboWebhookVerifierToken)
+    .update(req.rawBody)
+    .digest('base64');
+
+  if (hash !== signature) {
+    console.warn('[QBO Webhook] Signature verification failed');
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  // Process event notifications
   const events = req.body.eventNotifications || [];
   for (const event of events) {
+    const realmId = event.realmId;
     const entities = event.dataChangeEvent?.entities || [];
+
     for (const entity of entities) {
       if (entity.name === 'Payment' && entity.operation === 'Create') {
-        // A payment was made — find matching invoice and mark as paid
-        // Would need to query QBO for the payment details to find the invoice
-        console.log(`[QBO Webhook] Payment created: ${entity.id}`);
+        try {
+          // Find the QBO connection for this realm
+          const { rows: connections } = await query(
+            'SELECT * FROM qbo_connections WHERE realm_id = $1 LIMIT 1',
+            [realmId]
+          );
+          const connection = connections[0];
+          if (!connection) {
+            console.warn(`[QBO Webhook] No connection found for realmId ${realmId}`);
+            continue;
+          }
+
+          const accessToken = await qboService.ensureValidToken(connection);
+          const payment = await qboService.getPayment(accessToken, realmId, entity.id);
+
+          // Each payment can reference multiple invoices via Line items
+          const invoiceLines = (payment.Line || []).filter(
+            (line) => line.LinkedTxn?.some((txn) => txn.TxnType === 'Invoice')
+          );
+
+          for (const line of invoiceLines) {
+            const invoiceTxn = line.LinkedTxn.find((txn) => txn.TxnType === 'Invoice');
+            if (!invoiceTxn) continue;
+
+            const qboInvoiceId = invoiceTxn.TxnId;
+            const { rows: invoices } = await query(
+              'SELECT id FROM invoices WHERE qbo_invoice_id = $1 LIMIT 1',
+              [qboInvoiceId]
+            );
+
+            if (invoices.length > 0) {
+              await invoiceModel.update(invoices[0].id, {
+                status: 'paid',
+                paid_at: new Date(),
+              });
+              console.log(`[QBO Webhook] Invoice ${invoices[0].id} marked as paid (QBO payment ${entity.id})`);
+            }
+          }
+        } catch (err) {
+          console.error(`[QBO Webhook] Error processing payment ${entity.id}:`, err.message);
+        }
       }
     }
   }
+
   res.status(200).json({ ok: true });
 });
 

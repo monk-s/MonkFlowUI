@@ -37,7 +37,15 @@ app.set('trust proxy', 1);
 // Global middleware
 app.use(helmet());
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({
+  limit: '50mb',
+  verify: (req, _res, buf) => {
+    // Preserve raw body for webhook signature verification
+    if (req.url && req.url.includes('/quickbooks/webhook')) {
+      req.rawBody = buf;
+    }
+  },
+}));
 app.use(morgan(env.isDev ? 'dev' : 'combined'));
 app.use(rateLimiter.global);
 

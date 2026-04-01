@@ -150,6 +150,11 @@ async function sendInvoice(accessToken, realmId, qboInvoiceId, emailTo) {
   return result.Invoice;
 }
 
+async function getPayment(accessToken, realmId, paymentId) {
+  const result = await qboApiCall('GET', `/payment/${paymentId}`, accessToken, realmId);
+  return result.Payment;
+}
+
 async function getCompanyInfo(accessToken, realmId) {
   const result = await qboApiCall('GET', `/companyinfo/${realmId}`, accessToken, realmId);
   return result.CompanyInfo;
@@ -163,5 +168,6 @@ module.exports = {
   createCustomer,
   createInvoice,
   sendInvoice,
+  getPayment,
   getCompanyInfo,
 };

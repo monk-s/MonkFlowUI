@@ -25,6 +25,7 @@ const env = {
   qboClientSecret: process.env.QBO_CLIENT_SECRET || '',
   qboRedirectUri: process.env.QBO_REDIRECT_URI || 'https://resourceful-abundance-production.up.railway.app/api/v1/quickbooks/callback',
   qboEnvironment: process.env.QBO_ENVIRONMENT || 'sandbox',
+  qboWebhookVerifierToken: process.env.QBO_WEBHOOK_VERIFIER_TOKEN || '',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production',
 };
