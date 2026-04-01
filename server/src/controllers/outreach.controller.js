@@ -115,19 +115,35 @@ const createLead = catchAsync(async (req, res) => {
 });
 
 const getLeads = catchAsync(async (req, res) => {
-  const { status, limit = 500 } = req.query;
-  let sql = `SELECT * FROM outreach_leads`;
+  const { status, page = 1, limit = 50 } = req.query;
+  const pg = parseInt(page);
+  const lim = parseInt(limit);
+  const offset = (pg - 1) * lim;
+
+  let whereSql = '';
   const params = [];
 
   if (status) {
-    sql += ` WHERE status = $1`;
+    whereSql = ` WHERE status = $1`;
     params.push(status);
   }
-  sql += ` ORDER BY next_followup_at ASC NULLS LAST, created_at DESC LIMIT $${params.length + 1}`;
-  params.push(parseInt(limit));
 
-  const { rows } = await query(sql, params);
-  res.json({ data: rows });
+  const [dataResult, countResult] = await Promise.all([
+    query(
+      `SELECT * FROM outreach_leads${whereSql} ORDER BY next_followup_at ASC NULLS LAST, created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, lim, offset]
+    ),
+    query(
+      `SELECT COUNT(*)::int as total FROM outreach_leads${whereSql}`,
+      params
+    ),
+  ]);
+
+  const total = countResult.rows[0].total;
+  res.json({
+    data: dataResult.rows,
+    pagination: { page: pg, limit: lim, total, totalPages: Math.ceil(total / lim) },
+  });
 });
 
 const getLead = catchAsync(async (req, res) => {

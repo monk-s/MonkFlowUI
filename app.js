@@ -5602,14 +5602,18 @@ function renderBilling() {
 // ============================================================
 let outreachData = null;
 let outreachStats = null;
+let outreachPage = 1;
+let outreachPagination = null;
 
-async function loadOutreachData() {
+async function loadOutreachData(page) {
+  if (page !== undefined) outreachPage = page;
   try {
     const [leadsRes, statsRes] = await Promise.all([
-      api.get('/outreach?limit=500'),
+      api.get(`/outreach?page=${outreachPage}&limit=50`),
       api.get('/outreach/stats'),
     ]);
     outreachData = leadsRes.data || [];
+    outreachPagination = leadsRes.pagination || null;
     outreachStats = statsRes.data || {};
     renderMainContent();
   } catch (err) {
@@ -5728,6 +5732,32 @@ function renderOutreachPage() {
         </div>
       `}
     </div>
+
+    ${outreachPagination && outreachPagination.totalPages > 1 ? `
+    <!-- Pagination -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;">
+      <div style="font-size:13px;color:var(--text-tertiary);">
+        Showing ${((outreachPagination.page - 1) * outreachPagination.limit) + 1}–${Math.min(outreachPagination.page * outreachPagination.limit, outreachPagination.total)} of ${outreachPagination.total} leads
+      </div>
+      <div style="display:flex;gap:4px;">
+        <button class="btn btn-ghost btn-sm" ${outreachPagination.page <= 1 ? 'disabled style="opacity:0.4;cursor:default;"' : ''} onclick="loadOutreachData(${outreachPagination.page - 1})">
+          ${icons.arrowLeft}
+        </button>
+        ${Array.from({length: outreachPagination.totalPages}, (_, i) => i + 1).map(p => {
+          // Show first, last, current, and neighbors
+          if (p === 1 || p === outreachPagination.totalPages || Math.abs(p - outreachPagination.page) <= 1) {
+            return `<button class="btn ${p === outreachPagination.page ? 'btn-primary' : 'btn-ghost'} btn-sm" style="min-width:32px;" onclick="loadOutreachData(${p})">${p}</button>`;
+          } else if (Math.abs(p - outreachPagination.page) === 2) {
+            return `<span style="color:var(--text-tertiary);padding:0 4px;">...</span>`;
+          }
+          return '';
+        }).join('')}
+        <button class="btn btn-ghost btn-sm" ${outreachPagination.page >= outreachPagination.totalPages ? 'disabled style="opacity:0.4;cursor:default;"' : ''} onclick="loadOutreachData(${outreachPagination.page + 1})">
+          ${icons.chevronRight}
+        </button>
+      </div>
+    </div>
+    ` : ''}
   `;
 }
 
