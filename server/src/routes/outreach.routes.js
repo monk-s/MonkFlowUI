@@ -14,5 +14,6 @@ router.delete('/:id', ctrl.deleteLead);
 router.post('/:id/mark-reply', ctrl.markReply);
 router.get('/:id/preview', ctrl.previewFollowup);
 router.post('/process', ctrl.processDueFollowups);
+router.post('/bulk-import', ctrl.bulkImport);
 
 module.exports = router;

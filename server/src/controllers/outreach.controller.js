@@ -297,6 +297,50 @@ const previewFollowup = catchAsync(async (req, res) => {
   });
 });
 
+// ── Bulk import ────────────────────────────────────────────
+
+const bulkImport = catchAsync(async (req, res) => {
+  const { leads } = req.body;
+  if (!Array.isArray(leads) || leads.length === 0) {
+    throw ApiError.badRequest('leads array is required');
+  }
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (const lead of leads) {
+    if (!lead.contact_name || !lead.contact_email) {
+      skipped++;
+      continue;
+    }
+
+    // Skip duplicates
+    const { rows: existing } = await query(
+      'SELECT id FROM outreach_leads WHERE contact_email = $1',
+      [lead.contact_email]
+    );
+    if (existing.length > 0) {
+      skipped++;
+      continue;
+    }
+
+    const sentDate = lead.initial_email_date ? new Date(lead.initial_email_date) : new Date();
+    const nextFollowup = getNextFollowupDate(1, sentDate);
+
+    await query(
+      `INSERT INTO outreach_leads (contact_name, contact_email, company, notes, touch_count, last_sent_at, next_followup_at)
+       VALUES ($1, $2, $3, $4, 1, $5, $6)`,
+      [lead.contact_name, lead.contact_email, lead.company || null, lead.notes || null, sentDate, nextFollowup]
+    );
+    imported++;
+  }
+
+  res.status(201).json({
+    data: { imported, skipped, total: leads.length },
+    message: `Imported ${imported} leads, skipped ${skipped}`,
+  });
+});
+
 module.exports = {
   createLead,
   getLeads,
@@ -307,4 +351,5 @@ module.exports = {
   markReply,
   processDueFollowups,
   previewFollowup,
+  bulkImport,
 };
