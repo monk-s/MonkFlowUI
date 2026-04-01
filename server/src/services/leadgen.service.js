@@ -548,8 +548,8 @@ async function runDailyLeadGeneration() {
   }
 
   // 1. Pick firm types and cities — budget ~140 searches/day to stay under remaining monthly limit
-  // 10 firm types × 14 cities = 140 searches/day × 22 weekdays = 3,080/month
-  const cities = shuffle(US_CITIES).slice(0, 14);
+  // 10 firm types × 22 cities = 220 searches/day × 22 weekdays = 4,840/month (of 5,000 limit)
+  const cities = shuffle(US_CITIES).slice(0, 22);
   const firmTypes = shuffle(FIRM_TYPES);
 
   console.log(`[LEADGEN] Targeting: ${firmTypes.map(f => f.type).join(', ')} | Cities: ${cities.length}`);
