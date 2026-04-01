@@ -13,8 +13,34 @@ const SEARCH_API_PROVIDER = process.env.SERPAPI_KEY && !process.env.SEARCHAPI_KE
 const SEARCH_API_BASE = SEARCH_API_PROVIDER === 'serpapi'
   ? 'https://serpapi.com/search.json'
   : 'https://www.searchapi.io/api/v1/search';
-const DAILY_LIMIT = parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 250;
-const PER_SENDER_LIMIT = parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 25;
+// ── Domain warming schedule ────────────────────────────
+// getmonkflow.com launch date — used to auto-ramp sending volume
+const DOMAIN_LAUNCH_DATE = new Date(process.env.DOMAIN_LAUNCH_DATE || '2026-04-01');
+
+function getWarmingLimits() {
+  const daysSinceLaunch = Math.floor((Date.now() - DOMAIN_LAUNCH_DATE.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (daysSinceLaunch < 3) {
+    // Days 0-2: 15 per sender × 10 senders = 150/day
+    return { daily: 150, perSender: 15, phase: 'warm-1' };
+  } else if (daysSinceLaunch < 7) {
+    // Days 3-6: 25 per sender × 10 senders = 250/day
+    return { daily: 250, perSender: 25, phase: 'warm-2' };
+  } else if (daysSinceLaunch < 14) {
+    // Days 7-13: 40 per sender × 10 senders = 400/day
+    return { daily: 400, perSender: 40, phase: 'warm-3' };
+  } else {
+    // Day 14+: full volume from env vars
+    return {
+      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 500,
+      perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 50,
+      phase: 'full',
+    };
+  }
+}
+
+// NOTE: DAILY_LIMIT and PER_SENDER_LIMIT are now dynamic via getWarmingLimits()
+// Static fallbacks kept only for any external references
 const UNSUBSCRIBE_BASE = (env.frontendUrl || 'https://monkflow.io').replace(/\/$/, '');
 
 // Rotate across 10 sender identities to protect deliverability
@@ -484,12 +510,14 @@ async function runDailyLeadGeneration() {
 
   try {
   // 0. Resume any unsent leads from previous interrupted runs
+  const resumeWarming = getWarmingLimits();
   try {
     const { rows: unsentLeads } = await dbQuery(
-      `SELECT * FROM leads WHERE status = 'email_generated' AND outreach_subject IS NOT NULL AND outreach_body IS NOT NULL ORDER BY created_at LIMIT 250`
+      `SELECT * FROM leads WHERE status = 'email_generated' AND outreach_subject IS NOT NULL AND outreach_body IS NOT NULL ORDER BY created_at LIMIT $1`,
+      [resumeWarming.daily]
     );
     if (unsentLeads.length > 0) {
-      console.log(`[LEADGEN] Found ${unsentLeads.length} unsent leads from previous run — sending now`);
+      console.log(`[LEADGEN] Found ${unsentLeads.length} unsent leads from previous run — sending now (warming phase: ${resumeWarming.phase})`);
       await logExec('info', `Resuming ${unsentLeads.length} unsent leads from previous run`, { count: unsentLeads.length });
       const senderCounts = new Map(SENDERS.map(s => [s.email, 0]));
       let senderIdx = 0;
@@ -497,7 +525,7 @@ async function runDailyLeadGeneration() {
         let sender = null;
         for (let j = 0; j < SENDERS.length; j++) {
           const candidate = SENDERS[(senderIdx + j) % SENDERS.length];
-          if (senderCounts.get(candidate.email) < PER_SENDER_LIMIT) {
+          if (senderCounts.get(candidate.email) < resumeWarming.perSender) {
             sender = candidate;
             senderIdx = (senderIdx + j + 1) % SENDERS.length;
             break;
@@ -653,9 +681,11 @@ async function runDailyLeadGeneration() {
 
   console.log(`[LEADGEN] Qualified leads: ${qualifiedLeads.length}`);
 
-  // 4. Sort by score (most gaps first), take top DAILY_LIMIT
+  // 4. Sort by score (most gaps first), take top leads (warming-aware limit)
+  const warming = getWarmingLimits();
+  console.log(`[LEADGEN] Domain warming phase: ${warming.phase} — daily limit: ${warming.daily}, per-sender: ${warming.perSender}`);
   qualifiedLeads.sort((a, b) => scoreLead(b.diagnosis_json) - scoreLead(a.diagnosis_json));
-  const toEmail = qualifiedLeads.slice(0, DAILY_LIMIT);
+  const toEmail = qualifiedLeads.slice(0, warming.daily);
 
   // 5. Generate personalized outreach via Claude API
   await logExec('info', `Email generation starting for ${toEmail.length} leads`, { leadCount: toEmail.length });
@@ -676,7 +706,7 @@ async function runDailyLeadGeneration() {
     await sleep(500);
   }
 
-  // 6. Send emails — distribute round-robin across senders (max PER_SENDER_LIMIT each)
+  // 6. Send emails — distribute round-robin across senders (warming-aware per-sender limit)
   const senderCounts = new Map(SENDERS.map(s => [s.email, 0]));
   const readyLeads = toEmail.filter(l => l.outreach_subject && l.outreach_body);
   let senderIdx = 0;
@@ -686,7 +716,7 @@ async function runDailyLeadGeneration() {
     let sender = null;
     for (let j = 0; j < SENDERS.length; j++) {
       const candidate = SENDERS[(senderIdx + j) % SENDERS.length];
-      if (senderCounts.get(candidate.email) < PER_SENDER_LIMIT) {
+      if (senderCounts.get(candidate.email) < warming.perSender) {
         sender = candidate;
         senderIdx = (senderIdx + j + 1) % SENDERS.length;
         break;
