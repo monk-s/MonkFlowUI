@@ -19,16 +19,16 @@ const UNSUBSCRIBE_BASE = (env.frontendUrl || 'https://monkflow.io').replace(/\/$
 
 // Rotate across 10 sender identities to protect deliverability
 const SENDERS = [
-  { email: 'nathan@monkflow.io', name: 'Nathan Linder' },
-  { email: 'nate@monkflow.io', name: 'Nate Linder' },
-  { email: 'nathan.linder@monkflow.io', name: 'Nathan Linder' },
-  { email: 'n.linder@monkflow.io', name: 'Nathan L.' },
-  { email: 'outreach@monkflow.io', name: 'Nathan at MonkFlow' },
-  { email: 'hello@monkflow.io', name: 'Nathan from MonkFlow' },
-  { email: 'growth@monkflow.io', name: 'Nathan — MonkFlow' },
-  { email: 'team@monkflow.io', name: 'Nathan at MonkFlow' },
-  { email: 'connect@monkflow.io', name: 'Nathan Linder' },
-  { email: 'info@monkflow.io', name: 'Nathan at MonkFlow' },
+  { email: 'nathan@getmonkflow.com', name: 'Nathan Linder' },
+  { email: 'nate@getmonkflow.com', name: 'Nate Linder' },
+  { email: 'nathan.linder@getmonkflow.com', name: 'Nathan Linder' },
+  { email: 'n.linder@getmonkflow.com', name: 'Nathan L.' },
+  { email: 'outreach@getmonkflow.com', name: 'Nathan at MonkFlow' },
+  { email: 'hello@getmonkflow.com', name: 'Nathan from MonkFlow' },
+  { email: 'growth@getmonkflow.com', name: 'Nathan — MonkFlow' },
+  { email: 'team@getmonkflow.com', name: 'Nathan at MonkFlow' },
+  { email: 'connect@getmonkflow.com', name: 'Nathan Linder' },
+  { email: 'info@getmonkflow.com', name: 'Nathan at MonkFlow' },
 ];
 
 const US_CITIES = [
@@ -308,7 +308,7 @@ async function generateOutreachEmail(lead, diagnosis, onRetry) {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
-  const prompt = `You are writing a cold outreach email for Nathan Linder, who runs MonkFlow (monkflow.io), a web development and automation company for small businesses.
+  const prompt = `You are writing a cold outreach email for Nathan Linder, who runs MonkFlow (getmonkflow.com), a web development and automation company for small businesses.
 
 Write a SHORT cold email (under 150 words) to this business. Be specific about what you found on their website. Do NOT be salesy. Be helpful and direct. Write from the perspective of Nathan Linder.
 
@@ -332,7 +332,7 @@ FORMAT:
 - Reference ONE specific finding from their site
 - Explain what MonkFlow could add (1-2 sentences)
 - End with a soft CTA asking for a 15-min call
-- Sign off as: Nathan Linder / MonkFlow | monkflow.io
+- Sign off as: Nathan Linder / MonkFlow | getmonkflow.com
 - Subject line should be short and curiosity-driven (under 50 chars)
 
 Return JSON: {"subject": "...", "body": "..."}`;
@@ -398,7 +398,7 @@ async function sendColdEmail(lead, sender) {
           </td>
           <td style="vertical-align: top;">
             <div style="font-weight: 600; color: #1a1a1a; font-size: 14px;">Nathan Linder</div>
-            <div style="color: #666; font-size: 13px;">Founder, <a href="https://monkflow.io" style="color: #00cc6a; text-decoration: none;">MonkFlow</a></div>
+            <div style="color: #666; font-size: 13px;">Founder, <a href="https://getmonkflow.com" style="color: #00cc6a; text-decoration: none;">MonkFlow</a></div>
             <div style="color: #999; font-size: 12px; margin-top: 2px;">AI-powered workflows for small businesses</div>
           </td>
         </tr>
@@ -414,7 +414,7 @@ async function sendColdEmail(lead, sender) {
   const fromAddr = sender ? `${sender.name} <${sender.email}>` : undefined;
 
   try {
-    const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@monkflow.io';
+    const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@getmonkflow.com';
     const result = await sendEmail({
       to: lead.email,
       subject: lead.outreach_subject,
@@ -774,7 +774,7 @@ async function runDailyLeadGeneration() {
 }
 
 async function sendOwnerSummary(batchDate, stats, leads) {
-  const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || 'nathan@monkflow.io';
+  const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || 'nathan@getmonkflow.com';
 
   const leadsTable = leads.map(l =>
     `<tr><td>${escapeHtml(l.business_name)}</td><td>${escapeHtml(l.city)}, ${escapeHtml(l.state)}</td><td>${escapeHtml(l.email)}</td><td>${l.priority}</td></tr>`

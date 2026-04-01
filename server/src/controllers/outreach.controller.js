@@ -1,6 +1,7 @@
 const catchAsync = require('../utils/catchAsync');
 const { query } = require('../config/database');
 const ApiError = require('../utils/ApiError');
+const env = require('../config/env');
 const { sendEmail } = require('../services/email.service');
 const outreachAI = require('../services/outreach-ai.service');
 
@@ -275,6 +276,7 @@ const processDueFollowups = catchAsync(async (req, res) => {
 
     try {
       const emailResult = await sendEmail({
+        from: env.outreachFromEmail,
         to: lead.contact_email,
         subject: template.subject,
         html: template.body,

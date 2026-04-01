@@ -241,6 +241,7 @@ async function sendAiEmail(leadId) {
   if (lead.ai_email_sent_at) throw new Error('AI email already sent');
 
   const emailResult = await sendEmail({
+    from: env.outreachFromEmail || 'Nathan Linder <nathan@getmonkflow.com>',
     to: lead.contact_email,
     subject: lead.ai_email_subject,
     html: lead.ai_email_body,
@@ -310,12 +311,12 @@ function smtpVerify(email, mxHost, timeout = 10000) {
         // Connected, send HELO
         step = 1;
         response = '';
-        socket.write('HELO monkflow.io\r\n');
+        socket.write('HELO getmonkflow.com\r\n');
       } else if (step === 1 && code === 250) {
         // HELO accepted, send MAIL FROM
         step = 2;
         response = '';
-        socket.write('MAIL FROM:<verify@monkflow.io>\r\n');
+        socket.write('MAIL FROM:<verify@getmonkflow.com>\r\n');
       } else if (step === 2 && code === 250) {
         // MAIL FROM accepted, send RCPT TO
         step = 3;

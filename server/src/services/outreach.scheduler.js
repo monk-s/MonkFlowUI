@@ -14,6 +14,7 @@ function start() {
     try {
       const { query } = require('../config/database');
       const { sendEmail } = require('./email.service');
+      const env = require('../config/env');
 
       // OOO detection patterns
       const OOO_PATTERNS = [
@@ -98,6 +99,7 @@ function start() {
 
         try {
           const emailResult = await sendEmail({
+            from: env.outreachFromEmail,
             to: lead.contact_email,
             subject: template.subject,
             html: template.body,
