@@ -67,6 +67,14 @@ runMigrations().then(() => {
     } catch (err) {
       console.error('Usage scheduler failed to start:', err.message);
     }
+
+    // Start billing cron
+    try {
+      const billingScheduler = require('./services/billing.scheduler');
+      billingScheduler.start();
+    } catch (err) {
+      console.error('Billing scheduler failed to start:', err.message);
+    }
   });
 
   // Graceful shutdown
@@ -88,6 +96,8 @@ runMigrations().then(() => {
         leadgenScheduler.stop();
         const usageScheduler = require('./services/usage.scheduler');
         usageScheduler.stop();
+        const billingScheduler = require('./services/billing.scheduler');
+        billingScheduler.stop();
         console.log('Cron jobs stopped');
       } catch { /* scheduler not loaded yet */ }
 

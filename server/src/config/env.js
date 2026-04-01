@@ -20,6 +20,10 @@ const env = {
   leadgenEnabled: process.env.LEADGEN_ENABLED === 'true',
   leadgenDailyLimit: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 20,
   leadgenFromEmail: process.env.LEADGEN_FROM_EMAIL || 'nathan@monkflow.io',
+  qboClientId: process.env.QBO_CLIENT_ID || '',
+  qboClientSecret: process.env.QBO_CLIENT_SECRET || '',
+  qboRedirectUri: process.env.QBO_REDIRECT_URI || 'https://resourceful-abundance-production.up.railway.app/api/v1/quickbooks/callback',
+  qboEnvironment: process.env.QBO_ENVIRONMENT || 'sandbox',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production',
 };

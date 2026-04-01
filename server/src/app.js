@@ -25,6 +25,8 @@ const projectRoutes = require('./routes/project.routes');
 const leadgenRoutes = require('./routes/leadgen.routes');
 const adminRoutes = require('./routes/admin.routes');
 const planRoutes = require('./routes/plan.routes');
+const quickbooksRoutes = require('./routes/quickbooks.routes');
+const billingRoutes = require('./routes/billing.routes');
 
 const app = express();
 
@@ -61,6 +63,8 @@ app.use('/api/v1/projects', projectRoutes);
 app.use('/api/v1/leadgen', leadgenRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/plans', planRoutes);
+app.use('/api/v1/quickbooks', quickbooksRoutes);
+app.use('/api/v1/billing', billingRoutes);
 
 // 404 handler
 app.use((req, res) => {
