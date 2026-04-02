@@ -625,6 +625,14 @@ async function runDailyLeadGeneration() {
       const bestEmail = diagnosis.emails[0];
       if (!bestEmail) continue;
 
+      // Verify email before adding (pattern + MX check)
+      const { verifyEmail } = require('./outreach-ai.service');
+      const verification = await verifyEmail(bestEmail);
+      if (!verification.valid) {
+        console.log(`[LEADGEN] Skipping invalid email ${bestEmail}: ${verification.reason}`);
+        continue;
+      }
+
       // Check dedup
       if (await leadModel.emailExists(bestEmail)) continue;
 

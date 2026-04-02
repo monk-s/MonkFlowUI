@@ -271,14 +271,26 @@ async function sendAiEmail(leadId) {
 const net = require('net');
 
 const BAD_PATTERNS = [
-  /^test@/i, /^admin@example/i, /^user@/i, /^noreply@/i,
+  /^test@/i, /^admin@example/i, /^user@/i, /^noreply@/i, /^no-reply@/i,
   /^filler@/i, /^johndoe@/i, /^jsmith@/i, /^demo@/i,
+  /^postmaster@/i, /^mailer-daemon@/i, /^webmaster@/i,
+  /^abuse@/i, /^spam@/i, /^root@/i, /^hostmaster@/i,
+  /^myself@/i, /^me@/i, /^owner@/i,
   /@example\.(com|org|net)$/i, /@test\./i, /@invalid$/i,
   /^.{60,}@/,  // Extremely long local parts (garbled data)
+  /^.{1,2}@/,  // Too-short local parts (a@, ab@)
   /[+=%].*@/,  // Encoded characters in local part
   /^u0022/i,   // Unicode-encoded quote prefix (malformed scrape data)
   /^insurers@/i, // Generic role addresses that bounce
+  /^[A-Z][a-z]+[A-Z][a-z]+[A-Z]/,  // CamelCase garbage like "WheelerDwheeler"
+  /\.\./,      // Double dots anywhere
 ];
+
+// TLDs that are almost always garbage from bad scraping
+const SUSPICIOUS_TLDS = new Set([
+  'dr', 'co', 'xyz', 'top', 'tk', 'ml', 'ga', 'cf', 'gq', 'buzz',
+  'club', 'work', 'click', 'link', 'monster', 'rest', 'icu', 'fun',
+]);
 
 const DISPOSABLE_DOMAINS = new Set([
   'mailinator.com', 'guerrillamail.com', 'tempmail.com', 'throwaway.email',
@@ -378,6 +390,19 @@ async function verifyEmail(email) {
   const domain = email.split('@')[1].toLowerCase();
   if (DISPOSABLE_DOMAINS.has(domain)) {
     return { valid: false, reason: 'Disposable email domain' };
+  }
+
+  // Check suspicious TLDs (common scraping garbage)
+  const tld = domain.split('.').pop();
+  if (SUSPICIOUS_TLDS.has(tld)) {
+    return { valid: false, reason: `Suspicious TLD .${tld} — likely scraped garbage` };
+  }
+
+  // Reject local parts with any uppercase letters — legit emails are virtually always lowercase
+  // Scraped garbage often has "Wheelerdwheeler", "DrSmith", etc.
+  const localPart = email.split('@')[0];
+  if (/[A-Z]/.test(localPart)) {
+    return { valid: false, reason: 'Uppercase in local part — likely scraped artifact' };
   }
 
   // MX record check
