@@ -439,7 +439,7 @@ async function sendColdEmail(lead, sender) {
   const fromAddr = sender ? `${sender.name} <${sender.email}>` : undefined;
 
   try {
-    const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@getmonkflow.com';
+    const replyTo = process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com';
     const result = await sendEmail({
       to: lead.email,
       subject: lead.outreach_subject,

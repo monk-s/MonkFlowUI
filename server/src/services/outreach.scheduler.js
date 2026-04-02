@@ -103,6 +103,7 @@ function start() {
             to: lead.contact_email,
             subject: template.subject,
             html: template.body,
+            headers: { 'Reply-To': process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com' },
           });
 
           const gmailId = emailResult?.data?.id || emailResult?.id || null;

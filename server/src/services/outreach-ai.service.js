@@ -245,6 +245,7 @@ async function sendAiEmail(leadId) {
     to: lead.contact_email,
     subject: lead.ai_email_subject,
     html: lead.ai_email_body,
+    headers: { 'Reply-To': process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com' },
   });
 
   const gmailId = emailResult?.data?.id || emailResult?.id || null;
