@@ -6109,7 +6109,11 @@ async function generateAllAiEmails() {
     showToast('Generating AI emails for all priority leads... this may take a minute', 'info');
     const res = await api.post('/outreach/generate-all');
     const data = res.data;
-    showToast(`Generated ${data.generated} AI emails${data.errors ? `, ${data.errors} errors` : ''}`, 'success');
+    showToast(data.generated > 0
+      ? `Generated ${data.generated} AI email drafts${data.errors ? `, ${data.errors} errors` : ''}`
+      : data.total === 0
+        ? 'No unsent priority leads found — mark leads as priority first'
+        : `${data.total} drafts already up to date`, data.generated > 0 ? 'success' : 'info');
     loadOutreachData();
   } catch (err) {
     showToast(err.message || 'Failed to generate AI emails', 'error');

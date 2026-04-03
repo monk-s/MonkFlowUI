@@ -208,7 +208,7 @@ async function generateForLead(leadId) {
 async function generateForAllPriority() {
   const { rows: leads } = await query(
     `SELECT id FROM outreach_leads
-     WHERE priority = true AND status = 'active' AND ai_email_body IS NULL
+     WHERE priority = true AND status = 'active' AND ai_email_sent_at IS NULL
      ORDER BY created_at ASC`
   );
 
