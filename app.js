@@ -1030,7 +1030,7 @@ function renderSidebar() {
       </div>
       ` : ''}
 
-      ${currentUser?.email === 'nathan@monkflow.io' ? `
+      ${['nathan@monkflow.io','jake@thelinders.com'].includes(currentUser?.email) ? `
       <div class="nav-section-label">Trading</div>
       <div class="nav-item" data-page="stonkbot" onclick="navigateTo('stonkbot')">
         ${icons.stonkbot} Stonk Bot

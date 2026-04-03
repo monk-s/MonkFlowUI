@@ -2,10 +2,10 @@ const env = require('../config/env');
 
 const STONKBOT_URL = process.env.STONKBOT_URL || 'http://localhost:3001';
 const STONKBOT_API_KEY = process.env.STONKBOT_API_KEY || 'dev-key';
-const ALLOWED_EMAIL = 'nathan@monkflow.io';
+const ALLOWED_EMAILS = ['nathan@monkflow.io', 'jake@thelinders.com'];
 
 async function proxyGet(endpoint, req, res) {
-  if (req.user.email !== ALLOWED_EMAIL) {
+  if (!ALLOWED_EMAILS.includes(req.user.email)) {
     return res.status(403).json({ error: 'Access denied' });
   }
   try {
@@ -21,7 +21,7 @@ async function proxyGet(endpoint, req, res) {
 }
 
 async function proxyPost(endpoint, req, res) {
-  if (req.user.email !== ALLOWED_EMAIL) {
+  if (!ALLOWED_EMAILS.includes(req.user.email)) {
     return res.status(403).json({ error: 'Access denied' });
   }
   try {
