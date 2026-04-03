@@ -439,6 +439,22 @@ const handleResendWebhook = catchAsync(async (req, res) => {
       if (rows.length > 0) {
         console.log(`[OUTREACH] ${type}: removed ${toEmail} from sequence`);
       }
+
+      // Also mark the lead as bounced in leads table (for domain suppression)
+      try {
+        const { rows: leadRows } = await query(
+          `UPDATE leads
+           SET status = 'bounced', updated_at = NOW()
+           WHERE email = $1 AND status IN ('sent', 'email_generated', 'diagnosed')
+           RETURNING id`,
+          [toEmail]
+        );
+        if (leadRows.length > 0) {
+          console.log(`[OUTREACH] ${type}: marked lead ${toEmail} as bounced in leads table`);
+        }
+      } catch (err) {
+        console.error(`[OUTREACH] Failed to mark lead as bounced: ${err.message}`);
+      }
     }
   }
 

@@ -10,7 +10,7 @@ const env = {
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   emailProvider: process.env.EMAIL_PROVIDER || '',
   resendApiKey: process.env.RESEND_API_KEY || '',
-  emailFrom: process.env.EMAIL_FROM || 'noreply@monkflow.io',
+  emailFrom: process.env.EMAIL_FROM || 'noreply@getmonkflow.com',
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   googleServiceAccountKey: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '',

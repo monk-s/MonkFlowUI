@@ -20,19 +20,17 @@ const DOMAIN_LAUNCH_DATE = new Date(process.env.DOMAIN_LAUNCH_DATE || '2026-04-0
 function getWarmingLimits() {
   const daysSinceLaunch = Math.floor((Date.now() - DOMAIN_LAUNCH_DATE.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (daysSinceLaunch < 3) {
-    // Days 0-2: 15 per sender × 10 senders = 150/day
-    return { daily: 150, perSender: 15, phase: 'warm-1' };
-  } else if (daysSinceLaunch < 7) {
-    // Days 3-6: 20 per sender × 10 senders = 200/day
-    return { daily: 200, perSender: 20, phase: 'warm-2' };
+  if (daysSinceLaunch < 7) {
+    // Days 0-6: conservative post-SPF-fix recovery — 10 per sender × 10 = 100/day
+    return { daily: 100, perSender: 10, phase: 'warm-1' };
+  } else if (daysSinceLaunch < 14) {
+    // Days 7-13: gradual increase — 13 per sender × 10 = ~125/day
+    return { daily: 125, perSender: 13, phase: 'warm-2' };
   } else {
-    // Day 7+: full volume — 25 per sender × 10 = 250/day
-    // Capped at 250 to stay within SerpAPI 5k/month budget
-    // (140 searches/day × 22 weekdays = 3,080 searches → ~200-250 qualified leads/day)
+    // Day 14+: steady state — 15 per sender × 10 = 150/day
     return {
-      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 250,
-      perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 25,
+      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 150,
+      perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 15,
       phase: 'full',
     };
   }
@@ -625,16 +623,18 @@ async function runDailyLeadGeneration() {
       const bestEmail = diagnosis.emails[0];
       if (!bestEmail) continue;
 
-      // Verify email before adding (pattern + MX check)
+      // Verify email before adding (pattern + MX check + domain suppression)
       const { verifyEmail } = require('./outreach-ai.service');
       const verification = await verifyEmail(bestEmail);
       if (!verification.valid) {
         console.log(`[LEADGEN] Skipping invalid email ${bestEmail}: ${verification.reason}`);
         continue;
       }
+      // Use normalized (lowercased) email from verification
+      const cleanEmail = verification.normalizedEmail || bestEmail;
 
       // Check dedup
-      if (await leadModel.emailExists(bestEmail)) continue;
+      if (await leadModel.emailExists(cleanEmail)) continue;
 
       // Parse city/state
       const [cityName, stateCode] = raw.city.split(/\s+(?=[A-Z]{2}$)/);
@@ -646,7 +646,7 @@ async function runDailyLeadGeneration() {
         state: stateCode,
         website_url: websiteUrl,
         facebook_url: null,
-        email: bestEmail,
+        email: cleanEmail,
         phone: null,
         ...diagnosis,
         diagnosis_json: diagnosis,

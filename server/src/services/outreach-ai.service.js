@@ -297,6 +297,15 @@ const DISPOSABLE_DOMAINS = new Set([
   'yopmail.com', '10minutemail.com', 'trashmail.com',
 ]);
 
+// Common typo domains that cause permanent bounces
+const TYPO_DOMAINS = new Map([
+  ['gmial.com', 'gmail.com'], ['gmal.com', 'gmail.com'], ['gmaill.com', 'gmail.com'],
+  ['gamil.com', 'gmail.com'], ['gnail.com', 'gmail.com'],
+  ['outlok.com', 'outlook.com'], ['outloo.com', 'outlook.com'],
+  ['hotmial.com', 'hotmail.com'], ['hotmal.com', 'hotmail.com'],
+  ['yahooo.com', 'yahoo.com'], ['yaho.com', 'yahoo.com'],
+]);
+
 // SMTP RCPT TO verification — checks if the mailbox actually exists
 function smtpVerify(email, mxHost, timeout = 10000) {
   return new Promise((resolve) => {
@@ -398,12 +407,26 @@ async function verifyEmail(email) {
     return { valid: false, reason: `Suspicious TLD .${tld} — likely scraped garbage` };
   }
 
-  // Reject local parts with any uppercase letters — legit emails are virtually always lowercase
-  // Scraped garbage often has "Wheelerdwheeler", "DrSmith", etc.
-  const localPart = email.split('@')[0];
-  if (/[A-Z]/.test(localPart)) {
-    return { valid: false, reason: 'Uppercase in local part — likely scraped artifact' };
+  // Check typo domains (gmial.com, outlok.com, etc.)
+  if (TYPO_DOMAINS.has(domain)) {
+    return { valid: false, reason: `Typo domain ${domain} (likely meant ${TYPO_DOMAINS.get(domain)})` };
   }
+
+  // Normalize to lowercase AFTER BAD_PATTERNS check (which catches CamelCase garbage)
+  // RFC 5321: local part is case-insensitive in practice for all major providers
+  email = email.toLowerCase();
+
+  // Check if domain has previous bounces (domain-level suppression)
+  try {
+    const { query: dbq } = require('../config/database');
+    const { rows } = await dbq(
+      `SELECT 1 FROM leads WHERE email LIKE $1 AND status = 'bounced' LIMIT 1`,
+      [`%@${domain}`]
+    );
+    if (rows.length > 0) {
+      return { valid: false, reason: `Domain ${domain} has previous bounces — suppressed` };
+    }
+  } catch (_) { /* don't block on DB errors */ }
 
   // MX record check
   let mxRecords;
@@ -429,7 +452,7 @@ async function verifyEmail(email) {
   // Note: mailbox-level verification (SMTP RCPT TO) is not reliable from
   // cloud environments (port 25 blocked). Bounce protection is handled
   // reactively via the Resend webhook at /api/v1/outreach/webhook/resend
-  return { valid: true, reason: 'OK' };
+  return { valid: true, reason: 'OK', normalizedEmail: email };
 }
 
 module.exports = {
