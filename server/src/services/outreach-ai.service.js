@@ -240,12 +240,34 @@ async function sendAiEmail(leadId) {
   if (!lead.ai_email_body) throw new Error('No AI email generated yet — generate first');
   if (lead.ai_email_sent_at) throw new Error('AI email already sent');
 
+  // Build anti-spam headers
+  const replyTo = process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com';
+  const emailHeaders = { 'Reply-To': replyTo };
+
+  // List-Unsubscribe (Gmail/Yahoo requirement for bulk senders)
+  const unsubToken = lead.unsubscribe_token;
+  if (unsubToken) {
+    const unsubUrl = `${env.frontendUrl || 'https://getmonkflow.com'}/api/v1/leadgen/unsubscribe/${unsubToken}`;
+    emailHeaders['List-Unsubscribe'] = `<${unsubUrl}>`;
+    emailHeaders['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+  }
+
+  // Plain-text alternative (improves deliverability score)
+  const plainText = lead.ai_email_body
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
   const emailResult = await sendEmail({
     from: env.outreachFromEmail || 'Nathan Linder <nathan@getmonkflow.com>',
     to: lead.contact_email,
     subject: lead.ai_email_subject,
     html: lead.ai_email_body,
-    headers: { 'Reply-To': process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com' },
+    text: plainText,
+    headers: emailHeaders,
   });
 
   const gmailId = emailResult?.data?.id || emailResult?.id || null;
@@ -257,10 +279,12 @@ async function sendAiEmail(leadId) {
     [leadId, lead.ai_email_subject, lead.ai_email_body, gmailId]
   );
 
-  // Mark as sent
+  // Store original message ID and subject for follow-up threading
   await query(
-    `UPDATE outreach_leads SET ai_email_sent_at = NOW(), updated_at = NOW() WHERE id = $1`,
-    [leadId]
+    `UPDATE outreach_leads
+     SET ai_email_sent_at = NOW(), original_message_id = $2, original_subject = $3, updated_at = NOW()
+     WHERE id = $1`,
+    [leadId, gmailId, lead.ai_email_subject]
   );
 
   return { sent: true, to: lead.contact_email };

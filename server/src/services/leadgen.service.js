@@ -438,12 +438,16 @@ async function sendColdEmail(lead, sender) {
 
   try {
     const replyTo = process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com';
+
+    // Plain-text alternative (improves deliverability — HTML-only emails score higher on spam filters)
+    const plainText = `${lead.outreach_body}\n\n--\nNathan Linder\nFounder, MonkFlow\nAI-powered workflows for small businesses\n\nMonkFlow LLC | 1600 Sayles Blvd, Abilene, TX 79605\nUnsubscribe: ${unsubUrl}`;
+
     const result = await sendEmail({
       to: lead.email,
       subject: lead.outreach_subject,
       html: htmlBody,
+      text: plainText,
       from: fromAddr,
-      reply_to: replyTo,
       headers: {
         'Reply-To': replyTo,
         'List-Unsubscribe': `<${unsubUrl}>`,
@@ -738,7 +742,7 @@ async function runDailyLeadGeneration() {
     } else {
       stats.errors++;
     }
-    await sleep(1000); // stagger sends
+    await sleep(3000); // stagger sends (3s minimum to avoid ISP rate-limiting)
   }
 
   console.log(`[LEADGEN] Sender distribution: ${[...senderCounts.entries()].map(([e,c]) => `${e}=${c}`).join(', ')}`);

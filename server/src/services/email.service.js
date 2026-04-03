@@ -10,7 +10,7 @@ function getResendClient() {
   return resendClient;
 }
 
-async function sendEmail({ to, subject, html, from, bcc, headers }) {
+async function sendEmail({ to, subject, html, text, from, bcc, headers }) {
   const client = getResendClient();
 
   if (!client) {
@@ -19,42 +19,28 @@ async function sendEmail({ to, subject, html, from, bcc, headers }) {
     return { id: 'dev-' + Date.now() };
   }
 
-  // If a custom `from` is provided (e.g. sender rotation), use it directly with Resend default fallback
-  // Otherwise use the configured domain first, fall back to Resend's default if domain not verified
-  const fromAddresses = from
-    ? [from, 'MonkFlow <onboarding@resend.dev>']
-    : [env.emailFrom, 'MonkFlow <onboarding@resend.dev>'];
+  const fromAddr = from || env.emailFrom;
 
-  for (const fromAddr of fromAddresses) {
-    try {
-      const sendPayload = { from: fromAddr, to, subject, html };
-      if (bcc) sendPayload.bcc = bcc;
-      if (headers) sendPayload.headers = headers;
-      const result = await client.emails.send(sendPayload);
+  try {
+    const sendPayload = { from: fromAddr, to, subject, html };
+    if (text) sendPayload.text = text;
+    if (bcc) sendPayload.bcc = bcc;
+    if (headers) sendPayload.headers = headers;
+    const result = await client.emails.send(sendPayload);
 
-      // Resend SDK returns { data, error } instead of throwing
-      if (result?.error) {
-        const errCode = result.error.statusCode || result.error.status;
-        console.error(`[Email] FAILED from ${fromAddr} to ${to}: ${result.error.message}`, errCode);
-        if (errCode === 403 && fromAddr === env.emailFrom) {
-          console.log(`[Email] Domain not verified, retrying with Resend default sender...`);
-          continue;
-        }
-        return result; // Return error result if not retryable
-      }
-
-      console.log(`[Email] Sent to ${to} from ${fromAddr}: id=${result?.data?.id || JSON.stringify(result)}`);
+    // Resend SDK returns { data, error } instead of throwing
+    if (result?.error) {
+      const errCode = result.error.statusCode || result.error.status;
+      console.error(`[Email] FAILED from ${fromAddr} to ${to}: ${result.error.message}`, errCode);
       return result;
-    } catch (emailErr) {
-      console.error(`[Email] EXCEPTION from ${fromAddr} to ${to}: ${emailErr.message}`, emailErr.statusCode || '');
-      if ((emailErr.statusCode === 403) && fromAddr === env.emailFrom) {
-        console.log(`[Email] Domain not verified, retrying with Resend default sender...`);
-        continue;
-      }
-      throw emailErr;
     }
+
+    console.log(`[Email] Sent to ${to} from ${fromAddr}: id=${result?.data?.id || JSON.stringify(result)}`);
+    return result;
+  } catch (emailErr) {
+    console.error(`[Email] EXCEPTION from ${fromAddr} to ${to}: ${emailErr.message}`, emailErr.statusCode || '');
+    throw emailErr;
   }
-  throw new Error('All sender addresses failed');
 }
 
 // ── Templates ──────────────────────────────────────────
