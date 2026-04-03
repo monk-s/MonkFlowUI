@@ -28,6 +28,7 @@ const planRoutes = require('./routes/plan.routes');
 const quickbooksRoutes = require('./routes/quickbooks.routes');
 const billingRoutes = require('./routes/billing.routes');
 const outreachRoutes = require('./routes/outreach.routes');
+const stonkbotRoutes = require('./routes/stonkbot.routes');
 
 const app = express();
 
@@ -75,6 +76,7 @@ app.use('/api/v1/plans', planRoutes);
 app.use('/api/v1/quickbooks', quickbooksRoutes);
 app.use('/api/v1/billing', billingRoutes);
 app.use('/api/v1/outreach', outreachRoutes);
+app.use('/api/v1/stonkbot', stonkbotRoutes);
 
 // 404 handler
 app.use((req, res) => {

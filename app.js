@@ -43,6 +43,7 @@ const icons = {
   chevronRight: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`,
   book: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>`,
   logout: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>`,
+  stonkbot: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>`,
   arrowLeft: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>`,
   save: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`,
   zoomIn: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/></svg>`,
@@ -429,6 +430,7 @@ function navigateTo(page) {
   if (page === 'admin') loadAdminData();
   if (page === 'billing') loadBillingData();
   if (page === 'outreach') loadOutreachData();
+  if (page === 'stonkbot') loadStonkBotData();
   if (page === 'integrations') loadQboStatus();
   // Update active nav
   document.querySelectorAll('.nav-item').forEach(el => {
@@ -1028,6 +1030,13 @@ function renderSidebar() {
       </div>
       ` : ''}
 
+      ${currentUser?.email === 'nathan@monkflow.io' ? `
+      <div class="nav-section-label">Trading</div>
+      <div class="nav-item" data-page="stonkbot" onclick="navigateTo('stonkbot')">
+        ${icons.stonkbot} Stonk Bot
+      </div>
+      ` : ''}
+
       <div class="nav-section-label">Account</div>
       <div class="nav-item" data-page="billing" onclick="navigateTo('billing')">
         ${icons.zap} Plans & Billing
@@ -1329,6 +1338,7 @@ function renderMainContent() {
     'admin': renderAdminDashboard,
     'admin-account': renderAdminAccountDetail,
     'outreach': renderOutreachPage,
+    'stonkbot': renderStonkBotPage,
     'billing': renderBilling,
   };
   main.innerHTML = (pages[currentPage] || renderDashboard)();
@@ -6130,4 +6140,270 @@ async function sendOutreachAiEmail(id) {
   } catch (err) {
     showToast(err.message || 'Failed to send AI email', 'error');
   }
+}
+
+// ============================================================
+// STONK BOT — Paper Trading Dashboard
+// ============================================================
+let stonkBotData = null;
+let stonkBotPollInterval = null;
+
+async function loadStonkBotData() {
+  try {
+    const [status, account, positions, trades, pnl, signals] = await Promise.all([
+      api.get('/stonkbot/status'),
+      api.get('/stonkbot/account'),
+      api.get('/stonkbot/positions'),
+      api.get('/stonkbot/trades?limit=50'),
+      api.get('/stonkbot/pnl'),
+      api.get('/stonkbot/signals?limit=60'),
+    ]);
+    stonkBotData = {
+      status: status.data || status,
+      account: account.data || account,
+      positions: positions.data || positions,
+      trades: trades.data || trades,
+      pnl: pnl.data || pnl,
+      signals: signals.data || signals,
+    };
+    if (currentPage === 'stonkbot') renderMainContent();
+
+    // Auto-refresh every 30 seconds while on this page
+    if (!stonkBotPollInterval) {
+      stonkBotPollInterval = setInterval(() => {
+        if (currentPage === 'stonkbot') loadStonkBotData();
+        else { clearInterval(stonkBotPollInterval); stonkBotPollInterval = null; }
+      }, 30000);
+    }
+  } catch (err) {
+    console.error('Failed to load Stonk Bot data:', err);
+    stonkBotData = { error: err.message };
+    if (currentPage === 'stonkbot') renderMainContent();
+  }
+}
+
+async function stonkBotControl(action) {
+  try {
+    await api.post('/stonkbot/control', { action });
+    showToast(`Bot ${action === 'scan' ? 'scan triggered' : action + 'd'}`, 'success');
+    loadStonkBotData();
+  } catch (err) {
+    showToast(err.message || `Failed to ${action}`, 'error');
+  }
+}
+
+function renderStonkBotPage() {
+  if (!stonkBotData) {
+    return `<div class="card" style="padding:40px;text-align:center;">
+      <div class="spinner"></div>
+      <p style="color:var(--text-tertiary);margin-top:12px;">Loading Stonk Bot data...</p>
+    </div>`;
+  }
+
+  if (stonkBotData.error) {
+    return `<div class="card" style="padding:40px;text-align:center;">
+      <div style="font-size:48px;margin-bottom:16px;">&#x1f4c9;</div>
+      <h3 style="margin-bottom:8px;">Stonk Bot Offline</h3>
+      <p style="color:var(--text-tertiary);margin-bottom:16px;">${stonkBotData.error}</p>
+      <p style="color:var(--text-tertiary);font-size:12px;">Make sure the bot is running on port 3001:<br><code style="background:var(--bg-tertiary);padding:2px 6px;border-radius:4px;">cd ~/Desktop/Stonk\\ Bot && npm start</code></p>
+    </div>`;
+  }
+
+  const { status, account, positions, trades, pnl, signals } = stonkBotData;
+  const isRunning = status.status === 'running';
+  const isDryRun = status.dryRun;
+  const summary = pnl.summary || {};
+  const dailyPnl = (pnl.daily || []).reverse().slice(-30);
+
+  // Calculate today's P&L
+  const todayPnl = dailyPnl.length > 0 ? dailyPnl[dailyPnl.length - 1] : null;
+  const todayReturn = todayPnl ? (todayPnl.ending_equity - todayPnl.starting_equity) : 0;
+
+  // Stat cards
+  const equity = account.equity || 0;
+  const cash = account.cash || 0;
+  const totalReturn = summary.totalReturn || 0;
+
+  const statCards = [
+    { label: 'Equity', value: `$${equity.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, color: '#3b82f6' },
+    { label: 'Cash', value: `$${cash.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, color: '#6b7280' },
+    { label: "Today's P&L", value: `${todayReturn >= 0 ? '+' : ''}$${todayReturn.toFixed(2)}`, color: todayReturn >= 0 ? '#00cc6a' : '#ef4444' },
+    { label: 'Total Return', value: `${totalReturn >= 0 ? '+' : ''}${totalReturn}%`, color: totalReturn >= 0 ? '#00cc6a' : '#ef4444' },
+  ];
+
+  // P&L chart bars
+  const maxPnl = Math.max(1, ...dailyPnl.map(d => Math.abs(d.ending_equity - d.starting_equity)));
+  const pnlBars = dailyPnl.map(d => {
+    const change = d.ending_equity - d.starting_equity;
+    const height = Math.max(2, Math.abs(change) / maxPnl * 80);
+    const color = change >= 0 ? '#00cc6a' : '#ef4444';
+    return `<div class="stonk-pnl-bar" title="${d.date}: ${change >= 0 ? '+' : ''}$${change.toFixed(2)}" style="height:${height}px;background:${color};"></div>`;
+  }).join('');
+
+  // Positions table rows
+  const posRows = (positions || []).map(p => {
+    const plColor = p.unrealizedPl >= 0 ? '#00cc6a' : '#ef4444';
+    const plSign = p.unrealizedPl >= 0 ? '+' : '';
+    return `<tr>
+      <td style="font-weight:600;">${p.symbol}</td>
+      <td>${p.qty}</td>
+      <td>$${p.avgEntryPrice.toFixed(2)}</td>
+      <td>$${p.currentPrice.toFixed(2)}</td>
+      <td style="color:${plColor};font-weight:600;">${plSign}$${p.unrealizedPl.toFixed(2)} (${plSign}${(p.unrealizedPlpc * 100).toFixed(1)}%)</td>
+      <td style="color:var(--text-tertiary);font-size:11px;">${p.stopLoss ? '$' + p.stopLoss.toFixed(2) : '—'}</td>
+      <td style="color:var(--text-tertiary);font-size:11px;">${p.takeProfit ? '$' + p.takeProfit.toFixed(2) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  // Signals table (last 20)
+  const recentSignals = (signals || []).slice(0, 20);
+  const sigRows = recentSignals.map(s => {
+    const dirColor = s.direction === 'buy' ? '#00cc6a' : s.direction === 'sell' ? '#ef4444' : '#6b7280';
+    const dirBg = s.direction === 'buy' ? '#00cc6a22' : s.direction === 'sell' ? '#ef444422' : '#6b728022';
+    const time = new Date(s.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `<tr>
+      <td style="color:var(--text-tertiary);font-size:11px;">${time}</td>
+      <td style="font-weight:600;">${s.symbol}</td>
+      <td><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${dirBg};color:${dirColor};">${s.direction.toUpperCase()}</span></td>
+      <td style="font-weight:500;">${s.combined_score.toFixed(3)}</td>
+      <td style="color:var(--text-tertiary);font-size:11px;">M:${s.momentum_score.toFixed(2)} R:${s.mean_reversion_score.toFixed(2)} S:${s.sentiment_score.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+
+  // Trades table (last 20)
+  const recentTrades = (trades || []).slice(0, 20);
+  const tradeRows = recentTrades.map(t => {
+    const sideColor = t.side === 'buy' ? '#3b82f6' : '#f59e0b';
+    const sideBg = t.side === 'buy' ? '#3b82f622' : '#f59e0b22';
+    const time = new Date(t.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const pnlStr = t.realized_pnl ? `${t.realized_pnl >= 0 ? '+' : ''}$${t.realized_pnl.toFixed(2)}` : '—';
+    const pnlColor = t.realized_pnl > 0 ? '#00cc6a' : t.realized_pnl < 0 ? '#ef4444' : 'var(--text-tertiary)';
+    return `<tr>
+      <td style="color:var(--text-tertiary);font-size:11px;">${time}</td>
+      <td style="font-weight:600;">${t.symbol}</td>
+      <td><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${sideBg};color:${sideColor};">${t.side.toUpperCase()}</span></td>
+      <td>${t.qty}</td>
+      <td>$${t.price.toFixed(2)}</td>
+      <td style="color:${pnlColor};font-weight:500;">${pnlStr}</td>
+      <td style="color:var(--text-tertiary);font-size:11px;">${t.strategy || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  // Performance stats
+  const winRate = summary.winRate || 0;
+  const totalTrades = summary.totalTrades || 0;
+  const wins = summary.totalWins || 0;
+  const losses = summary.totalLosses || 0;
+
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <h2 style="margin:0;">Stonk Bot</h2>
+        <span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:${isRunning ? '#00cc6a22' : '#f59e0b22'};color:${isRunning ? '#00cc6a' : '#f59e0b'};">${isRunning ? 'Running' : 'Paused'}</span>
+        ${isDryRun ? '<span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:#3b82f622;color:#3b82f6;">DRY RUN</span>' : ''}
+        ${status.dailyLossTriggered ? '<span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:#ef444422;color:#ef4444;">DAILY LOSS LIMIT</span>' : ''}
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-sm ${isRunning ? 'btn-secondary' : 'btn-primary'}" onclick="stonkBotControl('${isRunning ? 'pause' : 'resume'}')">
+          ${isRunning ? icons.pause + ' Pause' : icons.play + ' Resume'}
+        </button>
+        <button class="btn btn-sm btn-secondary" onclick="stonkBotControl('scan')">${icons.search} Force Scan</button>
+      </div>
+    </div>
+
+    ${status.lastScanAt ? `<p style="color:var(--text-tertiary);font-size:12px;margin:-16px 0 20px;">Last scan: ${new Date(status.lastScanAt).toLocaleString()}</p>` : ''}
+
+    <!-- Stat Cards -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
+      ${statCards.map(c => `
+        <div class="card" style="padding:20px;">
+          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:4px;">${c.label}</div>
+          <div style="font-size:24px;font-weight:700;color:${c.color};">${c.value}</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- Two-column: Positions + P&L Chart -->
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px;">
+      <!-- Positions -->
+      <div class="card" style="padding:20px;">
+        <h3 style="margin:0 0 12px;">Open Positions (${(positions || []).length})</h3>
+        ${(positions || []).length === 0
+          ? '<p style="color:var(--text-tertiary);text-align:center;padding:20px 0;">No open positions</p>'
+          : `<div style="overflow-x:auto;"><table class="data-table">
+              <thead><tr>
+                <th>Symbol</th><th>Qty</th><th>Entry</th><th>Current</th><th>P&L</th><th>Stop</th><th>Target</th>
+              </tr></thead>
+              <tbody>${posRows}</tbody>
+            </table></div>`}
+      </div>
+
+      <!-- P&L Chart -->
+      <div class="card" style="padding:20px;">
+        <h3 style="margin:0 0 12px;">Daily P&L (${dailyPnl.length}d)</h3>
+        ${dailyPnl.length === 0
+          ? '<p style="color:var(--text-tertiary);text-align:center;padding:20px 0;">No data yet</p>'
+          : `<div style="display:flex;align-items:flex-end;gap:3px;height:100px;padding-top:16px;">
+              ${pnlBars}
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:8px;">
+              <div style="font-size:11px;color:var(--text-tertiary);">Win Days: ${summary.profitDays || 0}</div>
+              <div style="font-size:11px;color:var(--text-tertiary);">Loss Days: ${summary.lossDays || 0}</div>
+            </div>`}
+      </div>
+    </div>
+
+    <!-- Performance Summary Cards -->
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:24px;">
+      <div class="card" style="padding:16px;text-align:center;">
+        <div style="font-size:11px;color:var(--text-tertiary);">Win Rate</div>
+        <div style="font-size:20px;font-weight:700;color:${winRate >= 50 ? '#00cc6a' : '#ef4444'};">${winRate}%</div>
+      </div>
+      <div class="card" style="padding:16px;text-align:center;">
+        <div style="font-size:11px;color:var(--text-tertiary);">Total Trades</div>
+        <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${totalTrades}</div>
+      </div>
+      <div class="card" style="padding:16px;text-align:center;">
+        <div style="font-size:11px;color:var(--text-tertiary);">Wins</div>
+        <div style="font-size:20px;font-weight:700;color:#00cc6a;">${wins}</div>
+      </div>
+      <div class="card" style="padding:16px;text-align:center;">
+        <div style="font-size:11px;color:var(--text-tertiary);">Losses</div>
+        <div style="font-size:20px;font-weight:700;color:#ef4444;">${losses}</div>
+      </div>
+      <div class="card" style="padding:16px;text-align:center;">
+        <div style="font-size:11px;color:var(--text-tertiary);">Trading Days</div>
+        <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${summary.totalDays || 0}</div>
+      </div>
+    </div>
+
+    <!-- Two-column: Signals + Trades -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <!-- Recent Signals -->
+      <div class="card" style="padding:20px;">
+        <h3 style="margin:0 0 12px;">Recent Signals</h3>
+        ${recentSignals.length === 0
+          ? '<p style="color:var(--text-tertiary);text-align:center;padding:20px 0;">No signals yet</p>'
+          : `<div style="overflow-x:auto;max-height:400px;overflow-y:auto;"><table class="data-table">
+              <thead><tr>
+                <th>Time</th><th>Symbol</th><th>Direction</th><th>Score</th><th>Breakdown</th>
+              </tr></thead>
+              <tbody>${sigRows}</tbody>
+            </table></div>`}
+      </div>
+
+      <!-- Recent Trades -->
+      <div class="card" style="padding:20px;">
+        <h3 style="margin:0 0 12px;">Trade History</h3>
+        ${recentTrades.length === 0
+          ? '<p style="color:var(--text-tertiary);text-align:center;padding:20px 0;">No trades yet</p>'
+          : `<div style="overflow-x:auto;max-height:400px;overflow-y:auto;"><table class="data-table">
+              <thead><tr>
+                <th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>P&L</th><th>Strategy</th>
+              </tr></thead>
+              <tbody>${tradeRows}</tbody>
+            </table></div>`}
+      </div>
+    </div>
+  `;
 }
