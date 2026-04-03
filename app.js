@@ -150,7 +150,12 @@ const FRONTEND_TO_BACKEND_TYPE = {
   'action': 'action',
   'api-call': 'api_call',
   'notify': 'notification',
-  'database': 'transform',
+  'database': 'database',
+  'custom-agent': 'custom_agent',
+  'slack-send': 'slack_send',
+  'twilio-sms': 'twilio_sms',
+  'github-issue': 'github_issue',
+  'stripe-invoice': 'stripe_invoice',
 };
 
 const BACKEND_TO_FRONTEND_TYPE = {
@@ -164,7 +169,13 @@ const BACKEND_TO_FRONTEND_TYPE = {
   'action': 'action',
   'api_call': 'api-call',
   'notification': 'notify',
+  'database': 'database',
   'transform': 'database',
+  'custom_agent': 'custom-agent',
+  'slack_send': 'slack-send',
+  'twilio_sms': 'twilio-sms',
+  'github_issue': 'github-issue',
+  'stripe_invoice': 'stripe-invoice',
 };
 
 // ── Helpers ──────────────────────────────────────────────
@@ -408,6 +419,12 @@ const nodeTypes = [
     { type: 'api-call', label: 'API Call', icon: 'globe', color: 'blue', desc: 'HTTP request', tooltip: 'Connects to an external service via API' },
     { type: 'notify', label: 'Notification', icon: 'bell', color: 'orange', desc: 'Send alert', tooltip: 'Sends a notification to your team' },
     { type: 'database', label: 'Database', icon: 'logs', color: 'purple', desc: 'DB operation', tooltip: 'Reads or writes data in your database' },
+  ]},
+  { category: 'Integrations', items: [
+    { type: 'slack-send', label: 'Slack Message', icon: 'mail', color: 'blue', desc: 'Send Slack message', tooltip: 'Send a message to a Slack channel' },
+    { type: 'twilio-sms', label: 'Send SMS', icon: 'mail', color: 'green', desc: 'Twilio SMS', tooltip: 'Send an SMS via Twilio' },
+    { type: 'github-issue', label: 'GitHub Issue', icon: 'globe', color: 'purple', desc: 'Create issue', tooltip: 'Create a GitHub issue' },
+    { type: 'stripe-invoice', label: 'Stripe Invoice', icon: 'logs', color: 'orange', desc: 'Create invoice', tooltip: 'Create a Stripe invoice' },
   ]},
 ];
 
@@ -1898,7 +1915,7 @@ function renderWorkflows() {
         <p class="page-desc">Manage and monitor all your automated workflows.</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-secondary btn-sm" onclick="showToast('Use the filter chips below to filter workflows','info')">${icons.filter} Filter</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.querySelector('.filter-bar').scrollIntoView({behavior:'smooth',block:'center'}); document.querySelector('.filter-bar').style.animation='pulse-highlight 1s ease';">${icons.filter} Filter</button>
         <button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button>
       </div>
     </div>
@@ -2303,12 +2320,20 @@ function renderAgentDetail() {
           <input type="number" id="agent-cfg-maxtokens" value="${agent.max_tokens || agent.maxTokens || 4096}" />
         </div>
         <div class="form-group" style="grid-column:1/-1;">
-          <label class="form-label">System Prompt</label>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <label class="form-label" style="margin:0;">System Prompt</label>
+            <button class="btn btn-ghost btn-sm" onclick="enhanceAgentPrompt('${agent.id}')" style="font-size:11px;padding:4px 10px;">✨ Enhance with AI</button>
+          </div>
           <textarea id="agent-cfg-prompt" rows="5" style="resize:vertical;font-family:monospace;font-size:12px;" placeholder="Enter the system instructions for this agent...">${agent.system_prompt || agent.systemPrompt || ''}</textarea>
         </div>
         <div class="form-group" style="grid-column:1/-1;">
-          <label class="form-label">Temperature: <span id="agent-temp-display">${(tempValue / 100).toFixed(2)}</span></label>
+          <label class="form-label" title="Controls how random or creative the AI's responses are. Lower values produce more consistent, analytical results. Higher values produce more creative, varied responses.">Temperature: <span id="agent-temp-display">${(tempValue / 100).toFixed(2)}</span></label>
           <input type="range" id="agent-cfg-temp" min="0" max="100" value="${tempValue}" style="width:100%;background:transparent;border:none;padding:0;" oninput="document.getElementById('agent-temp-display').textContent=(this.value/100).toFixed(2)" />
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-tertiary);margin-top:4px;padding:0 2px;">
+            <span>🎯 Analytical</span>
+            <span>⚖️ Balanced</span>
+            <span>🎨 Creative</span>
+          </div>
         </div>
       </div>
       <div style="margin-top:16px;display:flex;justify-content:flex-end;">
@@ -2369,6 +2394,34 @@ async function saveAgentConfig(agentId) {
     renderMainContent();
   } catch (err) {
     showToast(err.message || 'Failed to save configuration', 'error');
+  }
+}
+
+async function enhanceAgentPrompt(agentId) {
+  const promptEl = document.getElementById('agent-cfg-prompt');
+  if (!promptEl) return;
+  const currentPrompt = promptEl.value?.trim();
+  if (!currentPrompt || currentPrompt.length < 10) {
+    showToast('Write at least a brief description of what the agent should do before enhancing.', 'error');
+    return;
+  }
+  const btn = event?.target;
+  const originalText = btn?.textContent;
+  if (btn) { btn.textContent = '⏳ Enhancing...'; btn.disabled = true; }
+  try {
+    const result = await api.post('/agents/enhance-prompt', { prompt: currentPrompt });
+    const enhanced = result.data?.enhanced || result.enhanced;
+    if (enhanced) {
+      promptEl.value = enhanced;
+      promptEl.rows = Math.min(15, enhanced.split('\n').length + 2);
+      showToast('Prompt enhanced! Review and save when ready.', 'success');
+    } else {
+      showToast('Enhancement returned empty — try a more descriptive prompt.', 'error');
+    }
+  } catch (err) {
+    showToast(err.message || 'Failed to enhance prompt', 'error');
+  } finally {
+    if (btn) { btn.textContent = originalText || '✨ Enhance with AI'; btn.disabled = false; }
   }
 }
 
@@ -2458,43 +2511,59 @@ async function deleteAgentFromDetail(agentId, agentName) {
 // ============================================================
 // INTEGRATIONS PAGE
 // ============================================================
-function renderIntegrations() {
-  const integrations = [
-    { name: 'Google Calendar', icon: '📅', desc: 'Sync appointments and scheduling with Google Calendar.', connected: true, cat: 'Productivity' },
-    { name: 'Email (Resend)', icon: '📧', desc: 'Send transactional emails and notifications.', connected: true, cat: 'Communication' },
-    { name: 'Claude AI', icon: '🤖', desc: 'AI-powered agents for text generation and analysis.', connected: true, cat: 'AI' },
-    { name: 'PostgreSQL', icon: '🐘', desc: 'Query, insert, and manage your database records.', connected: true, cat: 'Database' },
-    { name: 'Webhooks', icon: '🔗', desc: 'Trigger workflows from external services via webhooks.', connected: true, cat: 'Automation' },
-    { name: 'Slack', icon: '💬', desc: 'Send messages, create channels, and receive notifications.', connected: false, cat: 'Communication' },
-    { name: 'Stripe', icon: '💳', desc: 'Process payments, manage subscriptions, and invoices.', connected: false, cat: 'Finance' },
-    { name: 'QuickBooks Online', icon: '💰', desc: 'Automated invoicing, customer sync, and billing management.', connected: qboConnected, cat: 'Finance' },
-    { name: 'Google Sheets', icon: '📊', desc: 'Read and write spreadsheet data in your workflows.', connected: false, cat: 'Productivity' },
-    { name: 'GitHub', icon: '🐙', desc: 'Trigger workflows on PRs, issues, and deployments.', connected: false, cat: 'Developer' },
-    { name: 'HubSpot', icon: '🟠', desc: 'Marketing automation, CRM, and analytics integration.', connected: false, cat: 'Marketing' },
-    { name: 'Twilio', icon: '📱', desc: 'Send SMS, make calls, and manage communications.', connected: false, cat: 'Communication' },
-    { name: 'Notion', icon: '📝', desc: 'Sync pages, databases, and documents.', connected: false, cat: 'Productivity' },
-  ];
+// Integration provider definitions — static metadata
+const INTEGRATION_PROVIDERS = [
+  { name: 'Google Calendar', provider: null, icon: '📅', desc: 'Sync appointments and scheduling with Google Calendar.', builtIn: true, cat: 'Productivity' },
+  { name: 'Email (Resend)', provider: null, icon: '📧', desc: 'Send transactional emails and notifications.', builtIn: true, cat: 'Communication' },
+  { name: 'Claude AI', provider: null, icon: '🤖', desc: 'AI-powered agents for text generation and analysis.', builtIn: true, cat: 'AI' },
+  { name: 'PostgreSQL', provider: null, icon: '🐘', desc: 'Query, insert, and manage your database records.', builtIn: true, cat: 'Database' },
+  { name: 'Webhooks', provider: null, icon: '🔗', desc: 'Trigger workflows from external services via webhooks.', builtIn: true, cat: 'Automation' },
+  { name: 'Slack', provider: 'slack', icon: '💬', desc: 'Send messages, create channels, and receive notifications.', cat: 'Communication',
+    fields: [{ key: 'botToken', label: 'Bot Token', type: 'password', placeholder: 'xoxb-...' }] },
+  { name: 'Stripe', provider: 'stripe', icon: '💳', desc: 'Process payments, manage subscriptions, and invoices.', cat: 'Finance',
+    fields: [{ key: 'secretKey', label: 'Secret Key', type: 'password', placeholder: 'sk_live_...' }] },
+  { name: 'QuickBooks Online', provider: 'quickbooks', icon: '💰', desc: 'Automated invoicing, customer sync, and billing management.', cat: 'Finance', isQbo: true },
+  { name: 'Google Sheets', provider: 'google_sheets', icon: '📊', desc: 'Read and write spreadsheet data in your workflows.', cat: 'Productivity',
+    fields: [{ key: 'serviceAccountKey', label: 'Service Account Key (JSON)', type: 'textarea', placeholder: '{"type":"service_account",...}' }] },
+  { name: 'GitHub', provider: 'github', icon: '🐙', desc: 'Trigger workflows on PRs, issues, and deployments.', cat: 'Developer',
+    fields: [{ key: 'personalAccessToken', label: 'Personal Access Token', type: 'password', placeholder: 'ghp_...' }] },
+  { name: 'HubSpot', provider: 'hubspot', icon: '🟠', desc: 'Marketing automation, CRM, and analytics integration.', cat: 'Marketing',
+    fields: [{ key: 'accessToken', label: 'Private App Access Token', type: 'password', placeholder: 'pat-...' }] },
+  { name: 'Twilio', provider: 'twilio', icon: '📱', desc: 'Send SMS, make calls, and manage communications.', cat: 'Communication',
+    fields: [
+      { key: 'accountSid', label: 'Account SID', type: 'text', placeholder: 'AC...' },
+      { key: 'authToken', label: 'Auth Token', type: 'password', placeholder: '' },
+      { key: 'fromNumber', label: 'From Phone Number', type: 'text', placeholder: '+1234567890' },
+    ] },
+  { name: 'Notion', provider: 'notion', icon: '📝', desc: 'Sync pages, databases, and documents.', cat: 'Productivity',
+    fields: [{ key: 'integrationToken', label: 'Integration Token', type: 'password', placeholder: 'ntn_...' }] },
+];
 
-  const cards = integrations.map(i => `
-    <div class="integration-card" data-connected="${i.connected}">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <div class="int-icon" style="background:var(--bg-tertiary);font-size:24px;">${i.icon}</div>
-        <div>
-          <div class="int-name">${i.name}</div>
-          <span style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;">${i.cat}</span>
-        </div>
-      </div>
-      <div class="int-desc">${i.desc}</div>
-      <div class="int-footer">
-        ${i.connected
-          ? `<span class="badge-status active"><span class="dot"></span> Connected</span>
-             <button class="btn btn-ghost btn-sm" onclick="showToast('Integration settings opened')">Configure</button>`
-          : `<span class="badge-status draft"><span class="dot"></span> Not connected</span>
-             <button class="btn btn-primary btn-sm" onclick="${i.name === 'QuickBooks Online' ? 'connectQuickBooks()' : `showToast('${i.name} connected!', 'success')`}">Connect</button>`
-        }
-      </div>
-    </div>
-  `).join('');
+let integrationStatuses = {}; // provider -> { status, config }
+
+async function loadIntegrationStatuses() {
+  try {
+    const res = await fetch('/api/v1/integrations', { headers: {'Authorization': `Bearer ${api.token}`} });
+    if (!res.ok) return;
+    const json = await res.json();
+    integrationStatuses = {};
+    (json.data || []).forEach(i => {
+      integrationStatuses[i.provider] = { status: i.status, config: i.config, connectedAt: i.connected_at };
+    });
+  } catch (e) {
+    console.warn('Failed to load integration statuses:', e.message);
+  }
+}
+
+function renderIntegrations() {
+  // Load real statuses from API
+  loadIntegrationStatuses().then(() => {
+    const container = document.getElementById('integration-cards-grid');
+    if (container) {
+      container.innerHTML = buildIntegrationCards();
+      updateIntegrationFilterCounts();
+    }
+  });
 
   return `
     <div class="page-header">
@@ -2502,17 +2571,236 @@ function renderIntegrations() {
         <h1>Integrations</h1>
         <p class="page-desc">Connect your tools and services to power your workflows.</p>
       </div>
-      <div class="page-actions">
-        <button class="btn btn-secondary btn-sm" onclick="showToast('Marketplace coming soon','info')">${icons.search} Browse Marketplace</button>
-      </div>
     </div>
-    <div class="filter-bar">
-      <span class="filter-chip active" onclick="filterIntegrations('all',this)">All (${integrations.length})</span>
-      <span class="filter-chip" onclick="filterIntegrations('connected',this)">Connected (${integrations.filter(i=>i.connected).length})</span>
-      <span class="filter-chip" onclick="filterIntegrations('available',this)">Available (${integrations.filter(i=>!i.connected).length})</span>
+    <div class="filter-bar" id="integration-filter-bar">
+      <span class="filter-chip active" onclick="filterIntegrations('all',this)">All (${INTEGRATION_PROVIDERS.length})</span>
+      <span class="filter-chip" onclick="filterIntegrations('connected',this)">Connected</span>
+      <span class="filter-chip" onclick="filterIntegrations('available',this)">Available</span>
     </div>
-    <div class="grid-3">${cards}</div>
+    <div class="grid-3" id="integration-cards-grid">${buildIntegrationCards()}</div>
   `;
+}
+
+function buildIntegrationCards() {
+  return INTEGRATION_PROVIDERS.map(i => {
+    const isBuiltIn = i.builtIn;
+    const isQbo = i.isQbo;
+    const providerStatus = i.provider ? integrationStatuses[i.provider] : null;
+    const connected = isBuiltIn || (isQbo && qboConnected) || (providerStatus && providerStatus.status === 'connected');
+
+    let actionBtn = '';
+    if (isBuiltIn) {
+      actionBtn = `<button class="btn btn-ghost btn-sm" disabled style="opacity:0.5;">Built-in</button>`;
+    } else if (isQbo) {
+      actionBtn = connected
+        ? `<button class="btn btn-ghost btn-sm" onclick="showToast('QuickBooks is connected. Manage in Settings.','info')">Configure</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="connectQuickBooks()">Connect</button>`;
+    } else if (connected) {
+      actionBtn = `<button class="btn btn-ghost btn-sm" onclick="showIntegrationConfigModal('${i.provider}')">Configure</button>`;
+    } else {
+      actionBtn = `<button class="btn btn-primary btn-sm" onclick="showIntegrationConfigModal('${i.provider}')">Connect</button>`;
+    }
+
+    return `
+      <div class="integration-card" data-connected="${connected}">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div class="int-icon" style="background:var(--bg-tertiary);font-size:24px;">${i.icon}</div>
+          <div>
+            <div class="int-name">${i.name}</div>
+            <span style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;">${i.cat}</span>
+          </div>
+        </div>
+        <div class="int-desc">${i.desc}</div>
+        <div class="int-footer">
+          ${connected
+            ? `<span class="badge-status active"><span class="dot"></span> Connected</span>`
+            : `<span class="badge-status draft"><span class="dot"></span> Not connected</span>`
+          }
+          ${actionBtn}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateIntegrationFilterCounts() {
+  const cards = document.querySelectorAll('.integration-card');
+  let connectedCount = 0, availableCount = 0;
+  cards.forEach(c => { c.dataset.connected === 'true' ? connectedCount++ : availableCount++; });
+  const bar = document.getElementById('integration-filter-bar');
+  if (bar) {
+    const chips = bar.querySelectorAll('.filter-chip');
+    if (chips[0]) chips[0].textContent = `All (${cards.length})`;
+    if (chips[1]) chips[1].textContent = `Connected (${connectedCount})`;
+    if (chips[2]) chips[2].textContent = `Available (${availableCount})`;
+  }
+}
+
+function showIntegrationConfigModal(providerKey) {
+  const provider = INTEGRATION_PROVIDERS.find(p => p.provider === providerKey);
+  if (!provider || !provider.fields) {
+    showToast('Integration configuration not available', 'error');
+    return;
+  }
+
+  const existing = integrationStatuses[providerKey];
+  const isConnected = existing && existing.status === 'connected';
+  const existingConfig = existing?.config || {};
+
+  const fieldsHtml = provider.fields.map(f => {
+    const val = existingConfig[f.key] || '';
+    if (f.type === 'textarea') {
+      return `<div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;font-weight:500;margin-bottom:6px;">${f.label}</label>
+        <textarea id="int-field-${f.key}" style="width:100%;min-height:80px;font-size:12px;padding:8px 12px;font-family:monospace;resize:vertical;" placeholder="${f.placeholder || ''}">${val}</textarea>
+      </div>`;
+    }
+    return `<div style="margin-bottom:14px;">
+      <label style="display:block;font-size:12px;font-weight:500;margin-bottom:6px;">${f.label}</label>
+      <input type="${f.type || 'text'}" id="int-field-${f.key}" value="${val}" style="width:100%;font-size:12px;padding:8px 12px;" placeholder="${f.placeholder || ''}" />
+    </div>`;
+  }).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);opacity:0;transition:opacity 0.2s;';
+  overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); } };
+
+  overlay.innerHTML = `
+    <div class="modal" style="width:480px;max-width:90vw;max-height:85vh;overflow-y:auto;padding:28px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+        <div style="font-size:28px;">${provider.icon}</div>
+        <div>
+          <h3 style="margin:0;font-size:16px;">${provider.name}</h3>
+          <p style="margin:0;font-size:12px;color:var(--text-tertiary);">${provider.desc}</p>
+        </div>
+      </div>
+
+      ${isConnected ? `<div style="padding:10px 14px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:8px;margin-bottom:16px;font-size:12px;color:#22c55e;">
+        Connected ${existing.connectedAt ? 'since ' + new Date(existing.connectedAt).toLocaleDateString() : ''}
+      </div>` : ''}
+
+      <div id="int-config-fields">${fieldsHtml}</div>
+
+      <div id="int-test-result" style="display:none;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:12px;"></div>
+
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button class="btn btn-secondary btn-sm" style="flex:1;" onclick="testIntegrationConnection('${providerKey}')" id="int-test-btn">
+          Test Connection
+        </button>
+        <button class="btn btn-primary btn-sm" style="flex:1;" onclick="saveIntegrationConnection('${providerKey}')" id="int-save-btn">
+          ${isConnected ? 'Update' : 'Connect'}
+        </button>
+      </div>
+
+      ${isConnected ? `
+        <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px;color:#ef4444;" onclick="disconnectIntegration('${providerKey}')">
+          Disconnect
+        </button>
+      ` : ''}
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => { overlay.style.opacity = '1'; });
+}
+
+function getIntegrationConfigFromForm(providerKey) {
+  const provider = INTEGRATION_PROVIDERS.find(p => p.provider === providerKey);
+  if (!provider) return {};
+  const config = {};
+  for (const f of provider.fields) {
+    const el = document.getElementById(`int-field-${f.key}`);
+    if (el) config[f.key] = el.value.trim();
+  }
+  return config;
+}
+
+async function testIntegrationConnection(providerKey) {
+  const config = getIntegrationConfigFromForm(providerKey);
+  const resultEl = document.getElementById('int-test-result');
+  const btn = document.getElementById('int-test-btn');
+  if (btn) btn.disabled = true;
+  if (btn) btn.textContent = 'Testing...';
+
+  try {
+    const res = await fetch(`/api/v1/integrations/${providerKey}/test`, {
+      method: 'POST',
+      headers: { ...{'Authorization': `Bearer ${api.token}`}, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config }),
+    });
+    const json = await res.json();
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      if (json.data?.success) {
+        resultEl.style.background = 'rgba(34,197,94,0.1)';
+        resultEl.style.border = '1px solid rgba(34,197,94,0.2)';
+        resultEl.style.color = '#22c55e';
+        resultEl.textContent = 'Connection successful!';
+      } else {
+        resultEl.style.background = 'rgba(239,68,68,0.1)';
+        resultEl.style.border = '1px solid rgba(239,68,68,0.2)';
+        resultEl.style.color = '#ef4444';
+        resultEl.textContent = json.data?.error || 'Connection failed';
+      }
+    }
+  } catch (err) {
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      resultEl.style.background = 'rgba(239,68,68,0.1)';
+      resultEl.style.border = '1px solid rgba(239,68,68,0.2)';
+      resultEl.style.color = '#ef4444';
+      resultEl.textContent = err.message;
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Test Connection'; }
+  }
+}
+
+async function saveIntegrationConnection(providerKey) {
+  const config = getIntegrationConfigFromForm(providerKey);
+  const btn = document.getElementById('int-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Connecting...'; }
+
+  try {
+    const res = await fetch(`/api/v1/integrations/${providerKey}/connect`, {
+      method: 'POST',
+      headers: { ...{'Authorization': `Bearer ${api.token}`}, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error?.message || 'Connection failed');
+
+    integrationStatuses[providerKey] = { status: 'connected', config: json.data?.config || {}, connectedAt: new Date().toISOString() };
+    showToast(`${INTEGRATION_PROVIDERS.find(p => p.provider === providerKey)?.name || providerKey} connected!`, 'success');
+
+    // Close modal and refresh cards
+    document.querySelector('.modal-overlay')?.remove();
+    const container = document.getElementById('integration-cards-grid');
+    if (container) { container.innerHTML = buildIntegrationCards(); updateIntegrationFilterCounts(); }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Connect'; }
+  }
+}
+
+async function disconnectIntegration(providerKey) {
+  if (!confirm(`Disconnect ${providerKey}? Workflows using this integration will stop working.`)) return;
+
+  try {
+    await fetch(`/api/v1/integrations/${providerKey}/disconnect`, {
+      method: 'POST',
+      headers: { ...{'Authorization': `Bearer ${api.token}`}, 'Content-Type': 'application/json' },
+    });
+    delete integrationStatuses[providerKey];
+    showToast(`${providerKey} disconnected`, 'info');
+    document.querySelector('.modal-overlay')?.remove();
+    const container = document.getElementById('integration-cards-grid');
+    if (container) { container.innerHTML = buildIntegrationCards(); updateIntegrationFilterCounts(); }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 }
 
 function filterIntegrations(filter, el) {
@@ -2912,6 +3200,9 @@ function renderWorkflowEditor() {
     </div>
   `).join('');
 
+  // Load user's custom agents into palette after render
+  setTimeout(() => loadAgentPaletteNodes(), 100);
+
   return `
     <div class="workflow-editor-container">
       <!-- Palette Sidebar -->
@@ -3063,9 +3354,25 @@ function initWorkflowEditor() {
           canvas.style.cursor = 'crosshair';
           return;
         } else if (e.target.classList.contains('in') && editorState.connecting) {
-          // Complete connection
+          // Complete connection with validation
           const fromId = editorState.connectFromId;
-          if (fromId !== nodeId && !editorState.connections.find(c => c.from === fromId && c.to === nodeId)) {
+          const targetNode = node;
+          const sourceNode = editorState.nodes.find(n => n.id === fromId);
+
+          // Validation: prevent self-connections
+          if (fromId === nodeId) {
+            showToast('Cannot connect a node to itself', 'error');
+          }
+          // Validation: prevent duplicate connections
+          else if (editorState.connections.find(c => c.from === fromId && c.to === nodeId)) {
+            showToast('These nodes are already connected', 'error');
+          }
+          // Validation: trigger nodes cannot receive incoming connections
+          else if (targetNode.type.includes('trigger')) {
+            showToast('Trigger nodes cannot receive incoming connections — they start the workflow', 'error');
+          }
+          // Validation: prevent connecting from a trigger's input (triggers only have outputs)
+          else {
             editorState.connections.push({ from: fromId, to: nodeId });
             renderEditorConnections();
           }
@@ -3192,13 +3499,18 @@ function renderEditorConnections() {
   svg.innerHTML = paths;
 }
 
-function addNodeToEditor(type, label, icon, color, desc) {
+function addNodeToEditor(type, label, icon, color, desc, agentId) {
   const id = editorState.nextId++;
+  const config = getDefaultNodeConfig(type);
+  if (agentId) {
+    config.agentId = agentId;
+    config.agentName = label;
+  }
   editorState.nodes.push({
     id, type, label, desc, icon, color,
     x: 200 + Math.random() * 300,
     y: 100 + Math.random() * 200,
-    config: getDefaultNodeConfig(type),
+    config,
   });
   renderEditorNodes();
   updateEmptyCanvasPrompt();
@@ -3220,6 +3532,11 @@ function getDefaultNodeConfig(type) {
     case 'api-call': return { url: '', method: 'GET', headers: '{}', body: '' };
     case 'notify': return { message: '' };
     case 'database': return { operation: 'query', query: '' };
+    case 'custom-agent': return { agentId: '', agentName: '', prompt: '' };
+    case 'slack-send': return { channel: '', text: '' };
+    case 'twilio-sms': return { to: '', body: '' };
+    case 'github-issue': return { owner: '', repo: '', title: '', body: '' };
+    case 'stripe-invoice': return { customerId: '', amount: 0, description: '' };
     default: return {};
   }
 }
@@ -3311,6 +3628,47 @@ function editorZoom(delta) {
   if (canvas) {
     canvas.style.transform = `scale(${editorState.zoom / 100})`;
     canvas.style.transformOrigin = 'top left';
+  }
+}
+
+async function loadAgentPaletteNodes() {
+  const paletteEl = document.getElementById('editor-palette');
+  if (!paletteEl) return;
+  try {
+    const res = await fetch('/api/v1/agents', { headers: {'Authorization': `Bearer ${api.token}`} });
+    if (!res.ok) return;
+    const json = await res.json();
+    const agents = (json.data || json.rows || []).filter(a => a.status === 'active');
+    if (agents.length === 0) return;
+
+    // Remove any existing "My Agents" category (in case of re-render)
+    const existing = paletteEl.querySelector('[data-category="my-agents"]');
+    if (existing) existing.remove();
+
+    const agentCategory = document.createElement('div');
+    agentCategory.className = 'palette-category';
+    agentCategory.setAttribute('data-category', 'my-agents');
+    agentCategory.innerHTML = `
+      <div class="palette-category-label">My Agents</div>
+      ${agents.map(agent => {
+        const agentIcon = agent.icon || 'agents';
+        const iconSvg = icons[agentIcon] || icons['agents'];
+        const safeName = (agent.name || 'Agent').replace(/'/g, "\\'");
+        const safeDesc = (agent.description || 'Custom AI agent').replace(/'/g, "\\'").substring(0, 50);
+        return `
+          <div class="editor-palette-item" title="${agent.description || 'Custom AI agent'}" onclick="addNodeToEditor('custom-agent','${safeName}','${agentIcon}','purple','${safeDesc}', '${agent.id}')">
+            <div class="palette-item-icon purple">${iconSvg}</div>
+            <div>
+              <div class="palette-item-name">${agent.name}</div>
+              <div class="palette-item-desc">${(agent.description || 'Custom AI agent').substring(0, 60)}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    `;
+    paletteEl.appendChild(agentCategory);
+  } catch (e) {
+    console.warn('Could not load agents for palette:', e.message);
   }
 }
 
@@ -3542,6 +3900,40 @@ function renderNodeConfigPanel() {
     case 'database':
       fields += configField(nodeId, 'operation', 'Operation', config.operation || 'query', 'select', ['query','insert','update','delete']);
       fields += configField(nodeId, 'query', 'Query / Expression', config.query || '', 'textarea', null, 'SELECT * FROM...');
+      break;
+    case 'custom-agent':
+      fields += `<div style="margin-bottom:12px;padding:10px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border);">
+        <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:4px;">${icons.agents} ${config.agentName || 'Custom Agent'}</div>
+        <div style="font-size:11px;color:var(--text-tertiary);">This node runs your custom AI agent.</div>
+      </div>`;
+      fields += configField(nodeId, 'prompt', 'Input Prompt (optional)', config.prompt || '', 'textarea', null, 'Override the input sent to this agent. Leave empty to pass workflow data automatically.');
+      fields += `<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:12px;">Use <code>{{data}}</code> or <code>{{results.nodeId.field}}</code> to reference data from earlier nodes.</div>`;
+      if (config.agentId) {
+        fields += `<button class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:8px;" onclick="navigateTo('agents');setTimeout(()=>{const el=document.querySelector('[data-agent-id=\\'${config.agentId}\\']');if(el)el.click();},300);">Edit Agent Settings →</button>`;
+      }
+      break;
+    case 'slack-send':
+      fields += `<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;font-size:11px;color:var(--text-tertiary);">Requires Slack integration to be connected.</div>`;
+      fields += configField(nodeId, 'channel', 'Channel', config.channel || '', 'text', null, '#general');
+      fields += configField(nodeId, 'text', 'Message', config.text || '', 'textarea', null, 'Workflow completed for {{data.name}}');
+      break;
+    case 'twilio-sms':
+      fields += `<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;font-size:11px;color:var(--text-tertiary);">Requires Twilio integration to be connected.</div>`;
+      fields += configField(nodeId, 'to', 'To Phone', config.to || '', 'text', null, '+1234567890');
+      fields += configField(nodeId, 'body', 'Message', config.body || '', 'textarea', null, 'Hello {{data.name}}!');
+      break;
+    case 'github-issue':
+      fields += `<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;font-size:11px;color:var(--text-tertiary);">Requires GitHub integration to be connected.</div>`;
+      fields += configField(nodeId, 'owner', 'Repo Owner', config.owner || '', 'text', null, 'myorg');
+      fields += configField(nodeId, 'repo', 'Repository', config.repo || '', 'text', null, 'my-repo');
+      fields += configField(nodeId, 'title', 'Issue Title', config.title || '', 'text', null, 'Bug: {{data.title}}');
+      fields += configField(nodeId, 'body', 'Issue Body', config.body || '', 'textarea', null, 'Details here...');
+      break;
+    case 'stripe-invoice':
+      fields += `<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;font-size:11px;color:var(--text-tertiary);">Requires Stripe integration to be connected.</div>`;
+      fields += configField(nodeId, 'customerId', 'Customer ID', config.customerId || '', 'text', null, 'cus_...');
+      fields += configField(nodeId, 'amount', 'Amount (cents)', config.amount ?? 0, 'number');
+      fields += configField(nodeId, 'description', 'Description', config.description || '', 'text', null, 'Invoice for services');
       break;
   }
 
@@ -4323,13 +4715,18 @@ function showNewAgentModal() {
         <option>Custom Model</option>
       </select>
     </div>
-    <div class="form-group">
-      <label class="form-label">Temperature</label>
-      <input type="range" min="0" max="100" value="30" style="background:transparent;border:none;padding:0;" />
+    <div class="form-group" style="grid-column:1/-1;">
+      <label class="form-label" title="Controls how random or creative the AI's responses are.">Temperature: <span id="new-agent-temp-display">0.30</span></label>
+      <input type="range" id="new-agent-temp" min="0" max="100" value="30" style="width:100%;background:transparent;border:none;padding:0;" oninput="document.getElementById('new-agent-temp-display').textContent=(this.value/100).toFixed(2)" />
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-tertiary);margin-top:4px;padding:0 2px;">
+        <span>🎯 Analytical</span>
+        <span>⚖️ Balanced</span>
+        <span>🎨 Creative</span>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">Max Tokens</label>
-      <input type="number" value="4096" />
+      <input type="number" id="new-agent-maxtokens" value="4096" />
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>

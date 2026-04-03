@@ -9,6 +9,7 @@ router.use(authenticate);
 
 router.get('/', agentController.list);
 router.post('/', validate(agentValidator.create), agentController.create);
+router.post('/enhance-prompt', agentController.enhancePrompt);
 router.get('/:id', agentController.getById);
 router.patch('/:id', validate(agentValidator.update), agentController.update);
 router.delete('/:id', agentController.remove);

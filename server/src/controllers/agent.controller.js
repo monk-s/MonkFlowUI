@@ -69,4 +69,13 @@ const listExecutions = catchAsync(async (req, res) => {
   res.json({ data: executions });
 });
 
-module.exports = { list, getById, create, update, remove, execute, listExecutions };
+const enhancePrompt = catchAsync(async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt || typeof prompt !== 'string' || prompt.trim().length < 10) {
+    throw ApiError.badRequest('Prompt must be at least 10 characters');
+  }
+  const enhanced = await agentExecutor.enhancePrompt(prompt.trim());
+  res.json({ data: { original: prompt, enhanced } });
+});
+
+module.exports = { list, getById, create, update, remove, execute, listExecutions, enhancePrompt };

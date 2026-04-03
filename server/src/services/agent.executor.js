@@ -157,8 +157,8 @@ async function callClaudeAPI({ prompt, systemPrompt, model, temperature, maxToke
 /**
  * Direct prompt execution (used by workflow engine AI nodes)
  */
-async function executePrompt({ prompt, model, maxTokens, temperature }) {
-  const result = await callClaudeAPI({ prompt, model, maxTokens, temperature });
+async function executePrompt({ prompt, systemPrompt, model, maxTokens, temperature }) {
+  const result = await callClaudeAPI({ prompt, systemPrompt, model, maxTokens, temperature });
   return {
     ...result.output,
     tokensInput: result.tokensInput,
@@ -167,4 +167,26 @@ async function executePrompt({ prompt, model, maxTokens, temperature }) {
   };
 }
 
-module.exports = { executeAgent, executePrompt };
+/**
+ * Enhance a user's brief prompt into a comprehensive system prompt
+ */
+async function enhancePrompt(userIntent) {
+  const result = await callClaudeAPI({
+    prompt: userIntent,
+    systemPrompt: `You are a prompt engineering expert. The user will give you a brief description of what they want an AI agent to do. Rewrite this into a comprehensive, well-structured system prompt that:
+
+1. Clearly defines the agent's role and expertise
+2. Specifies how to handle inputs and format outputs
+3. Includes edge case handling and error behavior
+4. Maintains the user's original intent completely
+5. Adds helpful constraints (tone, length, format) where appropriate
+
+Return ONLY the system prompt text — no explanation, no preamble, no markdown wrapping. The output should be ready to paste directly as a system prompt.`,
+    model: 'claude-sonnet-4-20250514',
+    maxTokens: 2048,
+    temperature: 0.4,
+  });
+  return result.output?.text || result.output;
+}
+
+module.exports = { executeAgent, executePrompt, enhancePrompt };
