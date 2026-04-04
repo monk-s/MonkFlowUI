@@ -6,11 +6,12 @@ const ctrl = require('../controllers/leadgen.controller');
 // Public: unsubscribe link (no auth needed)
 router.get('/unsubscribe/:token', ctrl.unsubscribe);
 
-// Protected routes
-router.get('/leads', authenticate, ctrl.getLeads);
-router.get('/stats', authenticate, ctrl.getStats);
-router.get('/leads/:id', authenticate, ctrl.getLead);
-router.post('/run', authenticate, ctrl.triggerRun);
+// Protected routes (admin-only — lead gen is a platform-level feature)
+const requireSuperadmin = require('../middleware/requireSuperadmin');
+router.get('/leads', authenticate, requireSuperadmin, ctrl.getLeads);
+router.get('/stats', authenticate, requireSuperadmin, ctrl.getStats);
+router.get('/leads/:id', authenticate, requireSuperadmin, ctrl.getLead);
+router.post('/run', authenticate, requireSuperadmin, ctrl.triggerRun);
 
 // Internal trigger via secret (for cron/manual without JWT)
 router.post('/run-internal', (req, res, next) => {

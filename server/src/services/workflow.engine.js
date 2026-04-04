@@ -305,9 +305,9 @@ async function executeNode(node, context, workflowUserId) {
         if (operation === 'query' && !trimmed.startsWith('SELECT')) {
           throw new Error('Only SELECT queries are allowed in query mode. Use insert/update/delete operation types for write operations.');
         }
-        const params = config.params ? (Array.isArray(config.params) ? config.params : []) : [];
-        const interpolatedQuery = interpolateTemplate(dbQuery, context);
-        const { rows } = await query(interpolatedQuery, params);
+        // SAFE parameterization: convert {{placeholder}} tokens into $N positional params
+        const { sql: safeSql, params: safeParams } = parameterizeQuery(dbQuery, context);
+        const { rows } = await query(safeSql, safeParams);
         return { rows, rowCount: rows.length, operation };
       } catch (err) {
         if (err.message.includes('Only SELECT')) throw err;
@@ -451,6 +451,29 @@ function interpolateTemplate(template, context) {
     }
     return typeof val === 'object' ? JSON.stringify(val) : String(val ?? '');
   });
+}
+
+/**
+ * Safely convert {{placeholder}} tokens in a SQL string to $N positional parameters.
+ * Returns { sql, params } ready for pg's parameterized query().
+ * This prevents SQL injection by never interpolating values into the query string.
+ */
+function parameterizeQuery(sqlTemplate, context) {
+  const params = [];
+  let paramIndex = 1;
+  const sql = sqlTemplate.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (match, path) => {
+    const parts = path.split('.');
+    let val = context;
+    for (const part of parts) {
+      if (val && typeof val === 'object') val = val[part];
+      else { val = null; break; }
+    }
+    // Convert objects to JSON strings for the parameter
+    const paramVal = (val && typeof val === 'object') ? JSON.stringify(val) : (val ?? null);
+    params.push(paramVal);
+    return `$${paramIndex++}`;
+  });
+  return { sql, params };
 }
 
 function flattenContext(context) {

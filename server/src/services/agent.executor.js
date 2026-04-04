@@ -122,13 +122,7 @@ async function processExecution(agent, execution, inputData, userId) {
 
 async function callClaudeAPI({ prompt, systemPrompt, model, temperature, maxTokens }) {
   if (!env.anthropicApiKey) {
-    // Dev mode — return mock response
-    console.log('[DEV] Mock Claude API call');
-    return {
-      output: { text: `[Mock Response] Processed: "${prompt.substring(0, 100)}..."`, model },
-      tokensInput: prompt.length,
-      tokensOutput: 50,
-    };
+    throw new Error('AI service unavailable: Anthropic API key not configured. Set ANTHROPIC_API_KEY in environment variables.');
   }
 
   const Anthropic = require('@anthropic-ai/sdk');

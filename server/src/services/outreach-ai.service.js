@@ -154,11 +154,7 @@ The body should be plain text with \\n for line breaks (will be converted to HTM
 
 async function generateEmailForLead(lead, websiteAnalysis) {
   if (!env.anthropicApiKey) {
-    console.log('[OUTREACH-AI] No Anthropic API key — returning mock email');
-    return {
-      subject: `quick thought about ${lead.company || 'your business'}`,
-      body: `Hey ${(lead.contact_name || '').split(' ')[0] || 'there'},\n\nMock AI email — set ANTHROPIC_API_KEY to generate real ones.\n\nNathan`,
-    };
+    throw new Error('AI email generation unavailable: Anthropic API key not configured. Set ANTHROPIC_API_KEY in environment variables.');
   }
 
   const Anthropic = require('@anthropic-ai/sdk');

@@ -433,6 +433,8 @@ function navigateTo(page) {
   currentPage = page;
   closeNotificationPanel();
   closeSearchDropdown();
+  // Close mobile sidebar on navigation
+  document.getElementById('sidebar')?.classList.remove('open');
   renderTopbar();
   renderMainContent();
   if (page === 'dashboard') loadDashboardData();
@@ -487,6 +489,33 @@ async function loadLogsData() {
   } catch (err) {
     console.error('Failed to load logs:', err);
   }
+}
+
+let liveModeInterval = null;
+function toggleLiveMode(el) {
+  el.classList.toggle('active');
+  if (el.classList.contains('active')) {
+    showToast('Live mode on — refreshing every 5s', 'info');
+    liveModeInterval = setInterval(() => loadLogsData(), 5000);
+  } else {
+    showToast('Live mode off', 'info');
+    if (liveModeInterval) { clearInterval(liveModeInterval); liveModeInterval = null; }
+  }
+}
+
+function exportLogsCSV() {
+  if (!logsData || logsData.length === 0) { showToast('No logs to export', 'error'); return; }
+  const headers = ['id', 'type', 'action', 'status', 'message', 'created_at'];
+  const csvRows = [headers.join(',')];
+  for (const log of logsData) {
+    csvRows.push(headers.map(h => `"${String(log[h] || '').replace(/"/g, '""')}"`).join(','));
+  }
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `monkflow-logs-${new Date().toISOString().split('T')[0]}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+  showToast('Logs exported', 'success');
 }
 
 async function loadAgentsData() {
@@ -686,6 +715,7 @@ function renderLandingPage() {
           <a href="#landing-services" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Services</a>
           <a href="#landing-testimonials" onclick="event.preventDefault();document.getElementById('landing-testimonials').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Why MonkFlow</a>
           <a href="#landing-about" onclick="event.preventDefault();document.getElementById('landing-about').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">About</a>
+          <a href="#landing-pricing" onclick="event.preventDefault();document.getElementById('landing-pricing').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Pricing</a>
         </div>
         <div class="landing-nav-actions">
           <button class="btn btn-ghost" onclick="showAuth()">Sign In</button>
@@ -767,6 +797,24 @@ function renderLandingPage() {
             <div style="color:var(--text-secondary);margin-top:8px;">We don't disappear after launch. You get a direct line to the person who built your tool — not a support ticket queue.</div>
           </div>
         </div>
+        <!-- Client Results -->
+        <div style="margin-top:40px;text-align:center;">
+          <p style="font-size:14px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;">Results We've Delivered</p>
+          <div style="display:flex;justify-content:center;gap:32px;flex-wrap:wrap;">
+            <div style="text-align:center;">
+              <div style="font-size:28px;font-weight:700;color:var(--accent);">45 min → 5 min</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">Client onboarding time</div>
+            </div>
+            <div style="text-align:center;">
+              <div style="font-size:28px;font-weight:700;color:var(--accent);">12 hrs/week</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">Saved on manual tasks</div>
+            </div>
+            <div style="text-align:center;">
+              <div style="font-size:28px;font-weight:700;color:var(--accent);">35% fewer</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">No-shows with auto-reminders</div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -802,6 +850,44 @@ function renderLandingPage() {
             <div class="process-icon">${icons.zap}</div>
             <h3>Iterate & Scale</h3>
             <p>We stay with you, refining tools as your business grows and evolves.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pricing -->
+    <section id="landing-pricing" class="landing-section">
+      <div class="landing-section-inner">
+        <div class="section-header">
+          <div class="hero-badge">Pricing</div>
+          <h2 class="section-title">Simple, Transparent Plans</h2>
+          <p class="section-subtitle">Start free. Upgrade when you're ready. No surprises.</p>
+        </div>
+        <div class="grid-3" style="max-width:960px;margin:0 auto;">
+          <div class="card" style="padding:28px;text-align:center;">
+            <h3 style="margin:0 0 4px;font-size:18px;">Starter</h3>
+            <div style="font-size:36px;font-weight:700;color:var(--accent);margin:12px 0;">$29<span style="font-size:14px;font-weight:400;color:var(--text-tertiary);">/mo</span></div>
+            <div style="font-size:13px;color:var(--text-secondary);text-align:left;line-height:2;">
+              500 workflow runs/mo<br/>200 agent tasks/mo<br/>Claude Sonnet + GPT-4o<br/>Email support
+            </div>
+            <button class="btn btn-secondary" style="width:100%;margin-top:16px;" onclick="showAuth('signup')">Get Started</button>
+          </div>
+          <div class="card" style="padding:28px;text-align:center;border:1px solid var(--accent);">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:4px;">Most Popular</div>
+            <h3 style="margin:0 0 4px;font-size:18px;">Pro</h3>
+            <div style="font-size:36px;font-weight:700;color:var(--accent);margin:12px 0;">$79<span style="font-size:14px;font-weight:400;color:var(--text-tertiary);">/mo</span></div>
+            <div style="font-size:13px;color:var(--text-secondary);text-align:left;line-height:2;">
+              2,000 workflow runs/mo<br/>1,000 agent tasks/mo<br/>All models incl. Claude Opus<br/>Priority support
+            </div>
+            <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="showAuth('signup')">Get Started</button>
+          </div>
+          <div class="card" style="padding:28px;text-align:center;">
+            <h3 style="margin:0 0 4px;font-size:18px;">Business</h3>
+            <div style="font-size:36px;font-weight:700;color:var(--accent);margin:12px 0;">$199<span style="font-size:14px;font-weight:400;color:var(--text-tertiary);">/mo</span></div>
+            <div style="font-size:13px;color:var(--text-secondary);text-align:left;line-height:2;">
+              10,000 workflow runs/mo<br/>5,000 agent tasks/mo<br/>All models + priority queue<br/>Dedicated support
+            </div>
+            <button class="btn btn-secondary" style="width:100%;margin-top:16px;" onclick="showAuth('signup')">Get Started</button>
           </div>
         </div>
       </div>
@@ -849,6 +935,10 @@ function renderLandingPage() {
         </div>
         <div class="landing-footer-bottom">
           <span>&copy; 2026 MonkFlow. All rights reserved.</span>
+          <div style="display:flex;gap:16px;margin-top:8px;">
+            <a href="#" onclick="event.preventDefault();showLegalPage('privacy')" style="font-size:12px;color:var(--text-tertiary);">Privacy Policy</a>
+            <a href="#" onclick="event.preventDefault();showLegalPage('terms')" style="font-size:12px;color:var(--text-tertiary);">Terms of Service</a>
+          </div>
         </div>
       </div>
     </footer>
@@ -1114,6 +1204,7 @@ function renderTopbar() {
   const unreadCount = notifications.filter(n => !n.read).length;
   const topbar = document.getElementById('topbar');
   topbar.innerHTML = `
+    <button class="topbar-btn mobile-menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')" style="display:none;">${icons.menu}</button>
     <span class="topbar-title">${titles[currentPage] || 'Dashboard'}</span>
     <div class="topbar-search" style="position:relative;">
       ${icons.search}
@@ -1369,7 +1460,7 @@ let currentProjectDetail = null;
 
 async function loadProjectsData() {
   try {
-    const isOwner = currentUser?.id === '385e12a9-c98d-4555-91a1-a9b4c76a9ad8';
+    const isOwner = currentUser?.role === 'superadmin';
     const endpoint = isOwner ? '/projects/all' : '/projects';
     const result = await api.get(endpoint);
     projectsData = result.data || [];
@@ -1498,7 +1589,7 @@ async function downloadProjectFile(projectId, fileId, filename) {
 }
 
 function renderProjects() {
-  const isOwner = currentUser?.id === '385e12a9-c98d-4555-91a1-a9b4c76a9ad8';
+  const isOwner = currentUser?.role === 'superadmin';
 
   // If viewing a specific project
   if (currentProjectDetail && currentPage === 'projects') {
@@ -1763,7 +1854,7 @@ function renderDashboard() {
             <div class="card-title">Workflow Executions</div>
             <div class="card-subtitle">Monthly execution volume</div>
           </div>
-          <button class="btn btn-ghost btn-sm" onclick="showToast('Chart filtering coming soon','info')">${icons.filter} Filter</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.querySelector('.filter-bar')?.scrollIntoView({behavior:'smooth',block:'center'})">${icons.filter} Filter</button>
         </div>
         <div class="chart-bar-group" style="margin-bottom:30px;">
           ${bars || '<div style="padding:20px;color:var(--text-secondary);font-size:13px;">No execution data yet</div>'}
@@ -1877,6 +1968,21 @@ function renderWorkflows() {
           <thead><tr><th>Workflow Name</th><th>Status</th><th>Trigger</th><th>Total Runs</th><th>Success Rate</th><th>Last Run</th><th>Actions</th></tr></thead>
           <tbody>${skeletonRows}</tbody>
         </table>
+      </div>
+    `;
+  }
+
+  if (workflows.length === 0) {
+    return `
+      <div class="page-header">
+        <div><h1>Workflows</h1><p class="page-desc">Manage and monitor all your automated workflows.</p></div>
+        <div class="page-actions"><button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button></div>
+      </div>
+      <div style="text-align:center;padding:60px 20px;color:var(--text-tertiary);">
+        <div style="font-size:48px;margin-bottom:12px;">${icons.workflow}</div>
+        <h3 style="color:var(--text-primary);">No workflows yet</h3>
+        <p>Create your first workflow to start automating your business processes.</p>
+        <button class="btn btn-primary" style="margin-top:16px;" onclick="showNewWorkflowModal()">${icons.plus} Create Workflow</button>
       </div>
     `;
   }
@@ -2941,9 +3047,9 @@ function renderLogs() {
         <p class="page-desc">Real-time log stream from all workflow executions.</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-secondary btn-sm" onclick="showToast('Use the filter chips below to filter logs','info')">${icons.filter} Filter</button>
-        <button class="btn btn-secondary btn-sm" onclick="showToast('Logs exported','success')">${icons.download} Export Logs</button>
-        <div class="toggle active" onclick="this.classList.toggle('active');showToast(this.classList.contains('active')?'Live mode on':'Live mode off','info')" title="Live mode"></div>
+        <button class="btn btn-secondary btn-sm" onclick="document.querySelector('.filter-bar')?.scrollIntoView({behavior:'smooth',block:'center'})">${icons.filter} Filter</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportLogsCSV()">${icons.download} Export Logs</button>
+        <div class="toggle" id="log-live-toggle" onclick="toggleLiveMode(this)" title="Live mode"></div>
       </div>
     </div>
 
@@ -4517,6 +4623,50 @@ async function handleChangePassword() {
 // ============================================================
 let teamData = null;
 
+function showTeamMemberMenu(event, memberId, currentRole, memberName) {
+  // Remove any existing popup
+  document.querySelectorAll('.team-member-popup').forEach(el => el.remove());
+
+  const popup = document.createElement('div');
+  popup.className = 'team-member-popup';
+  popup.style.cssText = 'position:fixed;z-index:100;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:4px;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.4);';
+  popup.style.top = event.clientY + 'px';
+  popup.style.left = (event.clientX - 170) + 'px';
+
+  const newRole = currentRole === 'admin' ? 'member' : 'admin';
+  popup.innerHTML = `
+    <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:flex-start;font-size:12px;" onclick="changeTeamMemberRole('${memberId}','${newRole}');this.closest('.team-member-popup').remove();">
+      ${icons.settings} Change to ${newRole}
+    </button>
+    <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:flex-start;font-size:12px;color:#ef4444;" onclick="removeTeamMember('${memberId}','${memberName.replace(/'/g, "\\'")}');this.closest('.team-member-popup').remove();">
+      ${icons.trash} Remove Member
+    </button>
+  `;
+  document.body.appendChild(popup);
+  setTimeout(() => { document.addEventListener('click', function close(e) { if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('click', close); } }, { once: false }); }, 10);
+}
+
+async function changeTeamMemberRole(memberId, newRole) {
+  try {
+    await api.request('PUT', `/team/${memberId}`, { role: newRole });
+    showToast(`Role updated to ${newRole}`, 'success');
+    loadTeamData();
+  } catch (err) {
+    showToast(err.message || 'Failed to update role', 'error');
+  }
+}
+
+async function removeTeamMember(memberId, memberName) {
+  if (!confirm(`Remove ${memberName} from the team? They will lose access immediately.`)) return;
+  try {
+    await api.request('DELETE', `/team/${memberId}`);
+    showToast(`${memberName} removed from team`, 'success');
+    loadTeamData();
+  } catch (err) {
+    showToast(err.message || 'Failed to remove member', 'error');
+  }
+}
+
 async function loadTeamData() {
   try {
     const result = await api.get('/team/members');
@@ -4603,7 +4753,7 @@ function renderTeam() {
                 <td><span class="badge-status active"><span class="dot"></span> Active</span></td>
                 <td style="font-size:12px;color:var(--text-tertiary);">${m.created_at ? new Date(m.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '--'}</td>
                 <td>
-                  <button class="btn btn-ghost btn-sm" onclick="showToast('Member options coming soon','info')">${icons.moreV}</button>
+                  <button class="btn btn-ghost btn-sm" onclick="showTeamMemberMenu(event,'${m.id}','${m.role || 'member'}','${getName(m).replace(/'/g, "\\'")}')">${icons.moreV}</button>
                 </td>
               </tr>
             `).join('')}
@@ -4766,6 +4916,53 @@ function showInviteModal() {
 
 // ── Scheduling Modal (3-Step Wizard) ─────────────────────
 const OWNER_USER_ID = '385e12a9-c98d-4555-91a1-a9b4c76a9ad8';
+
+function showLegalPage(type) {
+  const titles = { privacy: 'Privacy Policy', terms: 'Terms of Service' };
+  const content = type === 'privacy'
+    ? `<h2>Privacy Policy</h2>
+       <p><strong>Effective Date:</strong> January 1, 2026</p>
+       <p>MonkFlow ("we", "us", "our") operates the getmonkflow.com platform. This policy describes how we collect, use, and protect your information.</p>
+       <h3>Information We Collect</h3>
+       <p>We collect information you provide directly: name, email, company name, and usage data when you interact with our platform. We use cookies for authentication and preferences.</p>
+       <h3>How We Use Your Information</h3>
+       <p>We use your information to provide and improve our services, communicate with you about your account, and send service-related notifications. We do not sell your personal data to third parties.</p>
+       <h3>Data Security</h3>
+       <p>We implement industry-standard security measures including encryption in transit (TLS), encrypted database connections, and secure authentication tokens.</p>
+       <h3>Data Retention</h3>
+       <p>We retain your data for as long as your account is active. You may request deletion of your data by contacting us at nathan@getmonkflow.com.</p>
+       <h3>Contact</h3>
+       <p>For privacy inquiries, contact nathan@getmonkflow.com.</p>`
+    : `<h2>Terms of Service</h2>
+       <p><strong>Effective Date:</strong> January 1, 2026</p>
+       <p>By accessing or using MonkFlow ("the Service"), you agree to these terms.</p>
+       <h3>Account Terms</h3>
+       <p>You must provide accurate information when creating an account. You are responsible for maintaining the security of your credentials. You must be 18 or older to use the Service.</p>
+       <h3>Acceptable Use</h3>
+       <p>You may not use the Service for illegal purposes, to transmit malware, to abuse or overload our infrastructure, or to access other users' data without authorization.</p>
+       <h3>Payment Terms</h3>
+       <p>Paid plans are billed monthly. You may cancel at any time; access continues until the end of the billing period. Refunds are handled on a case-by-case basis.</p>
+       <h3>Intellectual Property</h3>
+       <p>You retain ownership of your data and workflows. MonkFlow retains ownership of the platform, code, and service infrastructure.</p>
+       <h3>Limitation of Liability</h3>
+       <p>MonkFlow is provided "as is." We are not liable for indirect, incidental, or consequential damages arising from your use of the Service.</p>
+       <h3>Contact</h3>
+       <p>For questions about these terms, contact nathan@getmonkflow.com.</p>`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);opacity:0;transition:opacity 0.2s;';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="modal" style="width:640px;max-width:90vw;max-height:85vh;overflow-y:auto;padding:32px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 style="margin:0;font-size:18px;">${titles[type]}</h2>
+      <button class="btn btn-ghost btn-sm" onclick="this.closest('.modal-overlay').remove()" style="font-size:18px;padding:2px 8px;">&times;</button>
+    </div>
+    <div style="font-size:13px;line-height:1.7;color:var(--text-secondary);">${content}</div>
+  </div>`;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => { overlay.style.opacity = '1'; });
+}
 
 function showSchedulingModal() {
   let currentStep = 1;

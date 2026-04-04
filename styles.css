@@ -3045,10 +3045,11 @@ tr:hover td { background: var(--bg-card); }
 }
 
 @media (max-width: 768px) {
-  .sidebar { transform: translateX(-100%); transition: transform var(--transition-base); }
+  .sidebar { transform: translateX(-100%); transition: transform var(--transition-base); z-index: 50; }
   .sidebar.open { transform: translateX(0); }
   .main-wrapper { margin-left: 0; }
   .main-content { padding: 20px; }
+  .mobile-menu-btn { display: flex !important; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .topbar-search { display: none; }

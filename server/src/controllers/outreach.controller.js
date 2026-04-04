@@ -384,6 +384,9 @@ const bulkImport = catchAsync(async (req, res) => {
   if (!Array.isArray(leads) || leads.length === 0) {
     throw ApiError.badRequest('leads array is required');
   }
+  if (leads.length > 1000) {
+    throw ApiError.badRequest('Maximum 1000 leads per import. Split larger lists into multiple batches.');
+  }
 
   let imported = 0;
   let skipped = 0;
