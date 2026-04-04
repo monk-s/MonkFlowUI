@@ -518,5 +518,5 @@ module.exports = {
   sendAiEmail,
   verifyEmail,
   generateEmailForLead,
-  CASE_STUDY,
+  CASE_STUDIES,
 };
