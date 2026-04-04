@@ -110,6 +110,7 @@ const api = {
 let currentPage = 'dashboard';
 let isAuthenticated = !!localStorage.getItem('accessToken');
 let currentUser = null;
+function isAdmin() { return currentUser?.role === 'superadmin'; }
 let notificationPanelOpen = false;
 let searchDropdownOpen = false;
 let searchSelectedIndex = -1;
@@ -596,19 +597,21 @@ function showApp() {
 }
 
 function showOnboarding() {
+  if (isAdmin()) { closeOnboarding(); return; }
+
   const steps = [
-    { icon: '&#9889;', title: 'Create Your First Workflow', desc: 'Automate repetitive tasks with our visual workflow builder. Drag, drop, and connect nodes.', action: 'navigateTo("workflows")', btn: 'Build a Workflow' },
-    { icon: '&#129302;', title: 'Deploy an AI Agent', desc: 'Set up AI agents that handle tasks like lead scoring, email drafting, and support routing.', action: 'navigateTo("agents")', btn: 'Create an Agent' },
-    { icon: '&#128268;', title: 'Connect Your Tools', desc: 'Link Slack, Gmail, CRM, and more to power your automations with real data.', action: 'navigateTo("integrations")', btn: 'Browse Integrations' },
+    { icon: '&#128640;', title: 'Your Client Portal', desc: 'This is your dedicated dashboard where you can monitor all the tools we build for your business — workflows, AI agents, and more.', action: 'navigateTo("workflows")', btn: 'View My Tools' },
+    { icon: '&#128200;', title: 'Real-Time Analytics', desc: 'Track exactly how your tools are performing — execution counts, success rates, and trends over time.', action: 'navigateTo("analytics")', btn: 'View Analytics' },
+    { icon: '&#128172;', title: 'Direct Support', desc: 'Need changes or have questions? You have a direct line to the team that built your tools. No ticket queues.', action: 'navigateTo("help")', btn: 'Get Help' },
   ];
 
   showModal(`
     <div class="modal-header">
-      <h2 class="modal-title">Welcome to MonkFlow!</h2>
+      <h2 class="modal-title">Welcome to Your Portal!</h2>
       <button class="modal-close" onclick="closeOnboarding()">${icons.x}</button>
     </div>
     <div style="padding:24px;">
-      <p style="color:var(--text-secondary);margin-bottom:24px;font-size:14px;">Here's how to get the most out of your account:</p>
+      <p style="color:var(--text-secondary);margin-bottom:24px;font-size:14px;">Your custom tools and automation dashboard is ready. Here's what you'll find:</p>
       <div style="display:flex;flex-direction:column;gap:16px;">
         ${steps.map((s, i) => `
           <div style="display:flex;align-items:flex-start;gap:16px;padding:16px;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border);">
@@ -622,7 +625,7 @@ function showOnboarding() {
         `).join('')}
       </div>
       <div style="margin-top:20px;text-align:center;">
-        <button class="btn btn-primary" onclick="closeOnboarding()" style="min-width:200px;">I'll explore on my own</button>
+        <button class="btn btn-primary" onclick="closeOnboarding()" style="min-width:200px;">Got it</button>
       </div>
     </div>
   `);
@@ -769,7 +772,7 @@ function renderLandingPage() {
           <a href="#landing-services" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Services</a>
           <a href="#landing-testimonials" onclick="event.preventDefault();document.getElementById('landing-testimonials').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Why MonkFlow</a>
           <a href="#landing-about" onclick="event.preventDefault();document.getElementById('landing-about').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">About</a>
-          <a href="#landing-pricing" onclick="event.preventDefault();document.getElementById('landing-pricing').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Pricing</a>
+          <a href="#landing-pricing" onclick="event.preventDefault();document.getElementById('landing-pricing').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">How It Works</a>
         </div>
         <div class="landing-nav-actions">
           <button class="btn btn-ghost" onclick="showAuth()">Sign In</button>
@@ -909,40 +912,39 @@ function renderLandingPage() {
       </div>
     </section>
 
-    <!-- Pricing -->
+    <!-- How It Works / Pricing -->
     <section id="landing-pricing" class="landing-section">
       <div class="landing-section-inner">
         <div class="section-header">
-          <div class="hero-badge">Pricing</div>
-          <h2 class="section-title">Simple, Transparent Plans</h2>
-          <p class="section-subtitle">Start free. Upgrade when you're ready. No surprises.</p>
+          <div class="hero-badge">How It Works</div>
+          <h2 class="section-title">Custom-Built. Fixed Fee. Ongoing Support.</h2>
+          <p class="section-subtitle">No monthly subscriptions for tools you don't use. We build exactly what your business needs and bill based on the work.</p>
         </div>
         <div class="grid-3" style="max-width:960px;margin:0 auto;">
           <div class="card" style="padding:28px;text-align:center;">
-            <h3 style="margin:0 0 4px;font-size:18px;">Starter</h3>
-            <div style="font-size:36px;font-weight:700;color:var(--accent);margin:12px 0;">$29<span style="font-size:14px;font-weight:400;color:var(--text-tertiary);">/mo</span></div>
-            <div style="font-size:13px;color:var(--text-secondary);text-align:left;line-height:2;">
-              500 workflow runs/mo<br/>200 agent tasks/mo<br/>Claude Sonnet + GPT-4o<br/>Email support
+            <div style="font-size:32px;margin-bottom:12px;">&#128221;</div>
+            <h3 style="margin:0 0 8px;font-size:18px;">Fixed-Fee Build</h3>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.8;">
+              We scope your project, quote a fixed price, and build it. No hourly billing, no surprise invoices. You know the cost before we write a line of code.
             </div>
-            <button class="btn btn-secondary" style="width:100%;margin-top:16px;" onclick="showAuth('signup')">Get Started</button>
           </div>
           <div class="card" style="padding:28px;text-align:center;border:1px solid var(--accent);">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:4px;">Most Popular</div>
-            <h3 style="margin:0 0 4px;font-size:18px;">Pro</h3>
-            <div style="font-size:36px;font-weight:700;color:var(--accent);margin:12px 0;">$79<span style="font-size:14px;font-weight:400;color:var(--text-tertiary);">/mo</span></div>
-            <div style="font-size:13px;color:var(--text-secondary);text-align:left;line-height:2;">
-              2,000 workflow runs/mo<br/>1,000 agent tasks/mo<br/>All models incl. Claude Opus<br/>Priority support
+            <div style="font-size:32px;margin-bottom:12px;">&#9889;</div>
+            <h3 style="margin:0 0 8px;font-size:18px;">Usage-Based Billing</h3>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.8;">
+              After deployment, you only pay for what your tools actually use — workflow runs, AI tasks, and integrations. We invoice you directly based on real usage.
             </div>
-            <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="showAuth('signup')">Get Started</button>
           </div>
           <div class="card" style="padding:28px;text-align:center;">
-            <h3 style="margin:0 0 4px;font-size:18px;">Business</h3>
-            <div style="font-size:36px;font-weight:700;color:var(--accent);margin:12px 0;">$199<span style="font-size:14px;font-weight:400;color:var(--text-tertiary);">/mo</span></div>
-            <div style="font-size:13px;color:var(--text-secondary);text-align:left;line-height:2;">
-              10,000 workflow runs/mo<br/>5,000 agent tasks/mo<br/>All models + priority queue<br/>Dedicated support
+            <div style="font-size:32px;margin-bottom:12px;">&#129309;</div>
+            <h3 style="margin:0 0 8px;font-size:18px;">Ongoing Partnership</h3>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.8;">
+              We don't disappear after launch. Your tools get a dedicated client portal where you can monitor everything — plus a direct line to us for changes.
             </div>
-            <button class="btn btn-secondary" style="width:100%;margin-top:16px;" onclick="showAuth('signup')">Get Started</button>
           </div>
+        </div>
+        <div style="text-align:center;margin-top:32px;">
+          <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Schedule a Free Consultation</button>
         </div>
       </div>
     </section>
@@ -1160,20 +1162,16 @@ function renderSidebar() {
         ${icons.dashboard} Dashboard
       </div>
       <div class="nav-item" data-page="workflows" onclick="navigateTo('workflows')">
-        ${icons.workflow} Workflows
+        ${icons.workflow} My Tools
       </div>
       <div class="nav-item" data-page="agents" onclick="navigateTo('agents')">
-        ${icons.agents} AI Solutions
+        ${icons.agents} AI Agents
       </div>
-
       <div class="nav-item" data-page="projects" onclick="navigateTo('projects')">
         ${icons.book} Projects
       </div>
 
-      <div class="nav-section-label">Platform</div>
-      <div class="nav-item" data-page="integrations" onclick="navigateTo('integrations')">
-        ${icons.integrations} Integrations
-      </div>
+      <div class="nav-section-label">Monitoring</div>
       <div class="nav-item" data-page="analytics" onclick="navigateTo('analytics')">
         ${icons.analytics} Analytics
       </div>
@@ -1181,7 +1179,15 @@ function renderSidebar() {
         ${icons.logs} Logs
       </div>
 
-      ${currentUser?.role === 'superadmin' ? `
+      ${isAdmin() ? `
+      <div class="nav-section-label">Builder</div>
+      <div class="nav-item" data-page="workflow-editor" onclick="navigateTo('workflow-editor')">
+        ${icons.edit} Workflow Editor
+      </div>
+      <div class="nav-item" data-page="integrations" onclick="navigateTo('integrations')">
+        ${icons.integrations} Integrations
+      </div>
+
       <div class="nav-section-label">Admin</div>
       <div class="nav-item" data-page="admin" onclick="navigateTo('admin')">
         ${icons.shield} Admin Dashboard
@@ -1200,7 +1206,7 @@ function renderSidebar() {
 
       <div class="nav-section-label">Account</div>
       <div class="nav-item" data-page="billing" onclick="navigateTo('billing')">
-        ${icons.zap} Plans & Billing
+        ${icons.zap} Billing
       </div>
       <div class="nav-item" data-page="help" onclick="navigateTo('help')">
         ${icons.help} Help Center
@@ -1217,17 +1223,7 @@ function renderSidebar() {
         <div class="avatar">${currentUser ? (currentUser.first_name?.[0] || '') + (currentUser.last_name?.[0] || '') : 'NL'}</div>
         <div class="user-info">
           <div class="user-name">${currentUser ? `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() : 'Nathan Linder'}</div>
-          <div class="user-plan">${currentPlan?.plan_name || 'Free'} Plan</div>
-${currentPlan ? `<div style="margin-top:6px;">
-  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-tertiary);margin-bottom:2px;">
-    <span>Runs: ${currentPlan.monthly_workflow_runs || 0}/${currentPlan.plan_workflow_limit || '\u221e'}</span>
-    <span>Tasks: ${currentPlan.monthly_agent_tasks || 0}/${currentPlan.plan_task_limit || '\u221e'}</span>
-  </div>
-  <div style="height:3px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden;display:flex;gap:1px;">
-    <div style="width:50%;position:relative;"><div style="position:absolute;inset:0;background:${(currentPlan.monthly_workflow_runs || 0) / (currentPlan.plan_workflow_limit || 1) > 0.9 ? '#ef4444' : (currentPlan.monthly_workflow_runs || 0) / (currentPlan.plan_workflow_limit || 1) > 0.7 ? '#fbbf24' : '#00cc6a'};width:${Math.min(100, ((currentPlan.monthly_workflow_runs || 0) / (currentPlan.plan_workflow_limit || 1)) * 100)}%;border-radius:2px;"></div></div>
-    <div style="width:50%;position:relative;"><div style="position:absolute;inset:0;background:${(currentPlan.monthly_agent_tasks || 0) / (currentPlan.plan_task_limit || 1) > 0.9 ? '#ef4444' : (currentPlan.monthly_agent_tasks || 0) / (currentPlan.plan_task_limit || 1) > 0.7 ? '#fbbf24' : '#00cc6a'};width:${Math.min(100, ((currentPlan.monthly_agent_tasks || 0) / (currentPlan.plan_task_limit || 1)) * 100)}%;border-radius:2px;"></div></div>
-  </div>
-</div>` : ''}
+          <div class="user-plan">${currentUser?.company || 'Client Portal'}</div>
         </div>
       </div>
       <button class="sidebar-logout-btn" onclick="handleLogout()">
@@ -1242,8 +1238,8 @@ function renderTopbar() {
   const titles = {
     dashboard: 'Dashboard',
     projects: 'Projects',
-    workflows: 'Workflows',
-    agents: 'AI Solutions',
+    workflows: 'My Tools',
+    agents: 'AI Agents',
     integrations: 'Integrations',
     analytics: 'Analytics',
     logs: 'Execution Logs',
@@ -1253,7 +1249,7 @@ function renderTopbar() {
     'workflow-editor': 'Workflow Editor',
     admin: 'Admin Dashboard',
     'admin-account': 'Account Detail',
-    billing: 'Plans & Billing',
+    billing: 'Billing',
   };
   const unreadCount = notifications.filter(n => !n.read).length;
   const topbar = document.getElementById('topbar');
@@ -1273,9 +1269,9 @@ function renderTopbar() {
       <button class="topbar-btn" onclick="navigateTo('help')">
         ${icons.help}
       </button>
-      <button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">
+      ${isAdmin() ? `<button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">
         ${icons.plus} New Workflow
-      </button>
+      </button>` : ''}
     </div>
   `;
 }
@@ -1857,37 +1853,32 @@ function renderDashboard() {
     </div>
   `).join('');
 
-  // Getting Started checklist
+  // Status overview for clients / Getting started for admin
   const hasWorkflows = (workflows?.active || 0) > 0;
   const hasAgents = (agents?.total || 0) > 0;
-  const completedSteps = [hasWorkflows, hasAgents].filter(Boolean).length;
-  const showChecklist = completedSteps < 2 && !localStorage.getItem('checklist_dismissed');
-  const checklistHtml = showChecklist ? `
+  const showChecklist = !localStorage.getItem('checklist_dismissed');
+  const checklistHtml = showChecklist && !isAdmin() ? `
     <div class="card" style="margin-bottom:24px;border:1px solid rgba(0,204,106,0.3);background:linear-gradient(135deg,var(--bg-secondary),rgba(0,204,106,0.05));">
       <div style="padding:20px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <div>
-            <h3 style="margin:0 0 4px;font-size:16px;color:var(--text-primary);">Getting Started</h3>
-            <span style="font-size:13px;color:var(--text-tertiary);">${completedSteps}/2 completed</span>
-          </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="margin:0;font-size:16px;color:var(--text-primary);">Your Custom Tools</h3>
           <button class="btn btn-ghost" style="font-size:11px;padding:2px 8px;" onclick="localStorage.setItem('checklist_dismissed','true');navigateTo('dashboard');">Dismiss</button>
         </div>
-        <div style="display:flex;flex-direction:column;gap:10px;">
-          <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);${hasWorkflows ? 'opacity:0.6;' : ''}">
-            <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${hasWorkflows ? '#00cc6a' : 'var(--border)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;color:#00cc6a;">${hasWorkflows ? '&#10003;' : ''}</div>
-            <div style="flex:1;">
-              <div style="font-size:13px;font-weight:600;color:var(--text-primary);">Create your first workflow</div>
-              <div style="font-size:12px;color:var(--text-tertiary);">Automate a process with our visual builder</div>
+        <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:16px;">The MonkFlow team is building and deploying custom automation tools for your business. Here's your current status:</p>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;padding:14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <div style="font-size:18px;">${hasWorkflows ? '&#9989;' : '&#128736;'}</div>
+              <div style="font-size:14px;font-weight:600;color:var(--text-primary);">Workflows</div>
             </div>
-            ${!hasWorkflows ? '<button class="btn btn-ghost" style="font-size:11px;padding:2px 10px;" onclick="showNewWorkflowModal()">Start</button>' : ''}
+            <div style="font-size:12px;color:var(--text-tertiary);">${hasWorkflows ? `${workflows.active} active tool${workflows.active !== 1 ? 's' : ''} running` : 'Being built — check back soon'}</div>
           </div>
-          <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);${hasAgents ? 'opacity:0.6;' : ''}">
-            <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${hasAgents ? '#00cc6a' : 'var(--border)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;color:#00cc6a;">${hasAgents ? '&#10003;' : ''}</div>
-            <div style="flex:1;">
-              <div style="font-size:13px;font-weight:600;color:var(--text-primary);">Deploy an AI agent</div>
-              <div style="font-size:12px;color:var(--text-tertiary);">Set up an AI agent for scoring, drafting, or routing</div>
+          <div style="flex:1;min-width:200px;padding:14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <div style="font-size:18px;">${hasAgents ? '&#9989;' : '&#128736;'}</div>
+              <div style="font-size:14px;font-weight:600;color:var(--text-primary);">AI Agents</div>
             </div>
-            ${!hasAgents ? '<button class="btn btn-ghost" style="font-size:11px;padding:2px 10px;" onclick="navigateTo(\'agents\')">Start</button>' : ''}
+            <div style="font-size:12px;color:var(--text-tertiary);">${hasAgents ? `${agents.total} agent${agents.total !== 1 ? 's' : ''} deployed` : 'Being configured — check back soon'}</div>
           </div>
         </div>
       </div>
@@ -1899,9 +1890,7 @@ function renderDashboard() {
         <h1>Welcome back, ${currentUser?.first_name || 'there'}</h1>
         <p class="page-desc">Here's an overview of your projects and team performance.</p>
       </div>
-      <div class="page-actions">
-        <button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button>
-      </div>
+      ${isAdmin() ? `<div class="page-actions"><button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button></div>` : ''}
     </div>
 
     ${checklistHtml}
@@ -2030,9 +2019,9 @@ function renderDashboard() {
 // ============================================================
 function renderWorkflows() {
   const workflows = workflowsData;
+  const admin = isAdmin();
 
   if (workflows === null) {
-    // Loading skeleton
     const skeletonRows = Array.from({ length: 5 }, () => `
       <tr>
         <td><div style="height:14px;width:160px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
@@ -2041,23 +2030,20 @@ function renderWorkflows() {
         <td><div style="height:14px;width:40px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
         <td><div style="height:14px;width:50px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
         <td><div style="height:14px;width:60px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
-        <td><div style="height:14px;width:80px;background:var(--bg-tertiary);border-radius:4px;animation:pulse 1.5s infinite;"></div></td>
       </tr>
     `).join('');
 
     return `
       <div class="page-header">
         <div>
-          <h1>Workflows</h1>
-          <p class="page-desc">Manage and monitor all your automated workflows.</p>
+          <h1>${admin ? 'Workflows' : 'My Tools'}</h1>
+          <p class="page-desc">${admin ? 'Build and deploy workflows for clients.' : 'Custom automation tools built for your business.'}</p>
         </div>
-        <div class="page-actions">
-          <button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button>
-        </div>
+        ${admin ? `<div class="page-actions"><button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button></div>` : ''}
       </div>
       <div class="table-wrapper">
         <table>
-          <thead><tr><th>Workflow Name</th><th>Status</th><th>Trigger</th><th>Total Runs</th><th>Success Rate</th><th>Last Run</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Status</th><th>Trigger</th><th>Total Runs</th><th>Success Rate</th><th>Last Run</th></tr></thead>
           <tbody>${skeletonRows}</tbody>
         </table>
       </div>
@@ -2067,14 +2053,14 @@ function renderWorkflows() {
   if (workflows.length === 0) {
     return `
       <div class="page-header">
-        <div><h1>Workflows</h1><p class="page-desc">Manage and monitor all your automated workflows.</p></div>
-        <div class="page-actions"><button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button></div>
+        <div><h1>${admin ? 'Workflows' : 'My Tools'}</h1><p class="page-desc">${admin ? 'Build and deploy workflows for clients.' : 'Custom automation tools built for your business.'}</p></div>
+        ${admin ? `<div class="page-actions"><button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button></div>` : ''}
       </div>
       <div style="text-align:center;padding:60px 20px;color:var(--text-tertiary);">
         <div style="font-size:48px;margin-bottom:12px;">${icons.workflow}</div>
-        <h3 style="color:var(--text-primary);">No workflows yet</h3>
-        <p>Create your first workflow to start automating your business processes.</p>
-        <button class="btn btn-primary" style="margin-top:16px;" onclick="showNewWorkflowModal()">${icons.plus} Create Workflow</button>
+        <h3 style="color:var(--text-primary);">${admin ? 'No workflows yet' : 'Your tools are being built'}</h3>
+        <p>${admin ? 'Create a workflow to deploy to a client.' : 'The MonkFlow team is building custom tools for your business. They\'ll appear here once deployed.'}</p>
+        ${admin ? `<button class="btn btn-primary" style="margin-top:16px;" onclick="showNewWorkflowModal()">${icons.plus} Create Workflow</button>` : `<button class="btn btn-secondary" style="margin-top:16px;" onclick="showSchedulingModal()">Schedule a Check-In</button>`}
       </div>
     `;
   }
@@ -2095,13 +2081,13 @@ function renderWorkflows() {
         <td>${totalRuns}</td>
         <td>${successRate}</td>
         <td>${lastRun}</td>
-        <td>
+        ${admin ? `<td>
           <div style="display:flex;gap:4px;">
             <button class="btn btn-ghost btn-sm" onclick="loadWorkflowInEditor('${w.id}')" title="Edit">${icons.edit}</button>
             <button class="btn btn-ghost btn-sm" onclick="executeWorkflowFromList('${w.id}')" title="Execute">${icons.play}</button>
             <button class="btn btn-ghost btn-sm" onclick="deleteWorkflowFromList('${w.id}','${(w.name || '').replace(/'/g, "\\'")}')" title="Delete">${icons.trash}</button>
           </div>
-        </td>
+        </td>` : ''}
       </tr>
     `;
   }).join('');
@@ -2109,12 +2095,12 @@ function renderWorkflows() {
   return `
     <div class="page-header">
       <div>
-        <h1>Workflows</h1>
-        <p class="page-desc">Manage and monitor all your automated workflows.</p>
+        <h1>${admin ? 'Workflows' : 'My Tools'}</h1>
+        <p class="page-desc">${admin ? 'Build and deploy workflows for clients.' : 'Custom automation tools built for your business.'}</p>
       </div>
       <div class="page-actions">
         <button class="btn btn-secondary btn-sm" onclick="document.querySelector('.filter-bar').scrollIntoView({behavior:'smooth',block:'center'}); document.querySelector('.filter-bar').style.animation='pulse-highlight 1s ease';">${icons.filter} Filter</button>
-        <button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button>
+        ${admin ? `<button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button>` : ''}
       </div>
     </div>
 
@@ -2123,26 +2109,27 @@ function renderWorkflows() {
       <span class="filter-chip" onclick="filterWorkflows('active',this)">Active (${workflows.filter(w=>w.status==='active').length})</span>
       <span class="filter-chip" onclick="filterWorkflows('paused',this)">Paused (${workflows.filter(w=>w.status==='paused').length})</span>
       <span class="filter-chip" onclick="filterWorkflows('error',this)">Error (${workflows.filter(w=>w.status==='error').length})</span>
-      <span class="filter-chip" onclick="filterWorkflows('draft',this)">Draft (${workflows.filter(w=>w.status==='draft').length})</span>
+      ${admin ? `<span class="filter-chip" onclick="filterWorkflows('draft',this)">Draft (${workflows.filter(w=>w.status==='draft').length})</span>` : ''}
     </div>
 
     <div class="table-wrapper">
       <table>
         <thead>
           <tr>
-            <th>Workflow Name</th>
+            <th>Name</th>
             <th>Status</th>
             <th>Trigger</th>
             <th>Total Runs</th>
             <th>Success Rate</th>
             <th>Last Run</th>
-            <th>Actions</th>
+            ${admin ? '<th>Actions</th>' : ''}
           </tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
 
+    ${admin ? `
     <!-- Quick Builder Preview -->
     <div style="margin-top:28px;">
       <div class="card" style="padding:24px;">
@@ -2150,15 +2137,15 @@ function renderWorkflows() {
           <div class="card-title">Workflow Builder</div>
           <button class="btn btn-primary btn-sm" onclick="navigateTo('workflow-editor')">${icons.edit} Open Editor</button>
         </div>
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">Design workflows visually with our drag-and-drop editor. Connect triggers, AI nodes, conditions, and actions.</p>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">Design workflows visually with the drag-and-drop editor. Connect triggers, AI nodes, conditions, and actions.</p>
         <div style="display:flex;gap:12px;flex-wrap:wrap;">
           <button class="btn btn-secondary btn-sm" onclick="currentWorkflowId=null;editorState.nodes=[];editorState.connections=[];editorState.workflowName='Untitled Workflow';editorState.nextId=1;navigateTo('workflow-editor')">Blank Canvas</button>
-          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowTemplate('lead-scoring')">Lead Scoring Template</button>
-          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowTemplate('email-automation')">Email Automation Template</button>
-          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowTemplate('support-router')">Support Router Template</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowTemplate('lead-scoring')">Lead Scoring</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowTemplate('email-automation')">Email Automation</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadWorkflowTemplate('support-router')">Support Router</button>
         </div>
       </div>
-    </div>
+    </div>` : ''}
   `;
 }
 
@@ -2245,9 +2232,9 @@ async function loadWorkflowInEditor(workflowId) {
 // ============================================================
 function renderAgents() {
   const agents = agentsData;
+  const admin = isAdmin();
 
   if (agents === null) {
-    // Loading skeleton
     const skeletonCards = Array.from({ length: 6 }, () => `
       <div class="agent-card">
         <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -2263,11 +2250,9 @@ function renderAgents() {
       <div class="page-header">
         <div>
           <h1>AI Agents</h1>
-          <p class="page-desc">Intelligent agents that power your workflows.</p>
+          <p class="page-desc">${admin ? 'Build and deploy AI agents for clients.' : 'Custom AI agents working for your business.'}</p>
         </div>
-        <div class="page-actions">
-          <button class="btn btn-primary btn-sm" onclick="showNewAgentModal()">${icons.plus} Create Agent</button>
-        </div>
+        ${admin ? `<div class="page-actions"><button class="btn btn-primary btn-sm" onclick="showNewAgentModal()">${icons.plus} Create Agent</button></div>` : ''}
       </div>
       <div class="grid-3">${skeletonCards}</div>
     `;
@@ -2296,12 +2281,12 @@ function renderAgents() {
             <div class="agent-stat-val">${a.agent_type || 'general'}</div>
             <div class="agent-stat-label">Type</div>
           </div>
-          <div class="agent-stat-item" style="flex:1;">
+          ${admin ? `<div class="agent-stat-item" style="flex:1;">
             <div style="display:flex;gap:4px;">
               <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();currentAgentId='${a.id}';currentAgentDetail=null;agentDetailExecutions=null;navigateTo('agent-detail')" title="Configure">${icons.settings}</button>
               <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteAgent('${a.id}','${(a.name || '').replace(/'/g, "\\'")}')" title="Delete">${icons.trash}</button>
             </div>
-          </div>
+          </div>` : ''}
         </div>
       </div>
     `;
@@ -2310,9 +2295,9 @@ function renderAgents() {
   const emptyState = agents.length === 0 ? `
     <div style="text-align:center;padding:60px 20px;color:var(--text-secondary);">
       <div style="font-size:48px;margin-bottom:16px;">🤖</div>
-      <h3 style="color:var(--text-primary);margin-bottom:8px;">No agents yet</h3>
-      <p style="font-size:13px;margin-bottom:20px;">Create your first AI agent to automate tasks.</p>
-      <button class="btn btn-primary" onclick="showNewAgentModal()">${icons.plus} Create Agent</button>
+      <h3 style="color:var(--text-primary);margin-bottom:8px;">${admin ? 'No agents yet' : 'Your AI agents are being configured'}</h3>
+      <p style="font-size:13px;margin-bottom:20px;">${admin ? 'Create an AI agent to deploy to a client.' : 'The MonkFlow team is building custom AI agents for your business. They\'ll appear here once deployed.'}</p>
+      ${admin ? `<button class="btn btn-primary" onclick="showNewAgentModal()">${icons.plus} Create Agent</button>` : `<button class="btn btn-secondary" onclick="showSchedulingModal()">Schedule a Check-In</button>`}
     </div>
   ` : '';
 
@@ -2320,32 +2305,24 @@ function renderAgents() {
     <div class="page-header">
       <div>
         <h1>AI Agents</h1>
-        <p class="page-desc">Intelligent agents that power your workflows.</p>
+        <p class="page-desc">${admin ? 'Build and deploy AI agents for clients.' : 'Custom AI agents working for your business.'}</p>
       </div>
-      <div class="page-actions">
-        <button class="btn btn-primary btn-sm" onclick="showNewAgentModal()">${icons.plus} Create Agent</button>
-      </div>
+      ${admin ? `<div class="page-actions"><button class="btn btn-primary btn-sm" onclick="showNewAgentModal()">${icons.plus} Create Agent</button></div>` : ''}
     </div>
 
     <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);">
       <div class="stat-card">
-        <div class="stat-header">
-          <div class="stat-icon green">${icons.agents}</div>
-        </div>
+        <div class="stat-header"><div class="stat-icon green">${icons.agents}</div></div>
         <div class="stat-value">${agents.length}</div>
         <div class="stat-label">Total Agents</div>
       </div>
       <div class="stat-card">
-        <div class="stat-header">
-          <div class="stat-icon blue">${icons.zap}</div>
-        </div>
+        <div class="stat-header"><div class="stat-icon blue">${icons.zap}</div></div>
         <div class="stat-value">${activeCount}</div>
-        <div class="stat-label">Active Agents</div>
+        <div class="stat-label">Active</div>
       </div>
       <div class="stat-card">
-        <div class="stat-header">
-          <div class="stat-icon yellow">${icons.analytics}</div>
-        </div>
+        <div class="stat-header"><div class="stat-icon yellow">${icons.analytics}</div></div>
         <div class="stat-value">${agents.length - activeCount}</div>
         <div class="stat-label">Paused / Draft</div>
       </div>
@@ -5117,7 +5094,7 @@ function showLegalPage(type) {
        <h3>Acceptable Use</h3>
        <p>You may not use the Service for illegal purposes, to transmit malware, to abuse or overload our infrastructure, or to access other users' data without authorization.</p>
        <h3>Payment Terms</h3>
-       <p>Paid plans are billed monthly. You may cancel at any time; access continues until the end of the billing period. Refunds are handled on a case-by-case basis.</p>
+       <p>Clients are invoiced based on actual usage and project build costs. Payment terms and refund policies are outlined in your service agreement. Questions about billing can be directed to your account manager.</p>
        <h3>Intellectual Property</h3>
        <p>You retain ownership of your data and workflows. MonkFlow retains ownership of the platform, code, and service infrastructure.</p>
        <h3>Limitation of Liability</h3>
@@ -6236,140 +6213,44 @@ function showUpgradeModal(message) {
 
 function renderBilling() {
   const plan = currentPlan;
-  const plans = Array.isArray(billingPlans) ? billingPlans : [];
 
   const now = new Date();
-  const renewalDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const renewalStr = renewalDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-
-  const runPct = plan ? Math.min(100, ((plan.monthly_workflow_runs || 0) / (plan.plan_workflow_limit || 1)) * 100) : 0;
-  const taskPct = plan ? Math.min(100, ((plan.monthly_agent_tasks || 0) / (plan.plan_task_limit || 1)) * 100) : 0;
-
-  function barColor(pct) {
-    if (pct > 90) return '#ef4444';
-    if (pct > 70) return '#fbbf24';
-    return '#00cc6a';
-  }
-
-  const tierDefaults = [
-    { name: 'Starter', price: 29, workflow_run_limit: 500, agent_task_limit: 200, models: 'GPT-4o, Claude Sonnet', overage_run: '$0.05', overage_task: '$0.08' },
-    { name: 'Pro', price: 79, workflow_run_limit: 2000, agent_task_limit: 1000, models: 'GPT-4o, Claude Opus, Gemini', overage_run: '$0.04', overage_task: '$0.06' },
-    { name: 'Business', price: 199, workflow_run_limit: 10000, agent_task_limit: 5000, models: 'All models + priority', overage_run: '$0.03', overage_task: '$0.04' },
-  ];
-
-  const displayPlans = plans.length >= 3 ? plans.map((p, i) => ({
-    slug: p.slug || (p.name || tierDefaults[i]?.name || '').toLowerCase(),
-    name: p.name || tierDefaults[i]?.name || p.plan_name,
-    price: p.price ?? p.monthly_price ?? tierDefaults[i]?.price,
-    workflow_run_limit: p.workflow_run_limit ?? p.plan_workflow_limit ?? tierDefaults[i]?.workflow_run_limit,
-    agent_task_limit: p.agent_task_limit ?? p.plan_task_limit ?? tierDefaults[i]?.agent_task_limit,
-    models: p.models || tierDefaults[i]?.models || 'Standard',
-    overage_run: p.overage_run || tierDefaults[i]?.overage_run || '--',
-    overage_task: p.overage_task || tierDefaults[i]?.overage_task || '--',
-  })) : tierDefaults;
-
-  const planCards = displayPlans.map(p => {
-    const isCurrent = plan && (plan.plan_name || '').toLowerCase() === (p.name || '').toLowerCase();
-    return `
-      <div class="card" style="flex:1;min-width:220px;position:relative;${isCurrent ? 'border:1px solid #00cc6a;' : ''}">
-        ${isCurrent ? '<div style="position:absolute;top:12px;right:12px;background:#00cc6a;color:#000;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;">Current Plan</div>' : ''}
-        <div style="padding:20px;">
-          <h3 style="margin:0 0 4px;font-size:18px;color:var(--text-primary);">${p.name}</h3>
-          <div style="font-size:32px;font-weight:700;color:var(--text-primary);margin-bottom:16px;">$${p.price}<span style="font-size:14px;font-weight:400;color:var(--text-tertiary);">/mo</span></div>
-          <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--text-secondary);">
-            <div style="display:flex;justify-content:space-between;"><span>Workflow Runs</span><span style="color:var(--text-primary);font-weight:600;">${p.workflow_run_limit.toLocaleString()}</span></div>
-            <div style="display:flex;justify-content:space-between;"><span>Agent Tasks</span><span style="color:var(--text-primary);font-weight:600;">${p.agent_task_limit.toLocaleString()}</span></div>
-            <div style="display:flex;justify-content:space-between;"><span>Models</span><span style="color:var(--text-primary);font-weight:600;text-align:right;max-width:140px;">${p.models}</span></div>
-            <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
-              <div style="display:flex;justify-content:space-between;"><span>Overage / run</span><span style="color:var(--text-primary);">${p.overage_run}</span></div>
-              <div style="display:flex;justify-content:space-between;margin-top:4px;"><span>Overage / task</span><span style="color:var(--text-primary);">${p.overage_task}</span></div>
-            </div>
-          </div>
-          <div style="margin-top:16px;">
-            ${isCurrent
-              ? '<button class="btn btn-ghost" style="width:100%;cursor:default;" disabled>Current Plan</button>'
-              : `<button class="btn btn-primary" style="width:100%;" onclick="startCheckout('${(p.slug || p.name || '').toLowerCase()}')">Upgrade</button>`}
-          </div>
-        </div>
-      </div>`;
-  }).join('');
+  const periodStr = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   return `
     <div class="page-header">
       <div>
-        <h1>Plans & Billing</h1>
-        <p class="page-desc">Manage your subscription and monitor usage.</p>
+        <h1>Billing</h1>
+        <p class="page-desc">View your usage and invoice history.</p>
       </div>
     </div>
 
-    <!-- Current Plan Overview -->
+    <!-- Usage This Period -->
     <div class="card" style="margin-bottom:24px;">
       <div style="padding:20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
           <div>
-            <h3 style="margin:0 0 4px;font-size:16px;color:var(--text-primary);">${plan?.plan_name || 'Free'} Plan</h3>
-            <span style="font-size:13px;color:var(--text-tertiary);">Renews ${renewalStr}</span>
+            <h3 style="margin:0 0 4px;font-size:16px;color:var(--text-primary);">Current Period</h3>
+            <span style="font-size:13px;color:var(--text-tertiary);">${periodStr}</span>
           </div>
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="font-size:24px;font-weight:700;color:#00cc6a;">
-              ${plan?.plan_price != null ? '$' + plan.plan_price : '--'}<span style="font-size:13px;font-weight:400;color:var(--text-tertiary);">/mo</span>
-            </div>
-            <button class="btn btn-ghost" style="font-size:12px;padding:4px 12px;" onclick="openBillingPortal()">Manage</button>
-          </div>
+          <div style="font-size:12px;color:var(--text-tertiary);">Billed based on usage</div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
           <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-tertiary);margin-bottom:4px;">
-              <span>Workflow Runs</span>
-              <span>${plan?.monthly_workflow_runs || 0} / ${plan?.plan_workflow_limit || '\u221e'}</span>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              ${icons.workflow}
+              <span style="font-size:14px;font-weight:600;color:var(--text-primary);">Workflow Runs</span>
             </div>
-            <div style="height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
-              <div style="height:100%;width:${runPct}%;background:${barColor(runPct)};border-radius:3px;transition:width .3s;"></div>
-            </div>
+            <div style="font-size:28px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">${plan?.monthly_workflow_runs || 0}</div>
+            <div style="font-size:12px;color:var(--text-tertiary);">this period</div>
           </div>
           <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-tertiary);margin-bottom:4px;">
-              <span>Agent Tasks</span>
-              <span>${plan?.monthly_agent_tasks || 0} / ${plan?.plan_task_limit || '\u221e'}</span>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              ${icons.agents}
+              <span style="font-size:14px;font-weight:600;color:var(--text-primary);">Agent Tasks</span>
             </div>
-            <div style="height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
-              <div style="height:100%;width:${taskPct}%;background:${barColor(taskPct)};border-radius:3px;transition:width .3s;"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Plan Comparison Grid -->
-    <h2 style="font-size:16px;color:var(--text-primary);margin-bottom:12px;">Compare Plans</h2>
-    <div style="display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap;">
-      ${planCards}
-    </div>
-
-    <!-- Usage This Period -->
-    <h2 style="font-size:16px;color:var(--text-primary);margin-bottom:12px;">Usage This Period</h2>
-    <div class="card" style="margin-bottom:24px;">
-      <div style="padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            ${icons.workflow}
-            <span style="font-size:14px;font-weight:600;color:var(--text-primary);">Workflow Runs</span>
-          </div>
-          <div style="font-size:28px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">${plan?.monthly_workflow_runs || 0}</div>
-          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px;">of ${plan?.plan_workflow_limit || '\u221e'} included</div>
-          <div style="height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden;">
-            <div style="height:100%;width:${runPct}%;background:${barColor(runPct)};border-radius:4px;transition:width .3s;"></div>
-          </div>
-        </div>
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            ${icons.agents}
-            <span style="font-size:14px;font-weight:600;color:var(--text-primary);">Agent Tasks</span>
-          </div>
-          <div style="font-size:28px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">${plan?.monthly_agent_tasks || 0}</div>
-          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px;">of ${plan?.plan_task_limit || '\u221e'} included</div>
-          <div style="height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden;">
-            <div style="height:100%;width:${taskPct}%;background:${barColor(taskPct)};border-radius:4px;transition:width .3s;"></div>
+            <div style="font-size:28px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">${plan?.monthly_agent_tasks || 0}</div>
+            <div style="font-size:12px;color:var(--text-tertiary);">this period</div>
           </div>
         </div>
       </div>
