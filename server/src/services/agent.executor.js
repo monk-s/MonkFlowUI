@@ -1,6 +1,7 @@
 const env = require('../config/env');
 const agentModel = require('../models/agent.model');
 const { query } = require('../config/database');
+const logger = require('../utils/logger');
 
 // Simple concurrency limiter
 let activeCount = 0;
@@ -39,7 +40,7 @@ async function executeAgent(agent, inputData, userId) {
 
   // Process asynchronously
   processExecution(agent, execution, inputData, userId).catch(err => {
-    console.error(`Agent ${agent.id} execution ${execution.id} failed:`, err.message);
+    logger.error(`Agent ${agent.id} execution ${execution.id} failed: %s`, err.message);
   });
 
   return execution;
@@ -80,7 +81,7 @@ async function processExecution(agent, execution, inputData, userId) {
     // Increment monthly usage counter
     try {
       await query('UPDATE users SET monthly_agent_tasks = COALESCE(monthly_agent_tasks, 0) + 1 WHERE id = $1', [userId]);
-    } catch (e) { console.error('[UsageCounter] agent increment failed:', e.message); }
+    } catch (e) { logger.error('[UsageCounter] agent increment failed: %s', e.message); }
 
     // Log
     await query(

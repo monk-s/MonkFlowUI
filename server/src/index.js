@@ -3,6 +3,7 @@ const app = require('./app');
 const { pool } = require('./config/database');
 const fs = require('fs');
 const path = require('path');
+const logger = require('./utils/logger');
 
 // Auto-run pending migrations on startup
 async function runMigrations() {
@@ -32,16 +33,16 @@ async function runMigrations() {
         await client.query(sql);
         await client.query('INSERT INTO _migrations (name) VALUES ($1)', [file]);
         await client.query('COMMIT');
-        console.log(`  ✔ Migration ${file} applied`);
+        logger.info(`Migration ${file} applied`);
         count++;
       } catch (err) {
         await client.query('ROLLBACK');
-        console.error(`  ✖ Migration ${file} FAILED:`, err.message);
+        logger.error(`Migration ${file} FAILED: %s`, err.message);
       }
     }
-    if (count > 0) console.log(`${count} new migration(s) applied.`);
+    if (count > 0) logger.info(`${count} new migration(s) applied.`);
   } catch (err) {
-    console.error('Migration check failed:', err.message);
+    logger.error('Migration check failed: %s', err.message);
   } finally {
     client.release();
   }
@@ -50,14 +51,14 @@ async function runMigrations() {
 // Run migrations then start server
 runMigrations().then(() => {
   const server = app.listen(env.port, () => {
-    console.log(`MonkFlow API running on port ${env.port} [${env.nodeEnv}]`);
+    logger.info(`MonkFlow API running on port ${env.port} [${env.nodeEnv}]`);
 
     // Start lead generation cron
     try {
       const leadgenScheduler = require('./services/leadgen.scheduler');
       leadgenScheduler.start();
     } catch (err) {
-      console.error('Lead gen scheduler failed to start:', err.message);
+      logger.error('Lead gen scheduler failed to start: %s', err.message);
     }
 
     // Start usage reset cron
@@ -65,7 +66,7 @@ runMigrations().then(() => {
       const usageScheduler = require('./services/usage.scheduler');
       usageScheduler.start();
     } catch (err) {
-      console.error('Usage scheduler failed to start:', err.message);
+      logger.error('Usage scheduler failed to start: %s', err.message);
     }
 
     // Start billing cron
@@ -73,7 +74,7 @@ runMigrations().then(() => {
       const billingScheduler = require('./services/billing.scheduler');
       billingScheduler.start();
     } catch (err) {
-      console.error('Billing scheduler failed to start:', err.message);
+      logger.error('Billing scheduler failed to start: %s', err.message);
     }
 
     // Start outreach follow-up cron
@@ -81,20 +82,20 @@ runMigrations().then(() => {
       const outreachScheduler = require('./services/outreach.scheduler');
       outreachScheduler.start();
     } catch (err) {
-      console.error('Outreach scheduler failed to start:', err.message);
+      logger.error('Outreach scheduler failed to start: %s', err.message);
     }
   });
 
   // Graceful shutdown
   const shutdown = async (signal) => {
-    console.log(`\n${signal} received. Shutting down gracefully...`);
+    logger.info(`${signal} received. Shutting down gracefully...`);
 
     server.close(async () => {
       try {
         await pool.end();
-        console.log('Database pool closed');
+        logger.info('Database pool closed');
       } catch (err) {
-        console.error('Error closing pool:', err);
+        logger.error({ err }, 'Error closing pool');
       }
 
       try {
@@ -108,14 +109,14 @@ runMigrations().then(() => {
         billingScheduler.stop();
         const outreachScheduler = require('./services/outreach.scheduler');
         outreachScheduler.stop();
-        console.log('Cron jobs stopped');
+        logger.info('Cron jobs stopped');
       } catch { /* scheduler not loaded yet */ }
 
       process.exit(0);
     });
 
     setTimeout(() => {
-      console.error('Forced shutdown after timeout');
+      logger.error('Forced shutdown after timeout');
       process.exit(1);
     }, 10000);
   };
@@ -123,6 +124,6 @@ runMigrations().then(() => {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('unhandledRejection', (err) => {
-    console.error('Unhandled Rejection:', err);
+    logger.error({ err }, 'Unhandled Rejection');
   });
 });

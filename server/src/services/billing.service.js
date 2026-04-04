@@ -1,6 +1,7 @@
 const env = require('../config/env');
 const { query } = require('../config/database');
 const planModel = require('../models/plan.model');
+const logger = require('../utils/logger');
 
 let stripe = null;
 function getStripe() {
@@ -106,7 +107,7 @@ async function handleWebhook(event) {
           `UPDATE users SET plan_id = $1, stripe_subscription_id = $2 WHERE id = $3`,
           [planId, session.subscription, userId]
         );
-        console.log(`User ${userId} upgraded to plan ${planId}`);
+        logger.info(`User ${userId} upgraded to plan ${planId}`);
       }
       break;
     }
@@ -117,7 +118,7 @@ async function handleWebhook(event) {
       if (userId) {
         // If subscription becomes past_due or unpaid, we could downgrade
         if (subscription.status === 'past_due' || subscription.status === 'unpaid') {
-          console.log(`Subscription ${subscription.id} is ${subscription.status} for user ${userId}`);
+          logger.warn(`Subscription ${subscription.id} is ${subscription.status} for user ${userId}`);
         }
       }
       break;
@@ -134,7 +135,7 @@ async function handleWebhook(event) {
             'UPDATE users SET plan_id = $1, stripe_subscription_id = NULL WHERE id = $2',
             [starterPlan.id, userId]
           );
-          console.log(`User ${userId} downgraded to starter after subscription cancellation`);
+          logger.info(`User ${userId} downgraded to starter after subscription cancellation`);
         }
       }
       break;
@@ -142,7 +143,7 @@ async function handleWebhook(event) {
 
     case 'invoice.payment_failed': {
       const invoice = event.data.object;
-      console.log(`Payment failed for invoice ${invoice.id}, customer ${invoice.customer}`);
+      logger.error(`Payment failed for invoice ${invoice.id}, customer ${invoice.customer}`);
       break;
     }
 

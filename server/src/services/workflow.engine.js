@@ -1,6 +1,7 @@
 const { Parser } = require('expr-eval');
 const workflowModel = require('../models/workflow.model');
 const { query } = require('../config/database');
+const logger = require('../utils/logger');
 
 const parser = new Parser();
 
@@ -126,7 +127,7 @@ async function executeWorkflow(workflow, triggerPayload = {}) {
     // Increment monthly usage counter
     try {
       await query('UPDATE users SET monthly_workflow_runs = COALESCE(monthly_workflow_runs, 0) + 1 WHERE id = $1', [workflow.user_id]);
-    } catch (e) { console.error('[UsageCounter] workflow increment failed:', e.message); }
+    } catch (e) { logger.error('[UsageCounter] workflow increment failed: %s', e.message); }
 
     return { status: 'completed', executionId: execution.id, nodeResults, durationMs };
 
@@ -268,7 +269,7 @@ async function executeNode(node, context, workflowUserId) {
       }
       if (actionType === 'log') {
         const message = interpolateTemplate(config.message || JSON.stringify(context.data), context);
-        console.log(`[WORKFLOW LOG] ${label}: ${message}`);
+        logger.info({ nodeLabel: label }, `[WORKFLOW LOG] ${label}: ${message}`);
         return { action: 'log', executed: true, message, timestamp: new Date().toISOString() };
       }
       return { action: actionType, executed: true, timestamp: new Date().toISOString() };

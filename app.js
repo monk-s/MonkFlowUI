@@ -443,7 +443,7 @@ function navigateTo(page) {
   if (page === 'logs') loadLogsData();
   if (page === 'agents') loadAgentsData();
   if (page === 'team') loadTeamData();
-  if (page === 'analytics' && !dashboardData) loadDashboardData();
+  if (page === 'analytics') loadAnalyticsData();
   if (page === 'workflow-detail') loadWorkflowDetail();
   if (page === 'agent-detail') loadAgentDetail();
   if (page === 'admin') loadAdminData();
@@ -3014,26 +3014,91 @@ function filterIntegrations(filter, el) {
 // ============================================================
 // ANALYTICS PAGE
 // ============================================================
-function renderAnalytics() {
-  // Use real dashboard data if available
-  const d = dashboardData;
-  const totalExec = d?.executions?.total || 0;
-  const completedExec = d?.executions?.completed || 0;
-  const failedExec = d?.executions?.failed || 0;
-  const successRate = d?.executions?.successRate != null ? d.executions.successRate.toFixed(1) + '%' : '--';
-  const wfCount = d?.workflows?.total || 0;
-  const agentCount = d?.agents?.total || 0;
+let analyticsData = null;
+let analyticsDays = 30;
 
-  // Chart from real data
-  const chartData = d?.chartData || [];
-  const maxCount = Math.max(...chartData.map(c => c.count), 1);
-  const bars = chartData.map(c => `<div class="chart-bar" style="height:${Math.round((c.count / maxCount) * 100)}%"><span class="bar-value">${c.count}</span><span class="bar-label">${c.month}</span></div>`).join('');
+async function loadAnalyticsData(days) {
+  try {
+    analyticsDays = days || analyticsDays;
+    const res = await api.get(`/dashboard/analytics?days=${analyticsDays}`);
+    analyticsData = res.data;
+    renderMainContent();
+  } catch (err) {
+    showToast('Failed to load analytics: ' + err.message, 'error');
+  }
+}
+
+function renderAnalytics() {
+  const d = analyticsData;
+
+  if (!d) {
+    return `
+      <div class="page-header"><div><h1>Analytics</h1><p class="page-desc">Loading analytics data...</p></div></div>
+      <div class="stats-grid">${[1,2,3,4].map(() => '<div class="stat-card"><div style="height:60px;background:var(--bg-tertiary);border-radius:8px;animation:pulse 1.5s ease-in-out infinite;"></div></div>').join('')}</div>
+      <style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}</style>
+    `;
+  }
+
+  const ex = d.executions || {};
+  const totalExec = ex.total || 0;
+  const completedExec = ex.completed || 0;
+  const failedExec = ex.failed || 0;
+  const successRate = ex.successRate != null ? ex.successRate.toFixed(1) + '%' : '--';
+  const avgDuration = ex.avg_duration_sec != null ? ex.avg_duration_sec.toFixed(1) + 's' : '--';
+
+  // Daily trend chart
+  const trend = d.dailyTrend || [];
+  const maxTrend = Math.max(...trend.map(t => t.total), 1);
+  const trendBars = trend.map(t => {
+    const pct = Math.round((t.total / maxTrend) * 100);
+    const failPct = t.total > 0 ? Math.round((t.failed / t.total) * 100) : 0;
+    return `<div class="chart-bar" style="height:${pct}%" title="${t.label}: ${t.total} total, ${t.completed} ok, ${t.failed} failed">
+      ${failPct > 0 ? `<div style="position:absolute;bottom:0;width:100%;height:${failPct}%;background:var(--error);border-radius:0 0 3px 3px;opacity:0.7;"></div>` : ''}
+      <span class="bar-value">${t.total}</span><span class="bar-label">${t.label?.split(' ')[1] || ''}</span></div>`;
+  }).join('');
+
+  // Per-workflow table
+  const wfRows = (d.perWorkflow || []).map(w => {
+    const rate = w.executions > 0 ? Math.round((w.completed / w.executions) * 100) : 0;
+    const statusColor = w.workflow_status === 'active' ? '#00cc6a' : w.workflow_status === 'paused' ? '#fbbf24' : 'var(--text-tertiary)';
+    return `<tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:10px 12px;font-size:13px;font-weight:500;color:var(--text-primary);">${w.name || 'Unnamed'}</td>
+      <td style="padding:10px 12px;font-size:12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};margin-right:6px;"></span>${w.workflow_status}</td>
+      <td style="padding:10px 12px;font-size:13px;text-align:center;">${w.executions}</td>
+      <td style="padding:10px 12px;font-size:13px;text-align:center;color:#00cc6a;">${w.completed}</td>
+      <td style="padding:10px 12px;font-size:13px;text-align:center;color:var(--error);">${w.failed}</td>
+      <td style="padding:10px 12px;font-size:13px;text-align:center;">
+        <div style="display:flex;align-items:center;gap:6px;justify-content:center;">
+          <div style="width:40px;height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden;">
+            <div style="height:100%;width:${rate}%;background:${rate > 80 ? '#00cc6a' : rate > 50 ? '#fbbf24' : 'var(--error)'};"></div>
+          </div>
+          <span style="font-size:11px;color:var(--text-tertiary);">${rate}%</span>
+        </div>
+      </td>
+      <td style="padding:10px 12px;font-size:13px;text-align:center;color:var(--text-tertiary);">${w.avg_duration_sec != null ? w.avg_duration_sec + 's' : '--'}</td>
+    </tr>`;
+  }).join('');
+
+  // Top errors
+  const errorRows = (d.topErrors || []).map(e => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+      <span style="background:rgba(239,68,68,0.15);color:var(--error);font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;flex-shrink:0;">${e.count}</span>
+      <span style="font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${e.message}</span>
+    </div>
+  `).join('');
+
+  const dayButtons = [7, 30, 90].map(n =>
+    `<button class="btn ${analyticsDays === n ? 'btn-primary' : 'btn-ghost'}" style="font-size:12px;padding:4px 12px;" onclick="loadAnalyticsData(${n})">${n}d</button>`
+  ).join('');
 
   return `
     <div class="page-header">
       <div>
         <h1>Analytics</h1>
-        <p class="page-desc">Insights into your workflow and agent performance.</p>
+        <p class="page-desc">Performance insights for the last ${analyticsDays} days.</p>
+      </div>
+      <div class="page-actions" style="display:flex;gap:4px;">
+        ${dayButtons}
       </div>
     </div>
 
@@ -3041,7 +3106,7 @@ function renderAnalytics() {
       <div class="stat-card">
         <div class="stat-header"><div class="stat-icon green">${icons.zap}</div></div>
         <div class="stat-value">${totalExec.toLocaleString()}</div>
-        <div class="stat-label">Total Executions (30d)</div>
+        <div class="stat-label">Total Executions</div>
       </div>
       <div class="stat-card">
         <div class="stat-header"><div class="stat-icon blue">${icons.check}</div></div>
@@ -3049,49 +3114,60 @@ function renderAnalytics() {
         <div class="stat-label">Success Rate</div>
       </div>
       <div class="stat-card">
-        <div class="stat-header"><div class="stat-icon yellow">${icons.workflow}</div></div>
-        <div class="stat-value">${wfCount}</div>
-        <div class="stat-label">Total Workflows</div>
+        <div class="stat-header"><div class="stat-icon yellow">${icons.clock}</div></div>
+        <div class="stat-value">${avgDuration}</div>
+        <div class="stat-label">Avg Duration</div>
       </div>
       <div class="stat-card">
-        <div class="stat-header"><div class="stat-icon green">${icons.agents}</div></div>
-        <div class="stat-value">${agentCount}</div>
-        <div class="stat-label">AI Agents</div>
+        <div class="stat-header"><div class="stat-icon" style="background:rgba(239,68,68,0.15);color:var(--error);">${icons.x}</div></div>
+        <div class="stat-value">${failedExec}</div>
+        <div class="stat-label">Failed</div>
       </div>
     </div>
 
-    <div class="grid-2" style="margin-bottom:28px;">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Monthly Execution Volume</div>
-        </div>
-        <div class="chart-bar-group" style="margin-bottom:30px;">
-          ${bars || '<div style="padding:40px 20px;text-align:center;color:var(--text-secondary);font-size:13px;">No execution data yet. Run a workflow to see analytics here.</div>'}
-        </div>
+    <!-- Daily Trend -->
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header">
+        <div class="card-title">Daily Execution Trend</div>
       </div>
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Execution Breakdown</div>
-        </div>
-        <div style="padding:20px 0;">
-          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
-            <div style="width:10px;height:10px;border-radius:2px;background:var(--accent);"></div>
-            <span style="flex:1;font-size:13px;">Completed</span>
-            <span style="font-weight:600;font-size:13px;">${completedExec}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
-            <div style="width:10px;height:10px;border-radius:2px;background:var(--error);"></div>
-            <span style="flex:1;font-size:13px;">Failed</span>
-            <span style="font-weight:600;font-size:13px;">${failedExec}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;">
-            <div style="width:10px;height:10px;border-radius:2px;background:var(--info);"></div>
-            <span style="flex:1;font-size:13px;">Running</span>
-            <span style="font-weight:600;font-size:13px;">${d?.executions?.running || 0}</span>
-          </div>
-        </div>
+      <div class="chart-bar-group" style="margin-bottom:30px;min-height:160px;position:relative;">
+        ${trendBars || '<div style="padding:40px 20px;text-align:center;color:var(--text-secondary);font-size:13px;">No execution data yet.</div>'}
       </div>
     </div>
+
+    <div class="grid-2" style="margin-bottom:24px;">
+      <!-- Per-Workflow Breakdown -->
+      <div class="card" style="grid-column:1/-1;">
+        <div class="card-header">
+          <div class="card-title">Per-Workflow Breakdown</div>
+        </div>
+        ${(d.perWorkflow || []).length > 0 ? `
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="border-bottom:2px solid var(--border);">
+                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--text-tertiary);font-weight:600;">Workflow</th>
+                <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--text-tertiary);font-weight:600;">Status</th>
+                <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:var(--text-tertiary);font-weight:600;">Runs</th>
+                <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:var(--text-tertiary);font-weight:600;">OK</th>
+                <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:var(--text-tertiary);font-weight:600;">Failed</th>
+                <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:var(--text-tertiary);font-weight:600;">Rate</th>
+                <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:var(--text-tertiary);font-weight:600;">Avg Time</th>
+              </tr>
+            </thead>
+            <tbody>${wfRows}</tbody>
+          </table>
+        </div>` : '<div style="padding:40px 20px;text-align:center;color:var(--text-secondary);font-size:13px;">No workflows yet. Create one to see per-workflow analytics.</div>'}
+      </div>
+    </div>
+
+    ${(d.topErrors || []).length > 0 ? `
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header">
+        <div class="card-title">Top Errors</div>
+      </div>
+      <div style="padding:0 20px 12px;">${errorRows}</div>
+    </div>` : ''}
   `;
 }
 
@@ -4440,31 +4516,41 @@ function renderSettings() {
     <!-- Profile -->
     <div class="settings-section" data-settings-tab="general">
       <h3>Profile Information</h3>
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;">
+        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#00cc6a,#00a3ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:22px;">
+          ${(currentUser?.first_name || 'U')[0]}${(currentUser?.last_name || '')[0] || ''}
+        </div>
+        <div>
+          <div style="font-size:15px;font-weight:600;color:var(--text-primary);">${currentUser?.first_name || ''} ${currentUser?.last_name || ''}</div>
+          <div style="font-size:12px;color:var(--text-tertiary);">${currentUser?.email || ''}</div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">${currentUser?.role || 'member'} &middot; Joined ${currentUser?.created_at ? new Date(currentUser.created_at).toLocaleDateString('en-US', {month:'short',year:'numeric'}) : 'recently'}</div>
+        </div>
+      </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">First Name</label>
-          <input type="text" value="${currentUser?.first_name || ''}" />
+          <input type="text" value="${currentUser?.first_name || ''}" id="settings-first-name" />
         </div>
         <div class="form-group">
           <label class="form-label">Last Name</label>
-          <input type="text" value="${currentUser?.last_name || ''}" />
+          <input type="text" value="${currentUser?.last_name || ''}" id="settings-last-name" />
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">Email Address</label>
-        <input type="email" value="${currentUser?.email || ''}" />
+        <input type="email" value="${currentUser?.email || ''}" disabled style="opacity:0.6;cursor:not-allowed;" />
+        <span style="font-size:11px;color:var(--text-tertiary);">Contact support to change your email.</span>
       </div>
       <div class="form-group">
         <label class="form-label">Company</label>
-        <input type="text" value="${currentUser?.company || ''}" />
+        <input type="text" value="${currentUser?.company || ''}" id="settings-company" />
       </div>
       <div class="form-group">
         <label class="form-label">Timezone</label>
-        <select>
-          <option>America/Los_Angeles (PST)</option>
-          <option>America/New_York (EST)</option>
-          <option>Europe/London (GMT)</option>
-          <option>Asia/Tokyo (JST)</option>
+        <select id="settings-timezone">
+          ${['America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Anchorage','Pacific/Honolulu','Europe/London','Europe/Paris','Europe/Berlin','Asia/Tokyo','Asia/Shanghai','Asia/Kolkata','Australia/Sydney','Pacific/Auckland'].map(tz =>
+            `<option value="${tz}" ${currentUser?.timezone === tz ? 'selected' : ''}>${tz.replace('_',' ')}</option>`
+          ).join('')}
         </select>
       </div>
       <button class="btn btn-primary" onclick="handleSaveProfile()">Save Changes</button>
@@ -4580,18 +4666,16 @@ async function handleDeleteAccount() {
 }
 
 async function handleSaveProfile() {
-  const section = document.querySelector('[data-settings-tab="general"]');
-  const inputs = section.querySelectorAll('input');
-  const select = section.querySelector('select');
-  const firstName = inputs[0]?.value?.trim();
-  const lastName = inputs[1]?.value?.trim();
-  const company = inputs[3]?.value?.trim();
-  const timezone = select?.value?.split(' ')[0];
+  const firstName = document.getElementById('settings-first-name')?.value?.trim();
+  const lastName = document.getElementById('settings-last-name')?.value?.trim();
+  const company = document.getElementById('settings-company')?.value?.trim();
+  const timezone = document.getElementById('settings-timezone')?.value;
   if (!firstName || !lastName) { showToast('Name fields are required', 'error'); return; }
   try {
     const data = await api.patch('/users/me', { firstName, lastName, company, timezone });
     if (data?.user) currentUser = data.user;
     renderSidebar();
+    renderTopbar();
     showToast('Profile saved!');
   } catch (err) {
     showToast(err.message || 'Failed to save profile', 'error');

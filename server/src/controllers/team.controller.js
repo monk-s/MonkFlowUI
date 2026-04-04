@@ -2,6 +2,7 @@ const catchAsync = require('../utils/catchAsync');
 const ApiError = require('../utils/ApiError');
 const { query } = require('../config/database');
 const { generateToken } = require('../utils/crypto');
+const logger = require('../utils/logger');
 
 const listMembers = catchAsync(async (req, res) => {
   const { rows } = await query(
@@ -34,7 +35,7 @@ const invite = catchAsync(async (req, res) => {
     await emailService.sendTeamInvite(email, name, inviteToken);
     invite_email_sent = true;
   } catch (err) {
-    console.error('Failed to send team invite:', err.message);
+    logger.error('Failed to send team invite: %s', err.message);
   }
 
   res.status(201).json({ data: { ...rows[0], invite_email_sent } });
