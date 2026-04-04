@@ -30,19 +30,19 @@ function getFollowupTemplate(touchNumber, lead) {
         subject: reSubject,
         body: `<div style="font-family:sans-serif;max-width:600px;">
           <p>Hey ${firstName},</p>
-          <p>Just floating this back up in case it got buried. Would love to chat if you're open to it.</p>
-          <p>Let me know either way — happy to answer any questions.</p>
-          <p>Best,<br/>Nathan</p>
+          <p>Quick example of what I mean — we built a client onboarding system for a financial services firm that cut their new-client setup from 45 minutes to under 5. Contracts, CRM sync, everything automated.</p>
+          <p>Curious if${company ? ` ${lead.company}` : ' your team'} deals with anything similar on the operations side?</p>
+          <p>Nathan</p>
         </div>${unsubFooter}`,
       };
     case 3:
       return {
-        subject: reSubject,
+        subject: `${lead.company || firstName} + automation`,
         body: `<div style="font-family:sans-serif;max-width:600px;">
-          <p>Hi ${firstName},</p>
-          <p>Wanted to share a quick thought — I've been looking at how businesses${company} handle their workflows, and there's usually a lot of room to automate the repetitive stuff.</p>
-          <p>If you're curious, I'd be happy to walk through a couple ideas. No pressure at all.</p>
-          <p>Cheers,<br/>Nathan</p>
+          <p>Hey ${firstName},</p>
+          <p>No worries if the timing isn't right — figured I'd leave you with something useful either way.</p>
+          <p>Based on what I saw on${company ? ` ${lead.company}'s` : ' your'} site, there are a couple of quick automation wins that could free up real hours each week. Happy to share specifics if you're interested — no strings attached.</p>
+          <p>Nathan</p>
         </div>${unsubFooter}`,
       };
     case 4:
@@ -50,9 +50,9 @@ function getFollowupTemplate(touchNumber, lead) {
         subject: reSubject,
         body: `<div style="font-family:sans-serif;max-width:600px;">
           <p>Hey ${firstName},</p>
-          <p>Totally understand if the timing's off — just didn't want to drop the ball on my end.</p>
-          <p>If things change down the road, my door's always open. Wishing you and the team${company} all the best.</p>
-          <p>Take care,<br/>Nathan</p>
+          <p>Last note from me — going to assume the timing isn't right, and that's totally fine.</p>
+          <p>If automating any part of${company ? ` ${lead.company}'s` : ' your'} operations ever moves up the priority list, I'm easy to find. Wishing you a great rest of the quarter.</p>
+          <p>Nathan</p>
         </div>${unsubFooter}`,
       };
     default:

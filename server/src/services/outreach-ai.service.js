@@ -9,14 +9,30 @@ const { URL } = require('url');
 
 const resolveMx = promisify(dns.resolveMx);
 
-// ── Case study reference ───────────────────────────────────
-const CASE_STUDY = {
-  name: 'Team Financial Strategies',
-  industry: 'wealth management',
-  what: 'automated client onboarding contract system with CRM integration',
-  result: 'eliminated manual data entry and cut new client onboarding time from 45 minutes to under 5',
-  detail: 'custom contract form that auto-populates their Redtail CRM, generates signed agreements as PDFs, and syncs client financial profiles — all without a single spreadsheet',
-};
+// ── Case study references (AI picks the most relevant) ────
+const CASE_STUDIES = [
+  {
+    name: 'Team Financial Strategies',
+    industry: 'wealth management / financial services',
+    what: 'automated client onboarding contract system with CRM integration',
+    result: 'cut new-client onboarding from 45 minutes to under 5',
+    detail: 'custom contract form that auto-populates their Redtail CRM, generates signed agreements as PDFs, and syncs client financial profiles',
+  },
+  {
+    name: 'a local healthcare practice',
+    industry: 'healthcare / dental / medical',
+    what: 'online scheduling + automated intake forms with patient portal',
+    result: 'freed up 12 hours/week of front-desk time and reduced no-shows by 35%',
+    detail: 'self-service booking, digital intake forms that pre-fill into their EHR, automated appointment reminders via SMS and email',
+  },
+  {
+    name: 'a growing e-commerce brand',
+    industry: 'retail / e-commerce / general business',
+    what: 'order-to-fulfillment automation connecting their store, inventory, and shipping',
+    result: 'eliminated 15 hours/week of manual order processing and cut shipping errors to near zero',
+    detail: 'automated pipeline from order placement to label printing, real-time inventory sync, and exception alerts',
+  },
+];
 
 // ── Website fetcher ────────────────────────────────────────
 function fetchUrl(url, timeout = 8000) {
@@ -101,19 +117,35 @@ async function analyzeWebsite(domain) {
 
 // ── AI email generator ─────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are an expert cold email copywriter for MonkFlow, a software development agency that builds custom automation tools, client portals, and workflow software for small-to-mid-sized businesses.
+const SYSTEM_PROMPT = `You are writing a cold email for Nathan, who runs MonkFlow — a dev agency that builds custom automation tools, client portals, and workflow software for SMBs.
 
-Your job: write a hyper-personalized cold email based on the prospect's website analysis.
+GOAL: Write an email that stands out in a crowded inbox. This person gets dozens of cold emails a week. Yours needs to feel different.
 
-RULES:
-- Keep it under 120 words. Short paragraphs. Conversational, not salesy.
-- Open with something specific you noticed about THEIR business (from the website analysis). Never generic.
-- Identify 1-2 pain points based on what you see (manual processes, no online booking, no client portal, etc.)
-- Naturally mention the case study: "${CASE_STUDY.name}" — ${CASE_STUDY.what}. Result: ${CASE_STUDY.result}.
-- The case study mention should feel organic, not forced. One sentence max.
-- End with a soft CTA — "open to a quick chat?" or "worth a conversation?" energy. No hard sells.
-- Sign off as "Nathan" (not Nathan Linder, just Nathan)
-- Subject line: short, lowercase, personal. No "RE:" or fake reply threading.
+STRUCTURE — randomly pick ONE of these two frameworks per email (do NOT always use the same one):
+
+FRAMEWORK A — "Insight Lead":
+- Open with a specific, useful insight or stat relevant to their industry/situation (e.g., "Practices your size that add online self-scheduling typically see 30-40% fewer no-shows"). Use the website analysis to make it relevant.
+- Then briefly connect it to what you can do — one sentence, tied to a case study result.
+- Close with a low-friction question CTA.
+
+FRAMEWORK B — "Question Lead":
+- Open with a specific question about their operations that they can't read without mentally answering (e.g., "Curious — how much of your team's week goes to manually processing [X]?"). Base the question on pain points from their website analysis.
+- Then share a concrete result — one sentence from a case study.
+- Close with a low-friction question CTA.
+
+CASE STUDIES (pick the one closest to this prospect's industry):
+${CASE_STUDIES.map((cs, i) => `${i + 1}. ${cs.name} (${cs.industry}): ${cs.what}. Result: ${cs.result}.`).join('\n')}
+If none match well, use the result numbers without naming the client.
+
+HARD RULES:
+- Under 100 words. 3-4 short paragraphs max. Every word must earn its place.
+- NEVER start the email with "I" — the first word should be about them, a question, or an insight.
+- NEVER use "I was checking out your site", "I came across your website", "I noticed", or any variation. These are the most common cold email openers in existence — they signal mass outreach instantly.
+- NEVER use the phrases "reaching out", "touching base", "hope this finds you well", or "I'd love to".
+- Subject line: 2-5 words, lowercase, no punctuation. Must feel like a text from a colleague, not a marketing email. Examples of good patterns: "{company} + automation", "your booking page", "saving 10 hrs/week", "{firstName}, quick question". NEVER use the word "thought" or "idea" in the subject.
+- CTA: one soft question. "Worth a quick chat?" or "Open to exploring this?" — NEVER mention a specific time commitment like "15-minute call" or "30-minute demo".
+- Sign off as just "Nathan" — no last name, no company name, no URL, no title.
+- The case study mention should be ONE sentence woven into the email, never a separate paragraph.
 
 OUTPUT FORMAT: Return valid JSON only, no markdown:
 {"subject": "...", "body": "..."}

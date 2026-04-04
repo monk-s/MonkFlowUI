@@ -331,9 +331,9 @@ async function generateOutreachEmail(lead, diagnosis, onRetry) {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
-  const prompt = `You are writing a cold outreach email for Nathan Linder, who runs MonkFlow (getmonkflow.com), a web development and automation company for small businesses.
+  const prompt = `You are writing a cold email for Nathan, who runs MonkFlow — a dev agency that builds custom automation, client portals, and workflow tools for small businesses.
 
-Write a SHORT cold email (under 150 words) to this business. Be specific about what you found on their website. Do NOT be salesy. Be helpful and direct. Write from the perspective of Nathan Linder.
+This email needs to stand out. The recipient gets cold emails daily. Yours must feel different from the "I noticed your website..." template everyone else uses.
 
 BUSINESS INFO:
 - Name: ${lead.business_name}
@@ -350,13 +350,28 @@ WEBSITE DIAGNOSIS:
 - Design: ${diagnosis.design_age_estimate}
 - Issues: ${diagnosis.issues.join(', ') || 'None major'}
 
-FORMAT:
-- Start with "Hi [first name or 'there'],"
-- Reference ONE specific finding from their site
-- Explain what MonkFlow could add (1-2 sentences)
-- End with a soft CTA asking for a 15-min call
-- Sign off as: Nathan Linder / MonkFlow | getmonkflow.com
-- Subject line should be short and curiosity-driven (under 50 chars)
+STRUCTURE — randomly pick ONE of these two frameworks:
+
+FRAMEWORK A — "Insight Lead":
+Open with a specific, useful stat or insight relevant to their industry (e.g., "${lead.business_type} businesses that add online self-scheduling typically see 30-40% fewer no-shows and free up 8-10 hours/week"). Use the diagnosis to make it relevant. Then connect it to a concrete result you've delivered — one sentence. Close with a soft question CTA.
+
+FRAMEWORK B — "Question Lead":
+Open with a specific question about their operations they can't ignore (e.g., "Curious — how much of your week goes to [specific task from diagnosis]?"). Then share one concrete result. Close with a soft question CTA.
+
+CASE STUDIES (pick the most relevant):
+1. Wealth management firm: automated client onboarding + CRM integration. Cut onboarding from 45 min to under 5.
+2. Healthcare practice: online scheduling + automated intake forms. Freed 12 hrs/week, reduced no-shows 35%.
+3. E-commerce brand: order-to-fulfillment automation. Eliminated 15 hrs/week of manual processing.
+
+HARD RULES:
+- Under 100 words total. 3-4 short paragraphs max.
+- Start with "Hey [first name or 'there']," — never "Hi" (too formal for cold email).
+- NEVER start the first sentence with "I". Lead with them, a question, or an insight.
+- NEVER use: "I noticed your site", "I came across", "I was checking out", "reaching out", "touching base", "hope this finds you well", "I'd love to".
+- Subject line: 2-5 words, lowercase, no punctuation. Must feel like a text from a coworker. Good: "{company} + automation", "your booking page", "saving 10 hrs/week". Bad: "idea for your website", "quick thought".
+- CTA: one soft question — "Worth a quick chat?" or "Open to exploring this?" NEVER mention "15-minute call" or any specific time commitment.
+- Sign off as just "Nathan" — no last name, no company, no URL.
+- Case study should be ONE sentence woven in, never its own paragraph.
 
 Return JSON: {"subject": "...", "body": "..."}`;
 
