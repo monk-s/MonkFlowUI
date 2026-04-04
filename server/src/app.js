@@ -43,7 +43,7 @@ app.use(express.json({
   limit: '50mb',
   verify: (req, _res, buf) => {
     // Preserve raw body for webhook signature verification
-    if (req.url && req.url.includes('/quickbooks/webhook')) {
+    if (req.url && (req.url.includes('/quickbooks/webhook') || req.url.includes('/billing/webhook'))) {
       req.rawBody = buf;
     }
   },

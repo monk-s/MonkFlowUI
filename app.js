@@ -577,6 +577,60 @@ function showApp() {
   loadDashboardData();
   fetchNotifications().then(() => renderTopbar());
   loadCurrentPlan();
+
+  // Handle Stripe checkout return
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('checkout') === 'success') {
+    showToast('Plan upgraded successfully! Your new plan is now active.', 'success');
+    window.history.replaceState({}, '', window.location.pathname);
+    setTimeout(() => navigateTo('billing'), 500);
+  } else if (urlParams.get('checkout') === 'cancelled') {
+    showToast('Checkout cancelled.', 'info');
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+
+  // Show onboarding for new users
+  if (!localStorage.getItem('onboarding_completed')) {
+    setTimeout(() => showOnboarding(), 800);
+  }
+}
+
+function showOnboarding() {
+  const steps = [
+    { icon: '&#9889;', title: 'Create Your First Workflow', desc: 'Automate repetitive tasks with our visual workflow builder. Drag, drop, and connect nodes.', action: 'navigateTo("workflows")', btn: 'Build a Workflow' },
+    { icon: '&#129302;', title: 'Deploy an AI Agent', desc: 'Set up AI agents that handle tasks like lead scoring, email drafting, and support routing.', action: 'navigateTo("agents")', btn: 'Create an Agent' },
+    { icon: '&#128268;', title: 'Connect Your Tools', desc: 'Link Slack, Gmail, CRM, and more to power your automations with real data.', action: 'navigateTo("integrations")', btn: 'Browse Integrations' },
+  ];
+
+  showModal(`
+    <div class="modal-header">
+      <h2 class="modal-title">Welcome to MonkFlow!</h2>
+      <button class="modal-close" onclick="closeOnboarding()">${icons.x}</button>
+    </div>
+    <div style="padding:24px;">
+      <p style="color:var(--text-secondary);margin-bottom:24px;font-size:14px;">Here's how to get the most out of your account:</p>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        ${steps.map((s, i) => `
+          <div style="display:flex;align-items:flex-start;gap:16px;padding:16px;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border);">
+            <div style="font-size:28px;flex-shrink:0;width:40px;text-align:center;">${s.icon}</div>
+            <div style="flex:1;">
+              <h4 style="margin:0 0 4px;font-size:14px;color:var(--text-primary);">${s.title}</h4>
+              <p style="margin:0 0 10px;font-size:13px;color:var(--text-tertiary);">${s.desc}</p>
+              <button class="btn btn-ghost" style="font-size:12px;padding:4px 12px;" onclick="closeOnboarding();${s.action}">${s.btn}</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="margin-top:20px;text-align:center;">
+        <button class="btn btn-primary" onclick="closeOnboarding()" style="min-width:200px;">I'll explore on my own</button>
+      </div>
+    </div>
+  `);
+}
+
+function closeOnboarding() {
+  localStorage.setItem('onboarding_completed', 'true');
+  closeModal();
 }
 
 // ── Auth Handlers ──────────────────────────────────────
@@ -1803,6 +1857,42 @@ function renderDashboard() {
     </div>
   `).join('');
 
+  // Getting Started checklist
+  const hasWorkflows = (workflows?.active || 0) > 0;
+  const hasAgents = (agents?.total || 0) > 0;
+  const completedSteps = [hasWorkflows, hasAgents].filter(Boolean).length;
+  const showChecklist = completedSteps < 2 && !localStorage.getItem('checklist_dismissed');
+  const checklistHtml = showChecklist ? `
+    <div class="card" style="margin-bottom:24px;border:1px solid rgba(0,204,106,0.3);background:linear-gradient(135deg,var(--bg-secondary),rgba(0,204,106,0.05));">
+      <div style="padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <div>
+            <h3 style="margin:0 0 4px;font-size:16px;color:var(--text-primary);">Getting Started</h3>
+            <span style="font-size:13px;color:var(--text-tertiary);">${completedSteps}/2 completed</span>
+          </div>
+          <button class="btn btn-ghost" style="font-size:11px;padding:2px 8px;" onclick="localStorage.setItem('checklist_dismissed','true');navigateTo('dashboard');">Dismiss</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);${hasWorkflows ? 'opacity:0.6;' : ''}">
+            <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${hasWorkflows ? '#00cc6a' : 'var(--border)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;color:#00cc6a;">${hasWorkflows ? '&#10003;' : ''}</div>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:600;color:var(--text-primary);">Create your first workflow</div>
+              <div style="font-size:12px;color:var(--text-tertiary);">Automate a process with our visual builder</div>
+            </div>
+            ${!hasWorkflows ? '<button class="btn btn-ghost" style="font-size:11px;padding:2px 10px;" onclick="showNewWorkflowModal()">Start</button>' : ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);${hasAgents ? 'opacity:0.6;' : ''}">
+            <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${hasAgents ? '#00cc6a' : 'var(--border)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;color:#00cc6a;">${hasAgents ? '&#10003;' : ''}</div>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:600;color:var(--text-primary);">Deploy an AI agent</div>
+              <div style="font-size:12px;color:var(--text-tertiary);">Set up an AI agent for scoring, drafting, or routing</div>
+            </div>
+            ${!hasAgents ? '<button class="btn btn-ghost" style="font-size:11px;padding:2px 10px;" onclick="navigateTo(\'agents\')">Start</button>' : ''}
+          </div>
+        </div>
+      </div>
+    </div>` : '';
+
   return `
     <div class="page-header">
       <div>
@@ -1813,6 +1903,8 @@ function renderDashboard() {
         <button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button>
       </div>
     </div>
+
+    ${checklistHtml}
 
     <!-- Stats -->
     <div class="stats-grid">
@@ -3658,8 +3750,8 @@ function loadWorkflowTemplate(templateName) {
         { id: 2, type: 'ai-classifier', label: 'Score Lead', desc: 'High / Medium / Low', x: 320, y: 220, color: 'blue', icon: 'agents', config: { prompt: 'Classify the following lead as high, medium, or low value based on company size, role seniority, and engagement signals. Return JSON with score (0-100) and tier (high/medium/low).', model: 'claude-sonnet-4-20250514', temperature: 0.3, maxTokens: 512 } },
         { id: 3, type: 'condition', label: 'Score Router', desc: 'tier == "high"?', x: 580, y: 220, color: 'purple', icon: 'filter', config: { expression: 'output.tier === "high"' } },
         { id: 4, type: 'notify', label: 'Notify Sales', desc: 'Slack #high-value-leads', x: 840, y: 100, color: 'orange', icon: 'bell', config: { message: 'New high-value lead: {{lead.name}} ({{lead.company}}) — Score: {{output.score}}' } },
-        { id: 5, type: 'database', label: 'Save to CRM', desc: 'INSERT leads table', x: 1060, y: 100, color: 'purple', icon: 'logs', config: { operation: 'insert', query: 'INSERT INTO qualified_leads (name, email, company, score, tier, created_at) VALUES (:name, :email, :company, :score, :tier, NOW())' } },
-        { id: 6, type: 'database', label: 'Log Lead', desc: 'INSERT lead_log', x: 840, y: 340, color: 'purple', icon: 'logs', config: { operation: 'insert', query: 'INSERT INTO lead_log (email, score, tier, source, logged_at) VALUES (:email, :score, :tier, :source, NOW())' } },
+        { id: 5, type: 'database', label: 'Save to CRM', desc: 'INSERT leads table', x: 1060, y: 100, color: 'purple', icon: 'logs', config: { operation: 'insert', query: "INSERT INTO outreach_leads (email, first_name, company, status, created_at) VALUES ('{{lead.email}}', '{{lead.name}}', '{{lead.company}}', 'qualified', NOW())" } },
+        { id: 6, type: 'database', label: 'Log Lead', desc: 'INSERT lead_log', x: 840, y: 340, color: 'purple', icon: 'logs', config: { operation: 'insert', query: "INSERT INTO execution_logs (workflow_id, status, output, created_at) VALUES ('{{workflow_id}}', 'success', '{{output}}', NOW())" } },
       ],
       connections: [
         { from: 1, to: 2 },
@@ -3697,7 +3789,7 @@ function loadWorkflowTemplate(templateName) {
         { id: 5, type: 'condition', label: 'Is Technical?', desc: 'category == "technical"', x: 580, y: 280, color: 'purple', icon: 'filter', config: { expression: 'output.category === "technical"' } },
         { id: 6, type: 'notify', label: 'Engineering Team', desc: 'Slack #eng-support', x: 840, y: 220, color: 'orange', icon: 'bell', config: { message: '[{{output.priority}}] Technical ticket from {{ticket.email}}: {{ticket.subject}} — Confidence: {{output.confidence}}' } },
         { id: 7, type: 'notify', label: 'General Support', desc: 'Slack #general-support', x: 840, y: 380, color: 'orange', icon: 'bell', config: { message: '[{{output.priority}}] General inquiry from {{ticket.email}}: {{ticket.subject}}' } },
-        { id: 8, type: 'database', label: 'Log Ticket', desc: 'INSERT ticket_routing', x: 1100, y: 240, color: 'purple', icon: 'logs', config: { operation: 'insert', query: 'INSERT INTO ticket_routing (ticket_id, category, priority, confidence, routed_to, created_at) VALUES (:ticket_id, :category, :priority, :confidence, :routed_team, NOW())' } },
+        { id: 8, type: 'database', label: 'Log Ticket', desc: 'INSERT ticket_routing', x: 1100, y: 240, color: 'purple', icon: 'logs', config: { operation: 'insert', query: "INSERT INTO execution_logs (workflow_id, status, output, created_at) VALUES ('{{workflow_id}}', 'success', '{{output}}', NOW())" } },
       ],
       connections: [
         { from: 1, to: 2 },
@@ -5344,9 +5436,15 @@ async function handleSendInvite() {
   const role = select?.value || 'viewer';
   if (!email) { showToast('Please enter an email address', 'error'); return; }
   try {
-    await api.post('/team/invite', { email, role });
+    const res = await api.post('/team/invite', { email, role });
     closeModal();
-    showToast('Invitation sent!');
+    if (res.data?.invite_email_sent === false) {
+      const token = res.data?.invite_token || '';
+      showToast('Invite created but email failed to send. Share the invite link manually.', 'warning');
+    } else {
+      showToast('Invitation sent!');
+    }
+    if (typeof renderTeam === 'function') navigateTo('team');
   } catch (err) {
     showToast(err.message || 'Failed to send invitation', 'error');
   }
@@ -6005,6 +6103,38 @@ async function adminGenerateInvoices() {
   } catch (e) { showToast('Failed: ' + e.message, 'error'); }
 }
 
+async function startCheckout(planSlug) {
+  try {
+    showToast('Redirecting to checkout...', 'info');
+    const res = await api.post('/billing/checkout', { planSlug });
+    if (res.data?.url) {
+      window.location.href = res.data.url;
+    } else {
+      showToast('Could not create checkout session. Please contact support.', 'error');
+    }
+  } catch (err) {
+    if (err.message?.includes('Stripe is not configured')) {
+      showToast('Payment processing is being set up. Please contact support to upgrade.', 'info');
+    } else {
+      showToast(err.message || 'Checkout failed', 'error');
+    }
+  }
+}
+
+async function openBillingPortal() {
+  try {
+    showToast('Opening billing portal...', 'info');
+    const res = await api.post('/billing/portal');
+    if (res.data?.url) {
+      window.location.href = res.data.url;
+    } else {
+      showToast('Could not open billing portal.', 'error');
+    }
+  } catch (err) {
+    showToast(err.message || 'Failed to open billing portal', 'error');
+  }
+}
+
 function showUpgradeModal(message) {
   showModal(`
     <div class="modal-header">
@@ -6044,6 +6174,7 @@ function renderBilling() {
   ];
 
   const displayPlans = plans.length >= 3 ? plans.map((p, i) => ({
+    slug: p.slug || (p.name || tierDefaults[i]?.name || '').toLowerCase(),
     name: p.name || tierDefaults[i]?.name || p.plan_name,
     price: p.price ?? p.monthly_price ?? tierDefaults[i]?.price,
     workflow_run_limit: p.workflow_run_limit ?? p.plan_workflow_limit ?? tierDefaults[i]?.workflow_run_limit,
@@ -6073,7 +6204,7 @@ function renderBilling() {
           <div style="margin-top:16px;">
             ${isCurrent
               ? '<button class="btn btn-ghost" style="width:100%;cursor:default;" disabled>Current Plan</button>'
-              : '<button class="btn btn-primary" style="width:100%;" onclick="showToast(\'Contact support to change plans\', \'info\')">Upgrade</button>'}
+              : `<button class="btn btn-primary" style="width:100%;" onclick="startCheckout('${(p.slug || p.name || '').toLowerCase()}')">Upgrade</button>`}
           </div>
         </div>
       </div>`;
@@ -6095,8 +6226,11 @@ function renderBilling() {
             <h3 style="margin:0 0 4px;font-size:16px;color:var(--text-primary);">${plan?.plan_name || 'Free'} Plan</h3>
             <span style="font-size:13px;color:var(--text-tertiary);">Renews ${renewalStr}</span>
           </div>
-          <div style="font-size:24px;font-weight:700;color:#00cc6a;">
-            ${plan?.plan_price != null ? '$' + plan.plan_price : '--'}<span style="font-size:13px;font-weight:400;color:var(--text-tertiary);">/mo</span>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="font-size:24px;font-weight:700;color:#00cc6a;">
+              ${plan?.plan_price != null ? '$' + plan.plan_price : '--'}<span style="font-size:13px;font-weight:400;color:var(--text-tertiary);">/mo</span>
+            </div>
+            <button class="btn btn-ghost" style="font-size:12px;padding:4px 12px;" onclick="openBillingPortal()">Manage</button>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">

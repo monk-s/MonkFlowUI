@@ -28,14 +28,16 @@ const invite = catchAsync(async (req, res) => {
   );
 
   // Send invite email
+  let invite_email_sent = false;
   try {
     const emailService = require('../services/email.service');
     await emailService.sendTeamInvite(email, name, inviteToken);
+    invite_email_sent = true;
   } catch (err) {
     console.error('Failed to send team invite:', err.message);
   }
 
-  res.status(201).json({ data: rows[0] });
+  res.status(201).json({ data: { ...rows[0], invite_email_sent } });
 });
 
 const updateMember = catchAsync(async (req, res) => {
