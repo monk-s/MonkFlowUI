@@ -3026,8 +3026,8 @@ function renderAnalytics() {
   const totalExec = ex.total || 0;
   const completedExec = ex.completed || 0;
   const failedExec = ex.failed || 0;
-  const successRate = ex.successRate != null ? ex.successRate.toFixed(1) + '%' : '--';
-  const avgDuration = ex.avg_duration_sec != null ? ex.avg_duration_sec.toFixed(1) + 's' : '--';
+  const successRate = ex.successRate ? Number(ex.successRate).toFixed(1) + '%' : '--';
+  const avgDuration = ex.avg_duration_sec ? Number(ex.avg_duration_sec).toFixed(1) + 's' : '--';
 
   // Daily trend chart
   const trend = d.dailyTrend || [];
