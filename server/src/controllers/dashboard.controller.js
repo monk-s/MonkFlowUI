@@ -123,7 +123,7 @@ const getAnalytics = catchAsync(async (req, res) => {
         COUNT(*) FILTER (WHERE we.status = 'completed')::int as completed,
         COUNT(*) FILTER (WHERE we.status = 'failed')::int as failed,
         COUNT(*) FILTER (WHERE we.status = 'running')::int as running,
-        ROUND(AVG(EXTRACT(EPOCH FROM (we.finished_at - we.started_at)))::numeric, 2) as avg_duration_sec
+        ROUND(AVG(EXTRACT(EPOCH FROM (we.completed_at - we.started_at)))::numeric, 2) as avg_duration_sec
        FROM workflow_executions we
        JOIN workflows w ON we.workflow_id = w.id
        WHERE w.user_id = $1 AND we.started_at >= NOW() - make_interval(days := $2)`,
@@ -136,7 +136,7 @@ const getAnalytics = catchAsync(async (req, res) => {
         COUNT(we.id)::int as executions,
         COUNT(*) FILTER (WHERE we.status = 'completed')::int as completed,
         COUNT(*) FILTER (WHERE we.status = 'failed')::int as failed,
-        ROUND(AVG(EXTRACT(EPOCH FROM (we.finished_at - we.started_at)))::numeric, 2) as avg_duration_sec
+        ROUND(AVG(EXTRACT(EPOCH FROM (we.completed_at - we.started_at)))::numeric, 2) as avg_duration_sec
        FROM workflows w
        LEFT JOIN workflow_executions we ON we.workflow_id = w.id AND we.started_at >= NOW() - make_interval(days := $2)
        WHERE w.user_id = $1
