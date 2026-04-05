@@ -4,6 +4,7 @@ const ApiError = require('../utils/ApiError');
 const env = require('../config/env');
 const { sendEmail } = require('../services/email.service');
 const outreachAI = require('../services/outreach-ai.service');
+const { processInboundReply } = require('../services/reply-detector.service');
 
 // ── Follow-up templates ────────────────────────────────────
 // Touch 1 = original cold email (sent manually / externally)
@@ -462,12 +463,287 @@ const sendAiEmailEndpoint = catchAsync(async (req, res) => {
 
 // ── Resend bounce/complaint webhook ────────────────────────
 
+// ── Open/Click Tracking Endpoints ─────────────────────────
+
+// 1x1 transparent GIF pixel
+const TRACKING_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+
+const trackOpen = catchAsync(async (req, res) => {
+  const { emailId } = req.params;
+  if (emailId) {
+    // Try to match by: outreach_emails.gmail_message_id, outreach_emails.id, or outreach_leads.unsubscribe_token
+    await query(
+      `UPDATE outreach_leads SET opened_at = COALESCE(opened_at, NOW()), updated_at = NOW()
+       WHERE id = (SELECT lead_id FROM outreach_emails WHERE gmail_message_id = $1 OR id::text = $1 LIMIT 1)
+          OR unsubscribe_token::text = $1`,
+      [emailId]
+    ).catch(() => {}); // never fail the pixel response
+
+    // Also update opened_at on the specific outreach_email (if matched by email ID)
+    await query(
+      `UPDATE outreach_emails SET opened_at = COALESCE(opened_at, NOW())
+       WHERE gmail_message_id = $1 OR id::text = $1`,
+      [emailId]
+    ).catch(() => {});
+  }
+  res.set({ 'Content-Type': 'image/gif', 'Cache-Control': 'no-cache, no-store', 'Expires': '0' });
+  res.send(TRACKING_PIXEL);
+});
+
+const trackClick = catchAsync(async (req, res) => {
+  const { emailId } = req.params;
+  const targetUrl = req.query.url;
+
+  if (emailId) {
+    await query(
+      `UPDATE outreach_leads SET clicked_at = COALESCE(clicked_at, NOW()), updated_at = NOW()
+       WHERE id = (SELECT lead_id FROM outreach_emails WHERE gmail_message_id = $1 OR id::text = $1 LIMIT 1)
+          OR unsubscribe_token::text = $1`,
+      [emailId]
+    ).catch(() => {});
+  }
+
+  // Validate URL to prevent open redirect attacks
+  if (targetUrl) {
+    try {
+      const parsed = new URL(targetUrl);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        res.redirect(302, targetUrl);
+      } else {
+        res.redirect(302, 'https://getmonkflow.com');
+      }
+    } catch {
+      res.redirect(302, 'https://getmonkflow.com');
+    }
+  } else {
+    res.redirect(302, 'https://getmonkflow.com');
+  }
+});
+
+// ── Outreach Analytics Endpoint ──────���────────────────────
+
+const getAnalytics = catchAsync(async (req, res) => {
+  const days = parseInt(req.query.days, 10) || 30;
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  // Funnel stats
+  const { rows: [funnel] } = await query(
+    `SELECT
+       COUNT(*) AS total_leads,
+       COUNT(*) FILTER (WHERE touch_count >= 1) AS emails_sent,
+       COUNT(*) FILTER (WHERE opened_at IS NOT NULL) AS emails_opened,
+       COUNT(*) FILTER (WHERE clicked_at IS NOT NULL) AS emails_clicked,
+       COUNT(*) FILTER (WHERE replied_at IS NOT NULL OR status = 'replied') AS replies_received,
+       COUNT(*) FILTER (WHERE status = 'replied') AS positive_replies,
+       COUNT(*) FILTER (WHERE status = 'closed' AND notes LIKE '%converted%') AS clients_closed
+     FROM outreach_leads
+     WHERE created_at >= $1`,
+    [since]
+  );
+
+  // Daily trend (JOIN to outreach_leads for opened_at / replied_at)
+  const { rows: dailyTrend } = await query(
+    `SELECT
+       date_trunc('day', oe.sent_at)::date AS date,
+       COUNT(*) AS sent,
+       COUNT(*) FILTER (WHERE ol.opened_at IS NOT NULL) AS opened,
+       COUNT(*) FILTER (WHERE oe.reply_received_at IS NOT NULL) AS replied
+     FROM outreach_emails oe
+     JOIN outreach_leads ol ON ol.id = oe.lead_id
+     WHERE oe.sent_at >= $1
+     GROUP BY date_trunc('day', oe.sent_at)::date
+     ORDER BY date`,
+    [since]
+  );
+
+  // By industry breakdown
+  const { rows: byIndustry } = await query(
+    `SELECT
+       COALESCE(industry, 'unknown') AS industry,
+       COUNT(*) AS sent,
+       ROUND(COUNT(*) FILTER (WHERE status = 'replied')::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS reply_rate
+     FROM outreach_leads
+     WHERE created_at >= $1
+     GROUP BY industry
+     ORDER BY sent DESC
+     LIMIT 15`,
+    [since]
+  );
+
+  // By touch number (use reply_received_at which exists on outreach_emails)
+  const { rows: byTouch } = await query(
+    `SELECT
+       touch_number,
+       COUNT(*) AS sent,
+       COUNT(*) FILTER (WHERE reply_received_at IS NOT NULL) AS replied,
+       ROUND(COUNT(*) FILTER (WHERE reply_received_at IS NOT NULL)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS reply_rate
+     FROM outreach_emails
+     WHERE sent_at >= $1
+     GROUP BY touch_number
+     ORDER BY touch_number`,
+    [since]
+  );
+
+  // Sender health (last 7 days)
+  const { rows: senderHealth } = await query(
+    `SELECT
+       sender_email,
+       SUM(sent_count) AS sent_7d,
+       ROUND(SUM(bounce_count)::numeric / NULLIF(SUM(sent_count), 0) * 100, 1) AS bounce_rate,
+       ROUND(SUM(complaint_count)::numeric / NULLIF(SUM(sent_count), 0) * 100, 1) AS complaint_rate
+     FROM sender_health
+     WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+     GROUP BY sender_email
+     ORDER BY sent_7d DESC`
+  );
+
+  // Emails per lead (for the sidebar detail view)
+  const { rows: recentEmails } = await query(
+    `SELECT oe.*, ol.contact_name, ol.company
+     FROM outreach_emails oe
+     JOIN outreach_leads ol ON ol.id = oe.lead_id
+     WHERE oe.sent_at >= $1
+     ORDER BY oe.sent_at DESC
+     LIMIT 50`,
+    [since]
+  );
+
+  res.json({
+    period: { start: since.toISOString(), end: new Date().toISOString(), days },
+    funnel,
+    dailyTrend,
+    byIndustry,
+    byTouch,
+    senderHealth,
+    recentEmails,
+  });
+});
+
+// ── A/B Testing Results ──────────────────────────────────
+
+const getAbResults = catchAsync(async (req, res) => {
+  const { rows } = await query(`
+    SELECT
+      ol.email_variant AS variant,
+      COUNT(*) AS sent,
+      COUNT(*) FILTER (WHERE ol.opened_at IS NOT NULL) AS opened,
+      COUNT(*) FILTER (WHERE ol.replied_at IS NOT NULL OR ol.status = 'replied') AS replied,
+      COUNT(*) FILTER (WHERE ol.reply_sentiment = 'positive') AS positive,
+      ROUND(COUNT(*) FILTER (WHERE ol.opened_at IS NOT NULL)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS open_rate,
+      ROUND(COUNT(*) FILTER (WHERE ol.replied_at IS NOT NULL OR ol.status = 'replied')::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS reply_rate
+    FROM outreach_leads ol
+    WHERE ol.touch_count >= 1
+      AND ol.email_variant IN ('A', 'B')
+      AND ol.source_lead_id IS NOT NULL
+    GROUP BY ol.email_variant
+    ORDER BY variant
+  `);
+  res.json({ data: rows });
+});
+
+// ── Lead email timeline (for sidebar) ─────────────────────
+
+const getLeadTimeline = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { rows: emails } = await query(
+    `SELECT id, touch_number, subject, gmail_message_id, sent_at, opened_at, replied_at
+     FROM outreach_emails
+     WHERE lead_id = $1
+     ORDER BY touch_number ASC`,
+    [id]
+  );
+  res.json(emails);
+});
+
+// ── Inbound Reply Webhook ─────────────────────────────────
+
+const handleInboundReply = catchAsync(async (req, res) => {
+  // Verify webhook secret to prevent unauthorized access
+  const webhookSecret = process.env.INBOUND_WEBHOOK_SECRET || env.qboWebhookVerifierToken;
+  if (webhookSecret) {
+    const providedSecret = req.headers['x-webhook-secret'] || req.query.secret;
+    if (providedSecret !== webhookSecret) {
+      return res.status(401).json({ error: 'Invalid webhook secret' });
+    }
+  }
+
+  const { from, subject, body, headers, text } = req.body;
+
+  if (!from) {
+    throw ApiError.badRequest('from field is required');
+  }
+
+  // Extract In-Reply-To from headers (support object or string)
+  let inReplyTo = null;
+  if (headers) {
+    if (typeof headers === 'object') {
+      inReplyTo = headers['In-Reply-To'] || headers['in-reply-to'] || null;
+    } else if (typeof headers === 'string') {
+      const match = headers.match(/In-Reply-To:\s*(.+)/i);
+      if (match) inReplyTo = match[1].trim();
+    }
+  }
+
+  const replyBody = body || text || '';
+  if (!replyBody) {
+    throw ApiError.badRequest('body or text field is required');
+  }
+
+  const result = await processInboundReply({
+    from,
+    to: req.body.to || null,
+    subject: subject || '',
+    body: replyBody,
+    inReplyTo,
+  });
+
+  if (!result.matched) {
+    return res.status(404).json({ matched: false, reason: result.reason });
+  }
+
+  res.json({ data: result });
+});
+
+// ── Resend Webhook ────────────────────────────────────────
+
 const handleResendWebhook = catchAsync(async (req, res) => {
   const { type, data } = req.body;
+  const { trackBounce, trackComplaint } = require('../services/leadgen.service');
+
+  // Handle delivery tracking
+  if (type === 'email.delivered') {
+    const emailId = data?.email_id;
+    if (emailId) {
+      await query(
+        `UPDATE outreach_emails SET delivered_at = COALESCE(delivered_at, NOW())
+         WHERE gmail_message_id = $1`,
+        [emailId]
+      ).catch(err => console.error('[OUTREACH] Failed to track delivery:', err.message));
+    }
+  }
+
+  // Handle open tracking (backup — pixel tracking is primary)
+  if (type === 'email.opened') {
+    const emailId = data?.email_id;
+    if (emailId) {
+      await query(
+        `UPDATE outreach_emails SET opened_at = COALESCE(opened_at, NOW())
+         WHERE gmail_message_id = $1`,
+        [emailId]
+      ).catch(() => {});
+      await query(
+        `UPDATE outreach_leads SET opened_at = COALESCE(opened_at, NOW()), updated_at = NOW()
+         WHERE id = (SELECT lead_id FROM outreach_emails WHERE gmail_message_id = $1 LIMIT 1)`,
+        [emailId]
+      ).catch(() => {});
+    }
+  }
 
   // Resend webhook events: email.bounced, email.complained, email.delivered
   if (type === 'email.bounced' || type === 'email.complained') {
     const toEmail = data?.to?.[0] || data?.email_id;
+    const fromEmail = data?.from;
 
     if (toEmail) {
       // Find the lead and remove from active sequence
@@ -501,6 +777,15 @@ const handleResendWebhook = catchAsync(async (req, res) => {
       } catch (err) {
         console.error(`[OUTREACH] Failed to mark lead as bounced: ${err.message}`);
       }
+
+      // Track sender health
+      if (fromEmail) {
+        const senderAddr = fromEmail.includes('<') ? fromEmail.match(/<(.+)>/)?.[1] : fromEmail;
+        if (senderAddr) {
+          if (type === 'email.bounced') await trackBounce(senderAddr);
+          if (type === 'email.complained') await trackComplaint(senderAddr);
+        }
+      }
     }
   }
 
@@ -525,4 +810,10 @@ module.exports = {
   previewAiEmail,
   sendAiEmailEndpoint,
   handleResendWebhook,
+  handleInboundReply,
+  trackOpen,
+  trackClick,
+  getAnalytics,
+  getAbResults,
+  getLeadTimeline,
 };

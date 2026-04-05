@@ -2,6 +2,12 @@
    MONK FLOW — Complete SaaS Application
    ============================================================ */
 
+// ── Utilities ─────────────────────────────────────────────
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // ── SVG Icons ──────────────────────────────────────────────
 const icons = {
   dashboard: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>`,
@@ -6309,6 +6315,9 @@ let outreachPage = 1;
 let outreachPagination = null;
 let outreachFilterPriority = false;
 let outreachSearchQuery = '';
+let outreachActiveTab = 'leads';
+let outreachAnalyticsData = null;
+let outreachAnalyticsDays = 30;
 
 async function loadOutreachData(page) {
   if (page !== undefined) outreachPage = page;
@@ -6329,6 +6338,10 @@ async function loadOutreachData(page) {
 }
 
 function renderOutreachPage() {
+  if (outreachActiveTab === 'analytics' && isAdmin()) {
+    return renderOutreachAnalyticsPage();
+  }
+
   if (!outreachData) {
     return `<div class="card" style="padding:40px;text-align:center;">
       <div class="spinner"></div>
@@ -6370,15 +6383,24 @@ function renderOutreachPage() {
           ? '<span style="padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#6b728022;color:#6b7280;">Pending</span>'
           : '';
 
+    // Engagement indicators
+    const engagementIcons = [];
+    if (lead.touch_count >= 1) engagementIcons.push('<span title="Sent" style="color:#6b7280;">&#9993;</span>');
+    if (lead.opened_at) engagementIcons.push('<span title="Opened ' + new Date(lead.opened_at).toLocaleDateString() + '" style="color:#3b82f6;">&#128065;</span>');
+    if (lead.clicked_at) engagementIcons.push('<span title="Clicked ' + new Date(lead.clicked_at).toLocaleDateString() + '" style="color:#8b5cf6;">&#128279;</span>');
+    if (lead.replied_at || lead.status === 'replied') engagementIcons.push('<span title="Replied" style="color:#00cc6a;">&#128172;</span>');
+    const engagementStr = engagementIcons.length > 0 ? engagementIcons.join(' ') : '<span style="color:var(--text-tertiary);">—</span>';
+
     return `
       <tr onclick="viewOutreachLead('${lead.id}')" style="cursor:pointer;">
         <td>
-          <div style="font-weight:500;color:var(--text-primary);">${lead.priority ? '<span style="color:#f59e0b;margin-right:4px;" title="Priority">&#9733;</span>' : ''}${lead.contact_name}</div>
-          <div style="font-size:11px;color:var(--text-tertiary);">${lead.company || ''}</div>
+          <div style="font-weight:500;color:var(--text-primary);">${lead.priority ? '<span style="color:#f59e0b;margin-right:4px;" title="Priority">&#9733;</span>' : ''}${escapeHtml(lead.contact_name)}</div>
+          <div style="font-size:11px;color:var(--text-tertiary);">${escapeHtml(lead.company || '')}</div>
         </td>
-        <td style="font-size:12px;color:var(--text-secondary);">${lead.contact_email}</td>
+        <td style="font-size:12px;color:var(--text-secondary);">${escapeHtml(lead.contact_email)}</td>
         <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${sc.bg};color:${sc.fg};">${lead.status}</span></td>
         <td style="font-size:12px;color:var(--text-secondary);">${touchLabels[lead.touch_count] || lead.touch_count}/4</td>
+        <td style="font-size:12px;">${engagementStr}</td>
         <td style="font-size:12px;">${nextStr}</td>
         <td style="font-size:12px;">${aiStatus}</td>
         <td style="font-size:12px;color:var(--text-tertiary);">${timeAgo(lead.created_at)}</td>
@@ -6406,6 +6428,13 @@ function renderOutreachPage() {
         </button>
       </div>
     </div>
+
+    ${isAdmin() ? `
+    <div class="tabs" style="margin-bottom:20px;">
+      <div class="tab ${outreachActiveTab === 'leads' ? 'active' : ''}" onclick="switchOutreachTab('leads', this)">Leads</div>
+      <div class="tab ${outreachActiveTab === 'analytics' ? 'active' : ''}" onclick="switchOutreachTab('analytics', this)">Analytics</div>
+    </div>
+    ` : ''}
 
     <!-- Stats Row -->
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px;">
@@ -6449,6 +6478,7 @@ function renderOutreachPage() {
                 <th>Email</th>
                 <th>Status</th>
                 <th>Touch</th>
+                <th>Engagement</th>
                 <th>Next Follow-up</th>
                 <th>AI Email</th>
                 <th>Added</th>
@@ -6578,35 +6608,41 @@ async function viewOutreachLead(id) {
     const sc = statusColors[lead.status] || statusColors.active;
     const touchLabels = { 1: 'Initial Cold Email', 2: 'Day 3 — Bump', 3: 'Day 7 — Value Add', 4: 'Day 14 — Breakup' };
 
-    const timeline = (lead.emails || []).map(em => `
+    const timeline = (lead.emails || []).map(em => {
+      const engBadges = [];
+      engBadges.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#6b728022;color:#6b7280;">Sent</span>');
+      if (em.opened_at) engBadges.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#3b82f622;color:#3b82f6;" title="Opened ' + new Date(em.opened_at).toLocaleString() + '">Opened</span>');
+      if (em.replied_at) engBadges.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#00cc6a22;color:#00cc6a;" title="Replied ' + new Date(em.replied_at).toLocaleString() + '">Replied</span>');
+      return `
       <div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
-        <div style="width:8px;height:8px;border-radius:50%;background:#00cc6a;margin-top:6px;flex-shrink:0;"></div>
+        <div style="width:8px;height:8px;border-radius:50%;background:${em.replied_at ? '#00cc6a' : em.opened_at ? '#3b82f6' : '#6b7280'};margin-top:6px;flex-shrink:0;"></div>
         <div style="flex:1;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <span style="font-weight:600;font-size:13px;color:var(--text-primary);">${touchLabels[em.touch_number] || 'Touch ' + em.touch_number}</span>
             <span style="font-size:11px;color:var(--text-tertiary);">${new Date(em.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
           </div>
-          <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px;">Subject: ${em.subject}</div>
+          <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px;">Subject: ${escapeHtml(em.subject)}</div>
+          <div style="display:flex;gap:4px;margin-top:4px;">${engBadges.join('')}</div>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
 
     const nextDate = lead.next_followup_at ? new Date(lead.next_followup_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'None';
 
     showModal(`
       <div class="modal-header">
-        <h2 class="modal-title">${lead.contact_name}</h2>
+        <h2 class="modal-title">${escapeHtml(lead.contact_name)}</h2>
         <button class="modal-close" onclick="closeModal()">${icons.x}</button>
       </div>
       <div style="padding:24px;">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
           <div>
             <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Email</div>
-            <div style="font-size:14px;color:var(--text-primary);margin-top:2px;">${lead.contact_email}</div>
+            <div style="font-size:14px;color:var(--text-primary);margin-top:2px;">${escapeHtml(lead.contact_email)}</div>
           </div>
           <div>
             <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Company</div>
-            <div style="font-size:14px;color:var(--text-primary);margin-top:2px;">${lead.company || '—'}</div>
+            <div style="font-size:14px;color:var(--text-primary);margin-top:2px;">${escapeHtml(lead.company || '—')}</div>
           </div>
           <div>
             <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Status</div>
@@ -6618,7 +6654,27 @@ async function viewOutreachLead(id) {
           </div>
         </div>
 
-        ${lead.notes ? `<div style="background:var(--bg-secondary);padding:12px;border-radius:8px;font-size:13px;color:var(--text-secondary);margin-bottom:20px;white-space:pre-wrap;">${lead.notes}</div>` : ''}
+        <!-- Engagement Tracking -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px;">
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Touches</div>
+            <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${lead.touch_count || 0}/4</div>
+          </div>
+          <div style="background:${lead.opened_at ? '#3b82f611' : 'var(--bg-secondary)'};padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Opened</div>
+            <div style="font-size:14px;font-weight:600;color:${lead.opened_at ? '#3b82f6' : 'var(--text-tertiary)'};">${lead.opened_at ? new Date(lead.opened_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
+          </div>
+          <div style="background:${lead.clicked_at ? '#8b5cf611' : 'var(--bg-secondary)'};padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Clicked</div>
+            <div style="font-size:14px;font-weight:600;color:${lead.clicked_at ? '#8b5cf6' : 'var(--text-tertiary)'};">${lead.clicked_at ? new Date(lead.clicked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
+          </div>
+          <div style="background:var(--bg-secondary);padding:10px;border-radius:8px;text-align:center;">
+            <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Score</div>
+            <div style="font-size:20px;font-weight:700;color:${(lead.lead_score || 50) >= 70 ? '#00cc6a' : (lead.lead_score || 50) >= 40 ? '#f59e0b' : 'var(--text-tertiary)'};">${lead.lead_score || '—'}</div>
+          </div>
+        </div>
+
+        ${lead.notes ? `<div style="background:var(--bg-secondary);padding:12px;border-radius:8px;font-size:13px;color:var(--text-secondary);margin-bottom:20px;white-space:pre-wrap;">${escapeHtml(lead.notes)}</div>` : ''}
 
         <h3 style="font-size:14px;margin-bottom:12px;color:var(--text-primary);">Sequence Timeline</h3>
         <div style="margin-bottom:20px;">
@@ -6652,8 +6708,8 @@ async function viewOutreachLead(id) {
           </div>
           ${lead.ai_email_body ? `
             <div style="background:var(--bg-secondary);padding:12px;border-radius:8px;margin-bottom:12px;">
-              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px;">Subject: ${lead.ai_email_subject}</div>
-              <div style="font-size:13px;color:var(--text-secondary);">${lead.ai_email_body}</div>
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px;">Subject: ${escapeHtml(lead.ai_email_subject)}</div>
+              <div style="font-size:13px;color:var(--text-secondary);">${escapeHtml(lead.ai_email_body)}</div>
             </div>
             <div style="display:flex;gap:8px;">
               ${!lead.ai_email_sent_at ? `
@@ -6747,15 +6803,15 @@ async function previewNextFollowup(id) {
       <div style="padding:24px;">
         <div style="margin-bottom:16px;">
           <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px;">To</div>
-          <div style="font-size:14px;color:var(--text-primary);">${preview.to}</div>
+          <div style="font-size:14px;color:var(--text-primary);">${escapeHtml(preview.to)}</div>
         </div>
         <div style="margin-bottom:16px;">
           <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px;">Subject</div>
-          <div style="font-size:14px;color:var(--text-primary);">${preview.subject}</div>
+          <div style="font-size:14px;color:var(--text-primary);">${escapeHtml(preview.subject)}</div>
         </div>
         <div>
           <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;margin-bottom:4px;">Body</div>
-          <div style="background:var(--bg-secondary);padding:16px;border-radius:8px;font-size:13px;color:var(--text-secondary);">${preview.body}</div>
+          <div style="background:var(--bg-secondary);padding:16px;border-radius:8px;font-size:13px;color:var(--text-secondary);">${escapeHtml(preview.body)}</div>
         </div>
         <div style="margin-top:16px;text-align:right;">
           <button class="btn btn-ghost" onclick="closeModal()">Close</button>
@@ -6833,6 +6889,255 @@ async function sendOutreachAiEmail(id) {
   } catch (err) {
     showToast(err.message || 'Failed to send AI email', 'error');
   }
+}
+
+// ============================================================
+// OUTREACH ANALYTICS DASHBOARD
+// ============================================================
+
+function switchOutreachTab(tab, el) {
+  outreachActiveTab = tab;
+  renderMainContent(); // immediately render (shows loading spinner for analytics)
+  if (tab === 'analytics' && !outreachAnalyticsData) {
+    loadOutreachAnalytics();
+  }
+}
+
+async function loadOutreachAnalytics(days) {
+  if (days !== undefined) outreachAnalyticsDays = days;
+  try {
+    const res = await api.get(`/outreach/analytics?days=${outreachAnalyticsDays}`);
+    outreachAnalyticsData = res;
+    if (currentPage === 'outreach') renderMainContent();
+  } catch (err) {
+    showToast(err.message || 'Failed to load outreach analytics', 'error');
+  }
+}
+
+function renderOutreachAnalyticsPage() {
+  const periodButtons = [7, 14, 30, 90].map(d =>
+    `<button class="btn ${outreachAnalyticsDays === d ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="loadOutreachAnalytics(${d})">${d}d</button>`
+  ).join('');
+
+  if (!outreachAnalyticsData) {
+    return `
+      <div class="page-header">
+        <div>
+          <h1>Outreach Sequences</h1>
+          <p class="page-desc">Automated follow-up emails on a 3-touch cadence (Day 3, Day 7, Day 14)</p>
+        </div>
+      </div>
+      <div class="tabs" style="margin-bottom:20px;">
+        <div class="tab" onclick="switchOutreachTab('leads', this)">Leads</div>
+        <div class="tab active" onclick="switchOutreachTab('analytics', this)">Analytics</div>
+      </div>
+      <div class="card" style="padding:40px;text-align:center;">
+        <div class="spinner"></div>
+        <p style="color:var(--text-tertiary);margin-top:12px;">Loading analytics...</p>
+      </div>`;
+  }
+
+  const d = outreachAnalyticsData;
+  const funnel = d.funnel || {};
+  const dailyTrend = d.dailyTrend || [];
+  const byIndustry = (d.byIndustry || []).sort((a, b) => (parseFloat(b.reply_rate) || 0) - (parseFloat(a.reply_rate) || 0));
+  const byTouch = d.byTouch || [];
+  const senderHealth = d.senderHealth || [];
+
+  // Funnel visualization
+  const funnelSteps = [
+    { label: 'Total Leads', key: 'total_leads' },
+    { label: 'Emails Sent', key: 'emails_sent' },
+    { label: 'Opened', key: 'emails_opened' },
+    { label: 'Clicked', key: 'emails_clicked' },
+    { label: 'Replied', key: 'replies_received' },
+    { label: 'Positive', key: 'positive_replies' },
+  ];
+  const maxFunnel = parseInt(funnel.total_leads) || 1;
+  const funnelHtml = funnelSteps.map((step, i) => {
+    const val = parseInt(funnel[step.key]) || 0;
+    const pct = Math.round((val / maxFunnel) * 100);
+    const prevVal = i > 0 ? (parseInt(funnel[funnelSteps[i - 1].key]) || 1) : val;
+    const convPct = i > 0 && prevVal > 0 ? Math.round((val / prevVal) * 100) : 100;
+    const opacity = 1 - (i * 0.12);
+    return `
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:13px;font-weight:500;color:var(--text-primary);">${step.label}</span>
+          <span style="font-size:13px;color:var(--text-tertiary);">${val} ${i > 0 ? `<span style="font-size:11px;color:${convPct >= 50 ? '#00cc6a' : convPct >= 20 ? '#f59e0b' : '#ef4444'};">(${convPct}%)</span>` : ''}</span>
+        </div>
+        <div style="height:24px;background:var(--bg-primary);border-radius:6px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:#00cc6a;opacity:${opacity};border-radius:6px;transition:width 0.4s ease;"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Daily trend chart
+  const maxDaily = Math.max(1, ...dailyTrend.map(d => parseInt(d.sent) || 0));
+  const trendHtml = dailyTrend.length > 0 ? dailyTrend.map(day => {
+    const sent = parseInt(day.sent) || 0;
+    const opened = parseInt(day.opened) || 0;
+    const replied = parseInt(day.replied) || 0;
+    const sentH = Math.round((sent / maxDaily) * 100);
+    const openedH = Math.round((opened / maxDaily) * 100);
+    const repliedH = Math.round((replied / maxDaily) * 100);
+    const dateLabel = new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;" title="${dateLabel}: ${sent} sent, ${opened} opened, ${replied} replied">
+        <div style="display:flex;gap:2px;align-items:flex-end;height:80px;width:100%;">
+          <div style="flex:1;background:#00cc6a;border-radius:2px 2px 0 0;height:${sentH}%;min-height:${sent > 0 ? 2 : 0}px;"></div>
+          <div style="flex:1;background:#3b82f6;border-radius:2px 2px 0 0;height:${openedH}%;min-height:${opened > 0 ? 2 : 0}px;"></div>
+          <div style="flex:1;background:#8b5cf6;border-radius:2px 2px 0 0;height:${repliedH}%;min-height:${replied > 0 ? 2 : 0}px;"></div>
+        </div>
+        <div style="font-size:9px;color:var(--text-tertiary);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${dateLabel}</div>
+      </div>`;
+  }).join('') : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No daily data for this period.</div>';
+
+  // By industry table
+  const industryHtml = byIndustry.length > 0 ? `
+    <div class="table-wrapper" style="border:0;border-radius:0;">
+      <table>
+        <thead>
+          <tr>
+            <th>Industry</th>
+            <th style="text-align:right;">Sent</th>
+            <th style="text-align:right;">Reply Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${byIndustry.map(row => {
+            const rate = parseFloat(row.reply_rate) || 0;
+            const highlight = rate > 5;
+            return `
+              <tr>
+                <td style="font-size:13px;color:var(--text-primary);text-transform:capitalize;">${escapeHtml(row.industry)}</td>
+                <td style="text-align:right;font-size:13px;color:var(--text-secondary);">${row.sent}</td>
+                <td style="text-align:right;font-size:13px;font-weight:${highlight ? '600' : '400'};color:${highlight ? '#00cc6a' : 'var(--text-secondary)'};">${rate}%</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No industry data available.</div>';
+
+  // By touch conversion
+  const touchLabels = { 1: 'Touch 1 (Initial)', 2: 'Touch 2 (Bump)', 3: 'Touch 3 (Value-add)', 4: 'Touch 4 (Breakup)' };
+  const touchHtml = byTouch.length > 0 ? byTouch.map(t => {
+    const rate = parseFloat(t.reply_rate) || 0;
+    const sent = parseInt(t.sent) || 0;
+    const replied = parseInt(t.replied) || 0;
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);">
+        <div>
+          <div style="font-size:13px;font-weight:500;color:var(--text-primary);">${touchLabels[t.touch_number] || 'Touch ' + t.touch_number}</div>
+          <div style="font-size:11px;color:var(--text-tertiary);">${sent} sent / ${replied} replied</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:80px;height:6px;background:var(--bg-primary);border-radius:3px;overflow:hidden;">
+            <div style="height:100%;width:${Math.min(rate, 100)}%;background:#00cc6a;border-radius:3px;"></div>
+          </div>
+          <span style="font-size:14px;font-weight:600;color:${rate > 5 ? '#00cc6a' : 'var(--text-secondary)'};">${rate}%</span>
+        </div>
+      </div>`;
+  }).join('') : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No touch data available.</div>';
+
+  // Sender health cards
+  const senderHtml = senderHealth.length > 0 ? senderHealth.map(s => {
+    const bounce = parseFloat(s.bounce_rate) || 0;
+    const complaint = parseFloat(s.complaint_rate) || 0;
+    let status, statusColor, statusBg;
+    if (bounce > 5 || complaint > 0.5) {
+      status = 'Unhealthy'; statusColor = '#ef4444'; statusBg = '#ef444422';
+    } else if (bounce > 3 || complaint > 0.2) {
+      status = 'Warning'; statusColor = '#f59e0b'; statusBg = '#f59e0b22';
+    } else {
+      status = 'Healthy'; statusColor = '#00cc6a'; statusBg = '#00cc6a22';
+    }
+    return `
+      <div class="card" style="padding:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:500;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${escapeHtml(s.sender_email)}</div>
+          <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;background:${statusBg};color:${statusColor};">${status}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Sent (7d)</div>
+            <div style="font-size:18px;font-weight:600;color:var(--text-primary);">${s.sent_7d}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Bounce</div>
+            <div style="font-size:18px;font-weight:600;color:${bounce > 3 ? '#f59e0b' : 'var(--text-secondary)'};">${bounce}%</div>
+          </div>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Complaints</div>
+            <div style="font-size:18px;font-weight:600;color:${complaint > 0.2 ? '#ef4444' : 'var(--text-secondary)'};">${complaint}%</div>
+          </div>
+        </div>
+      </div>`;
+  }).join('') : '<div class="card" style="padding:20px;text-align:center;color:var(--text-tertiary);font-size:13px;">No sender health data available.</div>';
+
+  return `
+    <div class="page-header">
+      <div>
+        <h1>Outreach Sequences</h1>
+        <p class="page-desc">Automated follow-up emails on a 3-touch cadence (Day 3, Day 7, Day 14)</p>
+      </div>
+    </div>
+
+    <div class="tabs" style="margin-bottom:20px;">
+      <div class="tab" onclick="switchOutreachTab('leads', this)">Leads</div>
+      <div class="tab active" onclick="switchOutreachTab('analytics', this)">Analytics</div>
+    </div>
+
+    <!-- Period Selector -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <div style="font-size:14px;font-weight:500;color:var(--text-secondary);">
+        Showing last ${outreachAnalyticsDays} days
+        <span style="font-size:12px;color:var(--text-tertiary);margin-left:8px;">${d.period ? new Date(d.period.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' — ' + new Date(d.period.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</span>
+      </div>
+      <div style="display:flex;gap:4px;">${periodButtons}</div>
+    </div>
+
+    <!-- Funnel -->
+    <div class="card" style="padding:20px;margin-bottom:20px;">
+      <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:16px;">Conversion Funnel</div>
+      ${funnelHtml}
+    </div>
+
+    <!-- Daily Trend -->
+    <div class="card" style="padding:20px;margin-bottom:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div style="font-size:16px;font-weight:600;color:var(--text-primary);">Daily Activity</div>
+        <div style="display:flex;gap:12px;font-size:11px;">
+          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#00cc6a;"></span> Sent</span>
+          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;"></span> Opened</span>
+          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#8b5cf6;"></span> Replied</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:3px;align-items:flex-end;overflow-x:auto;padding-bottom:4px;">
+        ${trendHtml}
+      </div>
+    </div>
+
+    <!-- Two-column: Industry + Touch -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+      <div class="card" style="padding:20px;">
+        <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:12px;">By Industry</div>
+        ${industryHtml}
+      </div>
+      <div class="card" style="padding:20px;">
+        <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:12px;">By Touch Number</div>
+        ${touchHtml}
+      </div>
+    </div>
+
+    <!-- Sender Health -->
+    <div style="margin-bottom:20px;">
+      <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:12px;">Sender Health</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
+        ${senderHtml}
+      </div>
+    </div>
+  `;
 }
 
 // ============================================================

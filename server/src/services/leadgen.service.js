@@ -24,15 +24,90 @@ function getWarmingLimits() {
     // Days 0-6: conservative post-SPF-fix recovery — 10 per sender × 10 = 100/day
     return { daily: 100, perSender: 10, phase: 'warm-1' };
   } else if (daysSinceLaunch < 14) {
-    // Days 7-13: gradual increase — 13 per sender × 10 = ~125/day
-    return { daily: 125, perSender: 13, phase: 'warm-2' };
+    // Days 7-13: gradual ramp — 20 per sender × 10 = 200/day
+    return { daily: 200, perSender: 20, phase: 'warm-2' };
+  } else if (daysSinceLaunch < 28) {
+    // Days 14-27: near full — 25 per sender × 10 = 250/day
+    return { daily: 250, perSender: 25, phase: 'warm-3' };
   } else {
-    // Day 14+: steady state — 15 per sender × 10 = 150/day
+    // Day 28+: full capacity — 30 per sender × 10 = 300/day
     return {
-      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 150,
-      perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 15,
+      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 300,
+      perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 30,
       phase: 'full',
     };
+  }
+}
+
+// ── Sender health tracking ──��───────────────────────────
+async function trackSend(senderEmail) {
+  try {
+    await dbQuery(
+      `INSERT INTO sender_health (sender_email, date, sent_count)
+       VALUES ($1, CURRENT_DATE, 1)
+       ON CONFLICT (sender_email, date)
+       DO UPDATE SET sent_count = sender_health.sent_count + 1`,
+      [senderEmail]
+    );
+  } catch (_) { /* never break pipeline for tracking */ }
+}
+
+async function trackBounce(senderEmail) {
+  try {
+    await dbQuery(
+      `INSERT INTO sender_health (sender_email, date, bounce_count)
+       VALUES ($1, CURRENT_DATE, 1)
+       ON CONFLICT (sender_email, date)
+       DO UPDATE SET bounce_count = sender_health.bounce_count + 1`,
+      [senderEmail]
+    );
+  } catch (_) { /* never break pipeline for tracking */ }
+}
+
+async function trackComplaint(senderEmail) {
+  try {
+    await dbQuery(
+      `INSERT INTO sender_health (sender_email, date, complaint_count)
+       VALUES ($1, CURRENT_DATE, 1)
+       ON CONFLICT (sender_email, date)
+       DO UPDATE SET complaint_count = sender_health.complaint_count + 1`,
+      [senderEmail]
+    );
+  } catch (_) { /* never break pipeline for tracking */ }
+}
+
+async function getHealthySenders() {
+  try {
+    const { rows } = await dbQuery(
+      `SELECT sender_email,
+              SUM(sent_count) AS total_sent,
+              SUM(bounce_count) AS total_bounces,
+              SUM(complaint_count) AS total_complaints
+       FROM sender_health
+       WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+       GROUP BY sender_email
+       HAVING SUM(sent_count) > 0`
+    );
+    // Build a set of unhealthy senders (bounce rate > 5%)
+    const unhealthy = new Set();
+    for (const row of rows) {
+      const bounceRate = (row.total_bounces || 0) / row.total_sent;
+      const complaintRate = (row.total_complaints || 0) / row.total_sent;
+      if (bounceRate > 0.05 || complaintRate > 0.01) {
+        unhealthy.add(row.sender_email);
+        console.warn(`[LEADGEN] Sender ${row.sender_email} unhealthy — bounce: ${(bounceRate * 100).toFixed(1)}%, complaint: ${(complaintRate * 100).toFixed(1)}%`);
+      }
+    }
+    // Return only healthy senders from the SENDERS array
+    const healthy = SENDERS.filter(s => !unhealthy.has(s.email));
+    if (healthy.length === 0) {
+      console.error('[LEADGEN] ALL senders unhealthy! Using full list as fallback.');
+      return SENDERS;
+    }
+    return healthy;
+  } catch (_) {
+    // If health check fails, return all senders
+    return SENDERS;
   }
 }
 
@@ -327,7 +402,7 @@ async function diagnoseWebsite(url) {
 
 // ── Claude API: Generate Outreach Email ─────────────
 
-async function generateOutreachEmail(lead, diagnosis, onRetry) {
+async function generateOutreachEmail(lead, diagnosis, onRetry, variant) {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
@@ -375,21 +450,30 @@ HARD RULES:
 
 Return JSON: {"subject": "...", "body": "..."}`;
 
+  // A/B variant override: if a specific variant is requested, instruct the AI accordingly
+  let variantInstruction = '';
+  if (variant === 'A') {
+    variantInstruction = '\n\nIMPORTANT: You MUST use FRAMEWORK A ("Insight Lead") for this email. Do NOT use Framework B.';
+  } else if (variant === 'B') {
+    variantInstruction = '\n\nIMPORTANT: You MUST use FRAMEWORK B ("Question Lead") for this email. Do NOT use Framework A.';
+  }
+
   const MAX_RETRIES = 5;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const response = await client.messages.create({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 500,
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: 'user', content: prompt + variantInstruction }],
       });
 
       const text = response.content[0].text;
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]);
+        return { ...parsed, variant: variant || 'unknown' };
       }
-      return { subject: `Quick question about ${lead.business_name}`, body: text };
+      return { subject: `Quick question about ${lead.business_name}`, body: text, variant: variant || 'unknown' };
     } catch (err) {
       const isRetryable = err.message.includes('529') || err.message.includes('overloaded') || err.message.includes('rate') || err.status === 529 || err.status === 429;
       if (isRetryable && attempt < MAX_RETRIES) {
@@ -405,18 +489,40 @@ Return JSON: {"subject": "...", "body": "..."}`;
   }
 }
 
+// ── Add business days (skip weekends) ─────────────────
+function addBusinessDays(from, days) {
+  const date = new Date(from);
+  let added = 0;
+  while (added < days) {
+    date.setDate(date.getDate() + 1);
+    const dow = date.getDay();
+    if (dow !== 0 && dow !== 6) added++;
+  }
+  return date;
+}
+
 // ── Score a lead (higher = more gaps = better prospect) ──
 
 function scoreLead(diagnosis) {
-  let score = 0;
-  if (!diagnosis.has_ssl) score += 3;
-  if (!diagnosis.has_booking_software) score += 2;
-  if (!diagnosis.has_client_portal) score += 2;
-  if (!diagnosis.has_intake_forms) score += 2;
-  if (diagnosis.design_age_estimate === 'outdated') score += 2;
-  if (diagnosis.design_age_estimate === 'unknown') score += 1;
-  if (!diagnosis.has_ssl && !diagnosis.has_booking_software && !diagnosis.has_client_portal) score += 3; // total layup
-  return score;
+  // Guard: if diagnosis has no meaningful properties, return baseline score
+  if (!diagnosis || !('has_ssl' in diagnosis || 'has_booking_software' in diagnosis)) return 0;
+  let score = 50; // base score
+
+  // Website gap signals (positive = more opportunity)
+  if (!diagnosis.has_ssl) score += 5;
+  if (!diagnosis.has_booking_software) score += 12;  // big win — highest value service
+  if (!diagnosis.has_client_portal) score += 10;
+  if (!diagnosis.has_intake_forms) score += 8;
+  if (diagnosis.design_age_estimate === 'outdated') score += 8;
+  if (diagnosis.design_age_estimate === 'unknown') score += 3;
+
+  // Compound bonus: multiple gaps = better prospect
+  const gapCount = [!diagnosis.has_ssl, !diagnosis.has_booking_software, !diagnosis.has_client_portal, !diagnosis.has_intake_forms].filter(Boolean).length;
+  if (gapCount >= 3) score += 10; // 3+ gaps = strong prospect
+  if (gapCount >= 4) score += 5;  // all gaps = total layup
+
+  // Cap at 0-100
+  return Math.max(0, Math.min(100, score));
 }
 
 // ── Send Cold Email ─────────────────────────────────
@@ -446,6 +552,7 @@ async function sendColdEmail(lead, sender) {
       <p>MonkFlow LLC | 1600 Sayles Blvd, Abilene, TX 79605</p>
       <p><a href="${unsubUrl}" style="color: #999;">Unsubscribe</a></p>
     </div>
+    <img src="${(env.apiUrl || 'https://api.getmonkflow.com')}/api/v1/outreach/track/open/${lead.unsubscribe_token}" width="1" height="1" style="display:none" alt="" />
   `;
 
   // Format the from address: "Display Name <email>"
@@ -471,7 +578,47 @@ async function sendColdEmail(lead, sender) {
     });
 
     const emailId = result?.data?.id || result?.id || null;
+    if (!emailId) {
+      console.warn(`[LEADGEN] No email ID returned from Resend for ${lead.email} — follow-up threading will be broken`);
+    }
     await leadModel.update(lead.id, { status: 'sent', sent_at: new Date(), resend_email_id: emailId });
+
+    // ── Bridge: push into outreach_leads for automated follow-up sequence ──
+    try {
+      const nextFollowup = addBusinessDays(new Date(), 3); // Touch 2 in 3 business days
+      await dbQuery(
+        `INSERT INTO outreach_leads
+          (contact_name, contact_email, company, website_url, source_lead_id,
+           status, touch_count, last_sent_at, next_followup_at,
+           original_message_id, original_subject, ai_email_subject,
+           unsubscribe_token, industry, diagnosis_scores, original_email_body, lead_score,
+           email_variant)
+         VALUES ($1,$2,$3,$4,$5, 'active',$6,NOW(),$7, $8,$9,$10, $11,$12,$13,$14,$15, $16)
+         ON CONFLICT (contact_email) DO NOTHING`,
+        [
+          lead.business_name,                     // contact_name
+          lead.email,                             // contact_email
+          lead.business_name,                     // company
+          lead.website_url,                       // website_url
+          lead.id,                                // source_lead_id
+          1,                                      // touch_count (Touch 1 just sent)
+          nextFollowup,                           // next_followup_at
+          emailId,                                // original_message_id (Resend ID)
+          lead.outreach_subject,                  // original_subject
+          lead.outreach_subject,                  // ai_email_subject
+          lead.unsubscribe_token,                 // unsubscribe_token
+          lead.business_type || null,             // industry
+          lead.diagnosis_json ? JSON.stringify(lead.diagnosis_json) : null, // diagnosis_scores
+          lead.outreach_body || null,             // original_email_body
+          scoreLead(lead.diagnosis_json || {}),   // lead_score
+          lead.email_variant || 'A',              // email_variant (A/B test)
+        ]
+      );
+    } catch (bridgeErr) {
+      // Never break the pipeline for bridge failures — log and continue
+      console.warn(`[LEADGEN] Bridge insert failed for ${lead.email}:`, bridgeErr.message);
+    }
+
     return { success: true, emailId };
   } catch (err) {
     console.error(`[LEADGEN] Failed to send to ${lead.email}:`, err.message);
@@ -529,21 +676,22 @@ async function runDailyLeadGeneration() {
   const resumeWarming = getWarmingLimits();
   try {
     const { rows: unsentLeads } = await dbQuery(
-      `SELECT * FROM leads WHERE status = 'email_generated' AND outreach_subject IS NOT NULL AND outreach_body IS NOT NULL ORDER BY created_at LIMIT $1`,
+      `SELECT * FROM leads WHERE status = 'email_generated' AND outreach_subject IS NOT NULL AND outreach_body IS NOT NULL ORDER BY COALESCE(lead_score, 0) DESC, created_at LIMIT $1`,
       [resumeWarming.daily]
     );
     if (unsentLeads.length > 0) {
       console.log(`[LEADGEN] Found ${unsentLeads.length} unsent leads from previous run — sending now (warming phase: ${resumeWarming.phase})`);
       await logExec('info', `Resuming ${unsentLeads.length} unsent leads from previous run`, { count: unsentLeads.length });
-      const senderCounts = new Map(SENDERS.map(s => [s.email, 0]));
+      const resumeSenders = await getHealthySenders();
+      const senderCounts = new Map(resumeSenders.map(s => [s.email, 0]));
       let senderIdx = 0;
       for (const lead of unsentLeads) {
         let sender = null;
-        for (let j = 0; j < SENDERS.length; j++) {
-          const candidate = SENDERS[(senderIdx + j) % SENDERS.length];
+        for (let j = 0; j < resumeSenders.length; j++) {
+          const candidate = resumeSenders[(senderIdx + j) % resumeSenders.length];
           if (senderCounts.get(candidate.email) < resumeWarming.perSender) {
             sender = candidate;
-            senderIdx = (senderIdx + j + 1) % SENDERS.length;
+            senderIdx = (senderIdx + j + 1) % resumeSenders.length;
             break;
           }
         }
@@ -552,6 +700,7 @@ async function runDailyLeadGeneration() {
         if (result.success) {
           stats.emailed++;
           senderCounts.set(sender.email, senderCounts.get(sender.email) + 1);
+          trackSend(sender.email);
         } else {
           stats.errors++;
         }
@@ -670,7 +819,8 @@ async function runDailyLeadGeneration() {
         ...diagnosis,
         diagnosis_json: diagnosis,
         status: 'diagnosed',
-        priority: (() => { const s = scoreLead(diagnosis); return s >= 7 ? 'HIGH' : s >= 4 ? 'MEDIUM' : 'LOW'; })(),
+        lead_score: scoreLead(diagnosis),
+        priority: (() => { const s = scoreLead(diagnosis); return s >= 75 ? 'HIGH' : s >= 60 ? 'MEDIUM' : 'LOW'; })(),
         batch_date: batchDate,
         search_query: raw.searchQuery,
       };
@@ -713,14 +863,52 @@ async function runDailyLeadGeneration() {
   qualifiedLeads.sort((a, b) => scoreLead(b.diagnosis_json) - scoreLead(a.diagnosis_json));
   const toEmail = qualifiedLeads.slice(0, warming.daily);
 
-  // 5. Generate personalized outreach via Claude API
+  // 5. Generate personalized outreach via Claude API (with A/B variant assignment)
+  // Check current A/B counts to determine split ratio
+  let abCounts = { A: 0, B: 0 };
+  try {
+    const { rows: abRows } = await dbQuery(
+      `SELECT email_variant, COUNT(*)::int AS cnt FROM leads WHERE email_variant IS NOT NULL GROUP BY email_variant`
+    );
+    for (const row of abRows) abCounts[row.email_variant] = row.cnt;
+  } catch (_) { /* default to 50/50 if table not migrated yet */ }
+
+  // After 500 sends per variant, auto-promote the winner (80/20 split)
+  let abWinner = null;
+  if (abCounts.A >= 500 && abCounts.B >= 500) {
+    try {
+      const { rows: abStats } = await dbQuery(
+        `SELECT email_variant,
+                COUNT(*) FILTER (WHERE status = 'replied' OR replied_at IS NOT NULL)::numeric / NULLIF(COUNT(*), 0) AS reply_rate
+         FROM outreach_leads
+         WHERE email_variant IN ('A', 'B') AND touch_count >= 1
+         GROUP BY email_variant`
+      );
+      if (abStats.length === 2) {
+        const rateA = abStats.find(r => r.email_variant === 'A')?.reply_rate || 0;
+        const rateB = abStats.find(r => r.email_variant === 'B')?.reply_rate || 0;
+        abWinner = parseFloat(rateA) >= parseFloat(rateB) ? 'A' : 'B';
+        console.log(`[LEADGEN] A/B winner: ${abWinner} (A=${(rateA * 100).toFixed(1)}%, B=${(rateB * 100).toFixed(1)}%)`);
+      }
+    } catch (_) { /* no winner yet */ }
+  }
+
   await logExec('info', `Email generation starting for ${toEmail.length} leads`, { leadCount: toEmail.length });
   for (const lead of toEmail) {
     try {
+      // Assign A/B variant: 50/50 split, or 80/20 if we have a winner
+      let variant;
+      if (abWinner) {
+        variant = Math.random() < 0.8 ? abWinner : (abWinner === 'A' ? 'B' : 'A');
+      } else {
+        variant = Math.random() < 0.5 ? 'A' : 'B';
+      }
+      lead.email_variant = variant;
+
       const { subject, body } = await generateOutreachEmail(lead, lead.diagnosis_json, (attempt, maxRetries, errMsg) => {
         logExec('warn', `Claude API retry attempt ${attempt}/${maxRetries}: ${errMsg}`, { attempt, maxRetries, email: lead.email, error: errMsg });
-      });
-      await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated' });
+      }, variant);
+      await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated', email_variant: variant });
       lead.outreach_subject = subject;
       lead.outreach_body = body;
       stats.emailsGenerated++;
@@ -732,19 +920,21 @@ async function runDailyLeadGeneration() {
     await sleep(500);
   }
 
-  // 6. Send emails — distribute round-robin across senders (warming-aware per-sender limit)
-  const senderCounts = new Map(SENDERS.map(s => [s.email, 0]));
+  // 6. Send emails — distribute round-robin across healthy senders (warming-aware per-sender limit)
+  const healthySenders = await getHealthySenders();
+  console.log(`[LEADGEN] Using ${healthySenders.length}/${SENDERS.length} healthy senders`);
+  const senderCounts = new Map(healthySenders.map(s => [s.email, 0]));
   const readyLeads = toEmail.filter(l => l.outreach_subject && l.outreach_body);
   let senderIdx = 0;
 
   for (let i = 0; i < readyLeads.length; i++) {
     // Find next available sender (one that hasn't hit the per-sender limit)
     let sender = null;
-    for (let j = 0; j < SENDERS.length; j++) {
-      const candidate = SENDERS[(senderIdx + j) % SENDERS.length];
+    for (let j = 0; j < healthySenders.length; j++) {
+      const candidate = healthySenders[(senderIdx + j) % healthySenders.length];
       if (senderCounts.get(candidate.email) < warming.perSender) {
         sender = candidate;
-        senderIdx = (senderIdx + j + 1) % SENDERS.length;
+        senderIdx = (senderIdx + j + 1) % healthySenders.length;
         break;
       }
     }
@@ -754,6 +944,7 @@ async function runDailyLeadGeneration() {
     if (result.success) {
       stats.emailed++;
       senderCounts.set(sender.email, senderCounts.get(sender.email) + 1);
+      trackSend(sender.email); // Track for health monitoring (fire-and-forget)
     } else {
       stats.errors++;
     }
@@ -874,4 +1065,4 @@ async function sendOwnerSummary(batchDate, stats, leads) {
   });
 }
 
-module.exports = { runDailyLeadGeneration, diagnoseWebsite, generateOutreachEmail, searchSerpAPI };
+module.exports = { runDailyLeadGeneration, diagnoseWebsite, generateOutreachEmail, searchSerpAPI, trackSend, trackBounce, trackComplaint, getHealthySenders, getWarmingLimits };

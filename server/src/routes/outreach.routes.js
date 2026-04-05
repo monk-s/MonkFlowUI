@@ -5,10 +5,19 @@ const { authenticate } = require('../middleware/auth');
 // Resend bounce/complaint webhook — no auth (verified by Resend)
 router.post('/webhook/resend', ctrl.handleResendWebhook);
 
+// Inbound reply webhook — no auth (called by email forwarding services)
+router.post('/webhook/inbound', ctrl.handleInboundReply);
+
+// Open/click tracking — no auth (called by email clients)
+router.get('/track/open/:emailId', ctrl.trackOpen);
+router.get('/track/click/:emailId', ctrl.trackClick);
+
 // All other outreach routes require auth
 router.use(authenticate);
 
 router.get('/stats', ctrl.getStats);
+router.get('/analytics', ctrl.getAnalytics);
+router.get('/ab-results', ctrl.getAbResults);
 router.get('/', ctrl.getLeads);
 router.post('/', ctrl.createLead);
 router.post('/process', ctrl.processDueFollowups);
@@ -16,6 +25,7 @@ router.post('/bulk-import', ctrl.bulkImport);
 router.post('/generate-all', ctrl.generateAllAiEmails);
 
 router.get('/:id', ctrl.getLead);
+router.get('/:id/timeline', ctrl.getLeadTimeline);
 router.put('/:id', ctrl.updateLead);
 router.delete('/:id', ctrl.deleteLead);
 router.post('/:id/mark-reply', ctrl.markReply);

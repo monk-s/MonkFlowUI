@@ -15,6 +15,7 @@ function start() {
       const { query } = require('../config/database');
       const { sendEmail } = require('./email.service');
       const env = require('../config/env');
+      const { generateFollowup } = require('./outreach-ai.service');
 
       // OOO detection patterns
       const OOO_PATTERNS = [
@@ -53,10 +54,10 @@ function start() {
         }
       }
 
+      // Static fallback templates (used when AI generation fails)
       function getFollowupTemplate(touchNumber, lead) {
         const firstName = (lead.contact_name || '').split(' ')[0] || 'there';
         const company = lead.company ? ` at ${lead.company}` : '';
-        // Use the original subject from touch 1 for proper threading
         const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';
         const reSubject = `Re: ${origSubject}`;
 
@@ -83,7 +84,28 @@ function start() {
         }
       }
 
-      // Get due leads (include threading data for proper In-Reply-To headers)
+      // Format AI-generated follow-up body into HTML with unsubscribe footer
+      function formatFollowupHtml(body, lead) {
+        const unsubToken = lead.unsubscribe_token;
+        const unsubUrl = unsubToken ? `${env.frontendUrl || 'https://getmonkflow.com'}/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
+        const unsubFooter = unsubUrl
+          ? `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`
+          : '';
+
+        // Tracking pixel (uses unsubscribe_token as stable ID, looked up in /track/open endpoint)
+        const apiBase = env.apiUrl || 'https://api.getmonkflow.com';
+        const trackingPixel = lead.unsubscribe_token
+          ? `<img src="${apiBase}/api/v1/outreach/track/open/${lead.unsubscribe_token}" width="1" height="1" style="display:none" alt="" />`
+          : '';
+
+        const htmlBody = `<div style="font-family:sans-serif;max-width:600px;">${body.split('\n').map(line =>
+          line.trim() ? `<p style="margin:0 0 12px;">${line}</p>` : ''
+        ).join('')}</div>${unsubFooter}${trackingPixel}`;
+
+        return htmlBody;
+      }
+
+      // Get due leads (include threading data + metadata for AI personalization)
       const { rows: dueLeads } = await query(
         `SELECT ol.*,
                 (SELECT gmail_message_id FROM outreach_emails WHERE lead_id = ol.id ORDER BY touch_number ASC LIMIT 1) AS first_message_id,
@@ -92,10 +114,10 @@ function start() {
          WHERE ol.status = 'active'
            AND ol.next_followup_at <= NOW()
            AND ol.touch_count < 4
-         ORDER BY ol.next_followup_at ASC`
+         ORDER BY COALESCE(ol.lead_score, 0) DESC, ol.next_followup_at ASC`
       );
 
-      let sent = 0, completed = 0, errors = 0;
+      let sent = 0, completed = 0, errors = 0, aiGenerated = 0;
 
       for (const lead of dueLeads) {
         // Populate original_subject from DB if not yet set on the row
@@ -104,7 +126,22 @@ function start() {
         }
 
         const nextTouch = lead.touch_count + 1;
-        const template = getFollowupTemplate(nextTouch, lead);
+
+        // Try AI-personalized follow-up first, fall back to static templates
+        let template;
+        try {
+          const aiResult = await generateFollowup(lead, nextTouch);
+          template = {
+            subject: aiResult.subject,
+            body: formatFollowupHtml(aiResult.body, lead),
+          };
+          aiGenerated++;
+          // Rate limit AI calls — 1.5s delay between
+          await new Promise(r => setTimeout(r, 1500));
+        } catch (aiErr) {
+          console.warn(`[OUTREACH] AI follow-up failed for ${lead.contact_email}, using static template:`, aiErr.message);
+          template = getFollowupTemplate(nextTouch, lead);
+        }
 
         if (!template) {
           await query(
@@ -163,10 +200,19 @@ function start() {
           );
 
           const nextFollowup = getNextFollowupDate(nextTouch);
-          await query(
-            `UPDATE outreach_leads SET touch_count = $1, last_sent_at = NOW(), next_followup_at = $2, updated_at = NOW() WHERE id = $3`,
-            [nextTouch, nextFollowup, lead.id]
-          );
+          if (nextTouch >= 4) {
+            // Sequence complete after touch 4 — close the lead
+            await query(
+              `UPDATE outreach_leads SET touch_count = $1, last_sent_at = NOW(), next_followup_at = NULL, status = 'closed', updated_at = NOW() WHERE id = $2`,
+              [nextTouch, lead.id]
+            );
+            completed++;
+          } else {
+            await query(
+              `UPDATE outreach_leads SET touch_count = $1, last_sent_at = NOW(), next_followup_at = $2, updated_at = NOW() WHERE id = $3`,
+              [nextTouch, nextFollowup, lead.id]
+            );
+          }
 
           sent++;
         } catch (err) {
@@ -175,7 +221,7 @@ function start() {
         }
       }
 
-      console.log(`[OUTREACH] Done: ${sent} sent, ${completed} completed, ${errors} errors`);
+      console.log(`[OUTREACH] Done: ${sent} sent (${aiGenerated} AI-generated), ${completed} completed, ${errors} errors`);
     } catch (err) {
       console.error('[OUTREACH] Cron FAILED:', err.message, err.stack);
     }

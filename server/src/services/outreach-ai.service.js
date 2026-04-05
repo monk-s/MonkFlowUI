@@ -152,7 +152,7 @@ OUTPUT FORMAT: Return valid JSON only, no markdown:
 
 The body should be plain text with \\n for line breaks (will be converted to HTML for sending).`;
 
-async function generateEmailForLead(lead, websiteAnalysis) {
+async function generateEmailForLead(lead, websiteAnalysis, variant) {
   if (!env.anthropicApiKey) {
     throw new Error('AI email generation unavailable: Anthropic API key not configured. Set ANTHROPIC_API_KEY in environment variables.');
   }
@@ -161,7 +161,7 @@ async function generateEmailForLead(lead, websiteAnalysis) {
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
   const firstName = (lead.contact_name || '').split(' ')[0] || 'there';
-  const userPrompt = `Write a personalized cold email for this prospect:
+  let userPrompt = `Write a personalized cold email for this prospect:
 
 Name: ${lead.contact_name}
 Email: ${lead.contact_email}
@@ -169,6 +169,13 @@ Company: ${lead.company || 'Unknown'}
 Website Analysis: ${websiteAnalysis}
 
 Address them as "${firstName}".`;
+
+  // A/B variant override: instruct the AI to use a specific framework
+  if (variant === 'A') {
+    userPrompt += '\n\nIMPORTANT: You MUST use FRAMEWORK A ("Insight Lead") for this email. Do NOT use Framework B.';
+  } else if (variant === 'B') {
+    userPrompt += '\n\nIMPORTANT: You MUST use FRAMEWORK B ("Question Lead") for this email. Do NOT use Framework A.';
+  }
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-20250514',
@@ -179,18 +186,25 @@ Address them as "${firstName}".`;
   });
 
   const text = response.content[0]?.text || '';
+  // If no variant specified, the AI picks randomly — label as unknown to avoid polluting A/B data
+  const usedVariant = variant || 'unknown';
 
   // Parse JSON from response
   try {
     // Try direct parse first
     const parsed = JSON.parse(text);
-    return { subject: parsed.subject, body: parsed.body };
+    if (!parsed.subject || !parsed.body) throw new Error('Missing subject or body');
+    return { subject: parsed.subject, body: parsed.body, variant: usedVariant };
   } catch {
     // Try extracting JSON from markdown code block
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      return { subject: parsed.subject, body: parsed.body };
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.subject && parsed.body) {
+          return { subject: parsed.subject, body: parsed.body, variant: usedVariant };
+        }
+      } catch { /* fall through */ }
     }
     throw new Error('Failed to parse AI response as JSON');
   }
@@ -316,6 +330,108 @@ async function sendAiEmail(leadId) {
   );
 
   return { sent: true, to: lead.contact_email };
+}
+
+// ── AI follow-up generator (for touches 2-4) ─────────────────
+
+const FOLLOWUP_SYSTEM_PROMPT = `You are writing a follow-up email for Nathan, who runs MonkFlow — a dev agency that builds custom automation tools, client portals, and workflow software for SMBs.
+
+This is a FOLLOW-UP email in an existing thread. The prospect received a first email and hasn't replied yet.
+
+CASE STUDIES (pick the one closest to this prospect's industry):
+${CASE_STUDIES.map((cs, i) => `${i + 1}. ${cs.name} (${cs.industry}): ${cs.what}. Result: ${cs.result}. Detail: ${cs.detail}.`).join('\n')}
+
+HARD RULES:
+- Under 60 words. 2-3 short paragraphs max.
+- NEVER start with "I" — start with value or a question.
+- NEVER use "following up", "circling back", "checking in", "bumping this", "just wanted to".
+- Be conversational, not salesy. Sound like a real person continuing a conversation.
+- No sign-off block — just "Nathan".
+- Output valid JSON only: {"subject": "...", "body": "..."}
+- Body is plain text with \\n for line breaks.`;
+
+async function generateFollowup(lead, touchNumber) {
+  if (!env.anthropicApiKey) {
+    throw new Error('AI follow-up unavailable: Anthropic API key not configured.');
+  }
+
+  const Anthropic = require('@anthropic-ai/sdk');
+  const client = new Anthropic({ apiKey: env.anthropicApiKey });
+
+  const firstName = (lead.contact_name || '').split(' ')[0] || 'there';
+  const company = lead.company || '';
+  const industry = lead.industry || 'small business';
+  const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';
+
+  // Build context about the lead's website issues
+  let diagnosisContext = '';
+  if (lead.diagnosis_scores) {
+    const d = typeof lead.diagnosis_scores === 'string' ? JSON.parse(lead.diagnosis_scores) : lead.diagnosis_scores;
+    const gaps = [];
+    if (!d.has_ssl) gaps.push('no SSL');
+    if (!d.has_booking_software) gaps.push('no online booking');
+    if (!d.has_client_portal) gaps.push('no client portal');
+    if (!d.has_intake_forms) gaps.push('no digital intake forms');
+    if (d.design_age_estimate === 'outdated') gaps.push('outdated website design');
+    if (gaps.length) diagnosisContext = `Website gaps identified: ${gaps.join(', ')}.`;
+  }
+
+  let touchInstruction;
+  switch (touchNumber) {
+    case 2:
+      touchInstruction = `TOUCH 2 — Value proof. Share a specific, concrete result from the most relevant case study. Make it feel like you're sharing something useful, not selling. End with a soft question.
+Subject: Use "Re: ${origSubject}" for email threading.`;
+      break;
+    case 3:
+      touchInstruction = `TOUCH 3 — Free value offer. Offer a specific, useful insight about THEIR business based on their website gaps. Position it as genuinely helpful with no strings attached.
+Subject: Create a NEW short subject line (2-4 words) — something like "${company || firstName} + automation" or a reference to their specific gap.`;
+      break;
+    case 4:
+      touchInstruction = `TOUCH 4 — Graceful breakup. Acknowledge the timing may not be right. Leave the door open. Be genuinely warm and wish them well.
+Subject: Use "Re: ${origSubject}" for email threading.`;
+      break;
+    default:
+      throw new Error(`Invalid touch number: ${touchNumber}`);
+  }
+
+  const userPrompt = `Write follow-up email #${touchNumber} for this prospect:
+
+Name: ${firstName}
+Company: ${company}
+Industry: ${industry}
+${diagnosisContext}
+
+Original email subject: "${origSubject}"
+${lead.original_email_body ? `Original email body summary: The first email mentioned their specific automation opportunities based on their website analysis.` : ''}
+
+${touchInstruction}`;
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 512,
+    temperature: 0.7,
+    system: FOLLOWUP_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userPrompt }],
+  });
+
+  const text = response.content[0]?.text || '';
+
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed.subject || !parsed.body) throw new Error('Missing subject or body');
+    return { subject: parsed.subject, body: parsed.body };
+  } catch {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.subject && parsed.body) {
+          return { subject: parsed.subject, body: parsed.body };
+        }
+      } catch { /* fall through */ }
+    }
+    throw new Error('Failed to parse AI follow-up response as JSON');
+  }
 }
 
 // ── Email verification ─────────────────────────────────────
@@ -514,5 +630,6 @@ module.exports = {
   sendAiEmail,
   verifyEmail,
   generateEmailForLead,
+  generateFollowup,
   CASE_STUDIES,
 };
