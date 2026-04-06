@@ -614,6 +614,9 @@ function showApp() {
   if (!localStorage.getItem('onboarding_completed')) {
     setTimeout(() => showOnboarding(), 800);
   }
+
+  // Check for hash routes (e.g., #schedule) — works for both logged-in and logged-out users
+  handleHashRoute();
 }
 
 function showOnboarding() {
