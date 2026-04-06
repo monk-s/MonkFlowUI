@@ -243,6 +243,11 @@ function extractEmails(html) {
       || lower.startsWith('test@') || lower.startsWith('info@example')
       || lower.includes('@domain.com') || lower.includes('@email.com')
       || lower.includes('@yoursite') || lower.includes('@yourdomain')) return false;
+    // Filter obvious non-personal / directory addresses (these still get extracted
+    // but will be deprioritized or blocked by verifyEmail — filter the worst here)
+    if (lower.startsWith('directory@') || lower.startsWith('webmaster@')
+      || lower.startsWith('abuse@') || lower.startsWith('spam@')
+      || lower.startsWith('hostmaster@') || lower.startsWith('root@')) return false;
     // Filter large institutions (universities, hospitals, government)
     if (lower.endsWith('.edu') || lower.endsWith('.gov') || lower.endsWith('.mil')
       || lower.includes('ethicspoint.com') || lower.includes('hotline')) return false;
@@ -251,6 +256,65 @@ function extractEmails(html) {
     return true;
   });
   return filtered;
+}
+
+// ── Person name extraction from HTML ──────────────────────────
+// Tries to find an actual human name from the page content (attorney profile pages,
+// about pages, meta tags, etc.) rather than using the page title as contact_name.
+
+function extractPersonName(html, pageTitle) {
+  // 1. Try <meta name="author"> or og:title on attorney profile pages
+  const metaAuthor = html.match(/<meta\s[^>]*name=["']author["'][^>]*content=["']([^"']+)["']/i);
+  if (metaAuthor) {
+    const name = metaAuthor[1].trim();
+    if (looksLikePersonName(name)) return name;
+  }
+
+  // 2. Try <h1> text — attorney/staff profile pages usually have the name as h1
+  const h1Match = html.match(/<h1[^>]*>([^<]{2,60})<\/h1>/i);
+  if (h1Match) {
+    const name = h1Match[1].replace(/<[^>]*>/g, '').trim();
+    if (looksLikePersonName(name)) return name;
+  }
+
+  // 3. Try structured data (JSON-LD) for Person type
+  const jsonLdMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || [];
+  for (const block of jsonLdMatches) {
+    try {
+      const content = block.replace(/<\/?script[^>]*>/gi, '');
+      const data = JSON.parse(content);
+      const items = Array.isArray(data) ? data : [data];
+      for (const item of items) {
+        if (item['@type'] === 'Person' && item.name && looksLikePersonName(item.name)) {
+          return item.name.trim();
+        }
+      }
+    } catch { /* invalid JSON-LD */ }
+  }
+
+  // 4. Try the page title itself — sometimes it IS a person name (e.g. "John Smith | Law Firm")
+  const cleanTitle = pageTitle.replace(/\s*[\|–—:,].*/g, '').trim();
+  if (looksLikePersonName(cleanTitle)) return cleanTitle;
+
+  // 5. No person name found — return null (caller falls back to business name)
+  return null;
+}
+
+function looksLikePersonName(str) {
+  if (!str || str.length < 4 || str.length > 50) return false;
+  // Must have at least 2 words (first + last name)
+  const words = str.trim().split(/\s+/);
+  if (words.length < 2 || words.length > 5) return false;
+  // Each word should start with uppercase (names are capitalized)
+  const allCapitalized = words.every(w => /^[A-Z][a-z]/.test(w) || /^[A-Z]\.?$/.test(w));
+  if (!allCapitalized) return false;
+  // Reject if it contains business keywords
+  const bizWords = /\b(llc|llp|inc|corp|p\.?c\.?|pllc|group|associates|firm|law|legal|office|services|solutions|company|practice|dental|chiropractic|accounting|consultants?|advisors?|partners?|attorneys?|cpas?)\b/i;
+  if (bizWords.test(str)) return false;
+  // Reject locations (city names that got through)
+  const locationWords = /\b(city|county|north|south|east|west|new york|los angeles|san francisco|chicago|houston|phoenix|salt lake|las vegas|charleston)\b/i;
+  if (locationWords.test(str)) return false;
+  return true;
 }
 
 // ── Google Search (supports both SearchAPI.io and SerpAPI.com) ──
@@ -363,6 +427,11 @@ async function diagnoseWebsite(url) {
 
     // Extract emails from main page
     diagnosis.emails.push(...extractEmails(mainPage.html));
+
+    // Store raw HTML + title for person name extraction (not persisted to DB)
+    diagnosis._rawHtml = mainPage.html;
+    const titleMatch = mainPage.html.match(/<title[^>]*>([^<]{1,200})<\/title>/i);
+    diagnosis._pageTitle = titleMatch ? titleMatch[1].trim() : '';
 
     // Try /contact page for more emails
     try {
@@ -597,9 +666,9 @@ async function sendColdEmail(lead, sender) {
          VALUES ($1,$2,$3,$4,$5, 'active',$6,NOW(),$7, $8,$9,$10, $11,$12,$13,$14,$15, $16, $17)
          ON CONFLICT (contact_email) DO NOTHING`,
         [
-          lead.business_name,                     // contact_name
+          lead.contact_person || lead.business_name, // contact_name (prefer real person name)
           lead.email,                             // contact_email
-          lead.business_name,                     // company
+          lead.business_name,                     // company (always the business name)
           lead.website_url,                       // website_url
           lead.id,                                // source_lead_id
           1,                                      // touch_count (Touch 1 just sent)
@@ -789,8 +858,16 @@ async function runDailyLeadGeneration() {
         diagnosis.emails = [...new Set([...diagnosis.emails, ...raw.snippetEmails])];
       }
 
-      // Need at least one email
-      const bestEmail = diagnosis.emails[0];
+      // Need at least one email — prefer personal emails over generic role addresses
+      const ROLE_PREFIXES = /^(info|support|contact|admin|office|sales|help|billing|legal|hr|marketing|hello|general|team|directory|reception|inquiries|enquiries|careers|jobs|media|press|service|feedback|accounts|mail|staff)@/i;
+      const sortedEmails = [...diagnosis.emails].sort((a, b) => {
+        const aIsRole = ROLE_PREFIXES.test(a);
+        const bIsRole = ROLE_PREFIXES.test(b);
+        if (aIsRole && !bIsRole) return 1;   // personal emails first
+        if (!aIsRole && bIsRole) return -1;
+        return 0;                             // preserve original order otherwise
+      });
+      const bestEmail = sortedEmails[0];
       if (!bestEmail) continue;
 
       // Verify email before adding (pattern + MX check + domain suppression)
@@ -809,8 +886,19 @@ async function runDailyLeadGeneration() {
       // Parse city/state
       const [cityName, stateCode] = raw.city.split(/\s+(?=[A-Z]{2}$)/);
 
+      // Try to extract a real person name from the page HTML (for personalized outreach)
+      const businessName = raw.title.replace(/\s*[\|–—].*$/, '').trim();
+      const personName = diagnosis._rawHtml
+        ? extractPersonName(diagnosis._rawHtml, diagnosis._pageTitle || raw.title)
+        : null;
+
+      // Clean up internal fields before persisting
+      delete diagnosis._rawHtml;
+      delete diagnosis._pageTitle;
+
       const lead = {
-        business_name: raw.title.replace(/\s*[\|–—].*$/, '').trim(),
+        business_name: businessName,
+        contact_person: personName, // actual person name (may be null)
         business_type: raw.firmType,
         city: cityName,
         state: stateCode,

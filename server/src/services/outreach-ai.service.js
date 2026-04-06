@@ -452,6 +452,13 @@ const BAD_PATTERNS = [
   /^insurers@/i, // Generic role addresses that bounce
   /^[A-Z][a-z]+[A-Z][a-z]+[A-Z]/,  // CamelCase garbage like "WheelerDwheeler"
   /\.\./,      // Double dots anywhere
+  // ── Role-based addresses (high bounce risk, not real people) ──
+  /^info@/i, /^support@/i, /^contact@/i, /^admin@/i, /^office@/i,
+  /^sales@/i, /^help@/i, /^billing@/i, /^legal@/i, /^hr@/i,
+  /^marketing@/i, /^hello@/i, /^general@/i, /^team@/i,
+  /^directory@/i, /^reception@/i, /^inquiries@/i, /^enquiries@/i,
+  /^careers@/i, /^jobs@/i, /^media@/i, /^press@/i, /^service@/i,
+  /^feedback@/i, /^accounts@/i, /^mail@/i, /^staff@/i,
 ];
 
 // TLDs that are almost always garbage from bad scraping
