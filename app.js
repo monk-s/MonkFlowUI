@@ -108,8 +108,10 @@ const api = {
   },
   get(path) { return this.request('GET', path); },
   post(path, body) { return this.request('POST', path, body); },
+  put(path, body) { return this.request('PUT', path, body); },
   patch(path, body) { return this.request('PATCH', path, body); },
   del(path, body) { return this.request('DELETE', path, body); },
+  delete(path, body) { return this.request('DELETE', path, body); },
 };
 
 // ── State ──────────────────────────────────────────────
@@ -7219,11 +7221,11 @@ function renderStonkBotPage() {
     </div>`;
   }
 
-  const { status, account, positions, trades, pnl, signals } = stonkBotData;
-  const isRunning = status.status === 'running';
-  const isDryRun = status.dryRun;
-  const summary = pnl.summary || {};
-  const dailyPnl = (pnl.daily || []).reverse().slice(-30);
+  const { status = {}, account = {}, positions = [], trades = [], pnl = {}, signals = [] } = stonkBotData || {};
+  const isRunning = status?.status === 'running';
+  const isDryRun = status?.dryRun;
+  const summary = pnl?.summary || {};
+  const dailyPnl = (pnl?.daily || []).reverse().slice(-30);
 
   // Calculate today's P&L
   const todayPnl = dailyPnl.length > 0 ? dailyPnl[dailyPnl.length - 1] : null;
@@ -7257,9 +7259,9 @@ function renderStonkBotPage() {
     return `<tr>
       <td style="font-weight:600;">${p.symbol}</td>
       <td>${p.qty}</td>
-      <td>$${p.avgEntryPrice.toFixed(2)}</td>
-      <td>$${p.currentPrice.toFixed(2)}</td>
-      <td style="color:${plColor};font-weight:600;">${plSign}$${p.unrealizedPl.toFixed(2)} (${plSign}${(p.unrealizedPlpc * 100).toFixed(1)}%)</td>
+      <td>$${(p.avgEntryPrice || 0).toFixed(2)}</td>
+      <td>$${(p.currentPrice || 0).toFixed(2)}</td>
+      <td style="color:${plColor};font-weight:600;">${plSign}$${(p.unrealizedPl || 0).toFixed(2)} (${plSign}${((p.unrealizedPlpc || 0) * 100).toFixed(1)}%)</td>
       <td style="color:var(--text-tertiary);font-size:11px;">${p.stopLoss ? '$' + p.stopLoss.toFixed(2) : '—'}</td>
       <td style="color:var(--text-tertiary);font-size:11px;">${p.takeProfit ? '$' + p.takeProfit.toFixed(2) : '—'}</td>
     </tr>`;
@@ -7274,9 +7276,9 @@ function renderStonkBotPage() {
     return `<tr>
       <td style="color:var(--text-tertiary);font-size:11px;">${time}</td>
       <td style="font-weight:600;">${s.symbol}</td>
-      <td><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${dirBg};color:${dirColor};">${s.direction.toUpperCase()}</span></td>
-      <td style="font-weight:500;">${s.combined_score.toFixed(3)}</td>
-      <td style="color:var(--text-tertiary);font-size:11px;">M:${s.momentum_score.toFixed(2)} R:${s.mean_reversion_score.toFixed(2)} S:${s.sentiment_score.toFixed(2)}</td>
+      <td><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${dirBg};color:${dirColor};">${(s.direction || '—').toUpperCase()}</span></td>
+      <td style="font-weight:500;">${(s.combined_score || 0).toFixed(3)}</td>
+      <td style="color:var(--text-tertiary);font-size:11px;">M:${(s.momentum_score || 0).toFixed(2)} R:${(s.mean_reversion_score || 0).toFixed(2)} S:${(s.sentiment_score || 0).toFixed(2)}</td>
     </tr>`;
   }).join('');
 
@@ -7291,9 +7293,9 @@ function renderStonkBotPage() {
     return `<tr>
       <td style="color:var(--text-tertiary);font-size:11px;">${time}</td>
       <td style="font-weight:600;">${t.symbol}</td>
-      <td><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${sideBg};color:${sideColor};">${t.side.toUpperCase()}</span></td>
-      <td>${t.qty}</td>
-      <td>$${t.price.toFixed(2)}</td>
+      <td><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${sideBg};color:${sideColor};">${(t.side || '—').toUpperCase()}</span></td>
+      <td>${t.qty || 0}</td>
+      <td>$${(t.price || 0).toFixed(2)}</td>
       <td style="color:${pnlColor};font-weight:500;">${pnlStr}</td>
       <td style="color:var(--text-tertiary);font-size:11px;">${t.strategy || '—'}</td>
     </tr>`;
