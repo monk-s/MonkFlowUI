@@ -5,7 +5,7 @@ const corsOptions = {
     ? [env.corsOrigin, 'http://localhost:3000', 'http://localhost:8080']
     : env.corsOrigin.split(',').map(s => s.trim()),
   credentials: true,
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Webhook-Secret'],
   maxAge: 86400,
 };

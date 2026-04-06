@@ -36,23 +36,28 @@ const CASE_STUDIES = [
 ];
 
 // ── Website fetcher ────────────────────────────────────────
-function fetchUrl(url, timeout = 8000) {
+function fetchUrl(url, timeout = 8000, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
+    if (maxRedirects <= 0) return reject(new Error('Too many redirects'));
     const parsed = new URL(url);
     const client = parsed.protocol === 'https:' ? https : http;
     const req = client.get(url, {
       timeout,
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MonkFlow/1.0)' },
     }, (res) => {
-      // Follow redirects
+      // Follow redirects (with limit)
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         const redirect = res.headers.location.startsWith('http')
           ? res.headers.location
           : `${parsed.protocol}//${parsed.host}${res.headers.location}`;
-        return fetchUrl(redirect, timeout).then(resolve).catch(reject);
+        return fetchUrl(redirect, timeout, maxRedirects - 1).then(resolve).catch(reject);
       }
       let data = '';
-      res.on('data', chunk => { data += chunk; });
+      const MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
+      res.on('data', chunk => {
+        data += chunk;
+        if (data.length > MAX_SIZE) { req.destroy(); reject(new Error('Response too large')); }
+      });
       res.on('end', () => resolve(data));
     });
     req.on('error', reject);

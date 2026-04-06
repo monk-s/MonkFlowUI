@@ -672,13 +672,11 @@ const getLeadTimeline = catchAsync(async (req, res) => {
 // ── Inbound Reply Webhook ─────────────────────────────────
 
 const handleInboundReply = catchAsync(async (req, res) => {
-  // Verify webhook secret to prevent unauthorized access
-  const webhookSecret = process.env.INBOUND_WEBHOOK_SECRET || env.qboWebhookVerifierToken;
-  if (webhookSecret) {
-    const providedSecret = req.headers['x-webhook-secret'] || req.query.secret;
-    if (providedSecret !== webhookSecret) {
-      return res.status(401).json({ error: 'Invalid webhook secret' });
-    }
+  // Verify webhook secret to prevent unauthorized access (mandatory)
+  const webhookSecret = process.env.INBOUND_WEBHOOK_SECRET || env.inboundWebhookSecret;
+  const providedSecret = req.headers['x-webhook-secret'] || req.query.secret;
+  if (!webhookSecret || providedSecret !== webhookSecret) {
+    return res.status(401).json({ error: 'Invalid or missing webhook secret' });
   }
 
   const { from, subject, body, headers, text } = req.body;

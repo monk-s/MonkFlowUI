@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/outreach.controller');
 const { authenticate } = require('../middleware/auth');
+const requireSuperadmin = require('../middleware/requireSuperadmin');
 
 // Resend bounce/complaint webhook — no auth (verified by Resend)
 router.post('/webhook/resend', ctrl.handleResendWebhook);
@@ -12,8 +13,9 @@ router.post('/webhook/inbound', ctrl.handleInboundReply);
 router.get('/track/open/:emailId', ctrl.trackOpen);
 router.get('/track/click/:emailId', ctrl.trackClick);
 
-// All other outreach routes require auth
+// All other outreach routes require auth + superadmin (platform-level feature)
 router.use(authenticate);
+router.use(requireSuperadmin);
 
 router.get('/stats', ctrl.getStats);
 router.get('/analytics', ctrl.getAnalytics);
