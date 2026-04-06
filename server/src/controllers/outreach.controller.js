@@ -293,7 +293,7 @@ const processDueFollowups = catchAsync(async (req, res) => {
 
     try {
       // Build threading + anti-spam headers
-      const replyTo = process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com';
+      const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@mail.getmonkflow.com';
       const messageId = lead.original_message_id || lead.first_message_id;
       const emailHeaders = { 'Reply-To': replyTo };
 
@@ -786,6 +786,64 @@ const handleResendWebhook = catchAsync(async (req, res) => {
           if (type === 'email.complained') await trackComplaint(senderAddr);
         }
       }
+    }
+  }
+
+  // ── Inbound reply via Resend receiving ──────────────────
+  if (type === 'email.received') {
+    const emailId = data?.email_id;
+    if (!emailId) {
+      return res.json({ received: true, note: 'no email_id' });
+    }
+
+    // Fetch full email content from Resend API (webhook only has metadata)
+    try {
+      const resendKey = env.resendApiKey;
+      if (!resendKey) {
+        console.warn('[OUTREACH] email.received but no RESEND_API_KEY — cannot fetch body');
+        return res.json({ received: true, note: 'no api key' });
+      }
+
+      const fetchRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
+        headers: { Authorization: `Bearer ${resendKey}` },
+      });
+
+      if (!fetchRes.ok) {
+        console.error(`[OUTREACH] Failed to fetch received email ${emailId}: ${fetchRes.status}`);
+        return res.json({ received: true, note: 'fetch failed' });
+      }
+
+      const email = await fetchRes.json();
+      const senderFrom = email.from || data.from || '';
+      const replyBody = email.html || email.text || '';
+      const replySubject = email.subject || data.subject || '';
+
+      if (!senderFrom || !replyBody) {
+        console.warn(`[OUTREACH] email.received but missing from/body for ${emailId}`);
+        return res.json({ received: true, note: 'missing from or body' });
+      }
+
+      // Extract In-Reply-To from email headers
+      let inReplyTo = null;
+      if (email.headers) {
+        if (typeof email.headers === 'object') {
+          inReplyTo = email.headers['In-Reply-To'] || email.headers['in-reply-to'] || null;
+        }
+      }
+
+      console.log(`[OUTREACH] email.received from ${senderFrom} — routing to reply detector`);
+
+      const result = await processInboundReply({
+        from: senderFrom,
+        to: Array.isArray(email.to) ? email.to[0] : (email.to || null),
+        subject: replySubject,
+        body: replyBody,
+        inReplyTo,
+      });
+
+      console.log(`[OUTREACH] Reply processed: matched=${result.matched}, sentiment=${result.sentiment || 'n/a'}`);
+    } catch (err) {
+      console.error('[OUTREACH] email.received processing error:', err.message);
     }
   }
 

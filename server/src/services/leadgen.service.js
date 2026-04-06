@@ -635,7 +635,7 @@ async function sendColdEmail(lead, sender) {
   const fromAddr = sender ? `${sender.name} <${sender.email}>` : undefined;
 
   try {
-    const replyTo = process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com';
+    const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@mail.getmonkflow.com';
 
     // Plain-text alternative (improves deliverability — HTML-only emails score higher on spam filters)
     const plainText = `${lead.outreach_body}\n\n--\nNathan Linder\nFounder, MonkFlow\nAI-powered workflows for small businesses\n\nMonkFlow LLC | 1600 Sayles Blvd, Abilene, TX 79605\nUnsubscribe: ${unsubUrl}`;

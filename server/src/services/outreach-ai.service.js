@@ -283,7 +283,7 @@ async function sendAiEmail(leadId) {
   if (lead.ai_email_sent_at) throw new Error('AI email already sent');
 
   // Build anti-spam headers
-  const replyTo = process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com';
+  const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@mail.getmonkflow.com';
   const emailHeaders = { 'Reply-To': replyTo };
 
   // List-Unsubscribe (Gmail/Yahoo requirement for bulk senders)

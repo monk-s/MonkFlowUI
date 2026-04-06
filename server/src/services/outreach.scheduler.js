@@ -154,7 +154,7 @@ function start() {
 
         try {
           // Build threading + anti-spam headers
-          const replyTo = process.env.LEADGEN_REPLY_TO || 'nate@thelinders.com';
+          const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@mail.getmonkflow.com';
           const messageId = lead.original_message_id || lead.first_message_id;
           const emailHeaders = { 'Reply-To': replyTo };
 
