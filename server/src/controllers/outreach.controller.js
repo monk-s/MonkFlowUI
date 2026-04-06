@@ -22,9 +22,14 @@ function getFollowupTemplate(touchNumber, lead) {
   const reSubject = `Re: ${origSubject}`;
 
   const unsubToken = lead.unsubscribe_token;
-  const unsubUrl = unsubToken ? `${env.frontendUrl || 'https://getmonkflow.com'}/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
+  // Use sending domain (getmonkflow.com) for unsub links — must match From domain to avoid spam filters
+  const unsubUrl = unsubToken ? `https://getmonkflow.com/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
   const unsubFooter = unsubUrl
     ? `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`
+    : '';
+  // Tracking pixel for open detection
+  const trackingPixel = unsubToken
+    ? `<img src="https://getmonkflow.com/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`
     : '';
 
   switch (touchNumber) {
@@ -36,7 +41,7 @@ function getFollowupTemplate(touchNumber, lead) {
           <p>Quick example of what I mean — we built a client onboarding system for a financial services firm that cut their new-client setup from 45 minutes to under 5. Contracts, CRM sync, everything automated.</p>
           <p>Curious if${rawCompany ? ` ${rawCompany}` : ' your team'} deals with anything similar on the operations side? Happy to walk you through it — <a href="${env.bookingUrl}">grab 15 min here</a>.</p>
           <p>Nathan</p>
-        </div>${unsubFooter}`,
+        </div>${unsubFooter}${trackingPixel}`,
       };
     case 3:
       return {
@@ -46,7 +51,7 @@ function getFollowupTemplate(touchNumber, lead) {
           <p>No worries if the timing isn't right — figured I'd leave you with something useful either way.</p>
           <p>Based on what I saw on${rawCompany ? ` ${rawCompany}'s` : ' your'} site, there are a couple of quick automation wins that could free up real hours each week. If you're curious, happy to share over a quick call — <a href="${env.bookingUrl}">here's my calendar</a>.</p>
           <p>Nathan</p>
-        </div>${unsubFooter}`,
+        </div>${unsubFooter}${trackingPixel}`,
       };
     case 4:
       return {
@@ -56,7 +61,7 @@ function getFollowupTemplate(touchNumber, lead) {
           <p>Last note from me — going to assume the timing isn't right, and that's totally fine.</p>
           <p>If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the priority list, <a href="${env.bookingUrl}">my calendar's here</a>. Wishing you a great rest of the quarter.</p>
           <p>Nathan</p>
-        </div>${unsubFooter}`,
+        </div>${unsubFooter}${trackingPixel}`,
       };
     default:
       return null;
@@ -338,14 +343,20 @@ const processDueFollowups = catchAsync(async (req, res) => {
         [lead.id, nextTouch, template.subject, template.body, gmailId]
       );
 
-      // Update lead
+      // Update lead — close sequence after touch 4
       const nextFollowup = getNextFollowupDate(nextTouch, new Date());
-      await query(
-        `UPDATE outreach_leads
-         SET touch_count = $1, last_sent_at = NOW(), next_followup_at = $2, updated_at = NOW()
-         WHERE id = $3`,
-        [nextTouch, nextFollowup, lead.id]
-      );
+      if (nextTouch >= 4) {
+        await query(
+          `UPDATE outreach_leads SET touch_count = $1, last_sent_at = NOW(), next_followup_at = NULL, status = 'closed', updated_at = NOW() WHERE id = $2`,
+          [nextTouch, lead.id]
+        );
+        results.completed++;
+      } else {
+        await query(
+          `UPDATE outreach_leads SET touch_count = $1, last_sent_at = NOW(), next_followup_at = $2, updated_at = NOW() WHERE id = $3`,
+          [nextTouch, nextFollowup, lead.id]
+        );
+      }
 
       results.sent++;
     } catch (err) {

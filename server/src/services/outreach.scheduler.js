@@ -68,20 +68,24 @@ function start() {
         const unsubFooter = unsubUrl
           ? `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`
           : '';
+        // Tracking pixel for open detection
+        const trackingPixel = unsubToken
+          ? `<img src="https://getmonkflow.com/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`
+          : '';
 
         const bookingUrl = env.bookingUrl || 'https://monkflow.io/#schedule';
         switch (touchNumber) {
           case 2: return {
             subject: reSubject,
-            body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Quick example of what I mean — we built a client onboarding system for a financial services firm that cut their new-client setup from 45 minutes to under 5. Contracts, CRM sync, everything automated.</p><p>Curious if${rawCompany ? ` ${rawCompany}` : ' your team'} deals with anything similar on the operations side? Happy to walk you through it — <a href="${bookingUrl}">grab 15 min here</a>.</p><p>Nathan</p></div>${unsubFooter}`,
+            body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Quick example of what I mean — we built a client onboarding system for a financial services firm that cut their new-client setup from 45 minutes to under 5. Contracts, CRM sync, everything automated.</p><p>Curious if${rawCompany ? ` ${rawCompany}` : ' your team'} deals with anything similar on the operations side? Happy to walk you through it — <a href="${bookingUrl}">grab 15 min here</a>.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
           };
           case 3: return {
             subject: `${rawCompany || firstName} + automation`,
-            body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>No worries if the timing isn't right — figured I'd leave you with something useful either way.</p><p>Based on what I saw on${rawCompany ? ` ${rawCompany}'s` : ' your'} site, there are a couple of quick automation wins that could free up real hours each week. If you're curious, happy to share over a quick call — <a href="${bookingUrl}">here's my calendar</a>.</p><p>Nathan</p></div>${unsubFooter}`,
+            body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>No worries if the timing isn't right — figured I'd leave you with something useful either way.</p><p>Based on what I saw on${rawCompany ? ` ${rawCompany}'s` : ' your'} site, there are a couple of quick automation wins that could free up real hours each week. If you're curious, happy to share over a quick call — <a href="${bookingUrl}">here's my calendar</a>.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
           };
           case 4: return {
             subject: reSubject,
-            body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Last note from me — going to assume the timing isn't right, and that's totally fine.</p><p>If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the priority list, <a href="${bookingUrl}">my calendar's here</a>. Wishing you a great rest of the quarter.</p><p>Nathan</p></div>${unsubFooter}`,
+            body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Last note from me — going to assume the timing isn't right, and that's totally fine.</p><p>If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the priority list, <a href="${bookingUrl}">my calendar's here</a>. Wishing you a great rest of the quarter.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
           };
           default: return null;
         }

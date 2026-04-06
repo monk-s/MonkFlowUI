@@ -179,21 +179,28 @@ function getFirstName(contactName, contactEmail) {
     const trimmed = contactName.trim();
     const words = trimmed.split(/\s+/);
 
+    // Strip honorific prefixes (Dr., Mr., Mrs., Ms., Prof.)
+    let nameWords = [...words];
+    if (nameWords.length >= 2 && /^(dr\.?|mr\.?|mrs\.?|ms\.?|prof\.?)$/i.test(nameWords[0])) {
+      nameWords = nameWords.slice(1);
+    }
+
     const isRealName =
-      words.length >= 2 &&
-      /^[A-Z]/.test(words[0]) &&
+      nameWords.length >= 1 &&
+      words.length >= 2 && // original must have 2+ words
+      /^[A-Z]/.test(nameWords[0]) &&
       !BUSINESS_KEYWORDS.test(trimmed) &&
       !PAGE_TITLE_WORDS.test(trimmed) &&
       // Not a URL or domain pattern
       !/\.(com|net|org|io|co|us|biz)$/i.test(trimmed) &&
       // Not a single word repeated or very long (likely a business name scraped from page)
-      words[0].length <= 15 &&
+      nameWords[0].length <= 15 &&
       // First word should look like a name (alpha only, reasonable length)
-      /^[A-Za-z'-]+$/.test(words[0]) &&
-      words[0].length >= 2;
+      /^[A-Za-z'-]+$/.test(nameWords[0]) &&
+      nameWords[0].length >= 2;
 
     if (isRealName) {
-      return words[0];
+      return nameWords[0];
     }
 
     // Single-word name — only if it's in our common names dictionary

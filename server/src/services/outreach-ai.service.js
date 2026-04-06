@@ -297,8 +297,17 @@ async function sendAiEmail(leadId) {
     emailHeaders['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
   }
 
+  // Append tracking pixel and unsub footer if not already in the body
+  let htmlBody = lead.ai_email_body;
+  if (unsubToken && !htmlBody.includes('track/open/')) {
+    const unsubUrl = `https://getmonkflow.com/api/v1/leadgen/unsubscribe/${unsubToken}`;
+    const unsubFooter = `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`;
+    const trackingPixel = `<img src="https://getmonkflow.com/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`;
+    htmlBody = `${htmlBody}${unsubFooter}${trackingPixel}`;
+  }
+
   // Plain-text alternative (improves deliverability score)
-  const plainText = lead.ai_email_body
+  const plainText = htmlBody
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n\n')
     .replace(/<[^>]+>/g, '')
@@ -310,7 +319,7 @@ async function sendAiEmail(leadId) {
     from: env.outreachFromEmail || 'Nathan Linder <nathan@getmonkflow.com>',
     to: lead.contact_email,
     subject: lead.ai_email_subject,
-    html: lead.ai_email_body,
+    html: htmlBody,
     text: plainText,
     headers: emailHeaders,
   });
