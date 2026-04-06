@@ -586,14 +586,15 @@ async function sendColdEmail(lead, sender) {
     // ── Bridge: push into outreach_leads for automated follow-up sequence ──
     try {
       const nextFollowup = addBusinessDays(new Date(), 3); // Touch 2 in 3 business days
+      const leadScore = scoreLead(lead.diagnosis_json || {});
       await dbQuery(
         `INSERT INTO outreach_leads
           (contact_name, contact_email, company, website_url, source_lead_id,
            status, touch_count, last_sent_at, next_followup_at,
            original_message_id, original_subject, ai_email_subject,
            unsubscribe_token, industry, diagnosis_scores, original_email_body, lead_score,
-           email_variant)
-         VALUES ($1,$2,$3,$4,$5, 'active',$6,NOW(),$7, $8,$9,$10, $11,$12,$13,$14,$15, $16)
+           email_variant, priority)
+         VALUES ($1,$2,$3,$4,$5, 'active',$6,NOW(),$7, $8,$9,$10, $11,$12,$13,$14,$15, $16, $17)
          ON CONFLICT (contact_email) DO NOTHING`,
         [
           lead.business_name,                     // contact_name
@@ -610,8 +611,9 @@ async function sendColdEmail(lead, sender) {
           lead.business_type || null,             // industry
           lead.diagnosis_json ? JSON.stringify(lead.diagnosis_json) : null, // diagnosis_scores
           lead.outreach_body || null,             // original_email_body
-          scoreLead(lead.diagnosis_json || {}),   // lead_score
+          leadScore,                              // lead_score
           lead.email_variant || 'A',              // email_variant (A/B test)
+          leadScore >= 75,                        // priority (auto-flag high-scoring leads)
         ]
       );
     } catch (bridgeErr) {
