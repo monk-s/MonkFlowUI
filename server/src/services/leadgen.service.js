@@ -113,20 +113,27 @@ async function getHealthySenders() {
 
 // NOTE: DAILY_LIMIT and PER_SENDER_LIMIT are now dynamic via getWarmingLimits()
 // Static fallbacks kept only for any external references
-const UNSUBSCRIBE_BASE = (env.frontendUrl || 'https://monkflow.io').replace(/\/$/, '');
+// Use the sending domain for all email links (unsubscribe, tracking) so URLs
+// match the From domain — mismatched domains trigger spam filters.
+const SENDING_DOMAIN_BASE = 'https://getmonkflow.com';
+const UNSUBSCRIBE_BASE = SENDING_DOMAIN_BASE;
 
 // Rotate across 10 sender identities to protect deliverability
+// TODO: Once mail.getmonkflow.com DNS is verified on Resend, set
+//       OUTREACH_SENDING_DOMAIN=mail.getmonkflow.com in Railway env
+//       to migrate senders to the subdomain (protects root domain reputation).
+const SENDER_DOMAIN = process.env.OUTREACH_SENDING_DOMAIN || 'getmonkflow.com';
 const SENDERS = [
-  { email: 'nathan@getmonkflow.com', name: 'Nathan Linder' },
-  { email: 'nate@getmonkflow.com', name: 'Nate Linder' },
-  { email: 'nathan.linder@getmonkflow.com', name: 'Nathan Linder' },
-  { email: 'n.linder@getmonkflow.com', name: 'Nathan L.' },
-  { email: 'outreach@getmonkflow.com', name: 'Nathan at MonkFlow' },
-  { email: 'hello@getmonkflow.com', name: 'Nathan from MonkFlow' },
-  { email: 'growth@getmonkflow.com', name: 'Nathan — MonkFlow' },
-  { email: 'team@getmonkflow.com', name: 'Nathan at MonkFlow' },
-  { email: 'connect@getmonkflow.com', name: 'Nathan Linder' },
-  { email: 'info@getmonkflow.com', name: 'Nathan at MonkFlow' },
+  { email: `nathan@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
+  { email: `nate@${SENDER_DOMAIN}`, name: 'Nate Linder' },
+  { email: `nathan.linder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
+  { email: `n.linder@${SENDER_DOMAIN}`, name: 'Nathan L.' },
+  { email: `outreach@${SENDER_DOMAIN}`, name: 'Nathan at MonkFlow' },
+  { email: `hello@${SENDER_DOMAIN}`, name: 'Nathan from MonkFlow' },
+  { email: `growth@${SENDER_DOMAIN}`, name: 'Nathan — MonkFlow' },
+  { email: `team@${SENDER_DOMAIN}`, name: 'Nathan at MonkFlow' },
+  { email: `connect@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
+  { email: `info@${SENDER_DOMAIN}`, name: 'Nathan at MonkFlow' },
 ];
 
 const US_CITIES = [
@@ -621,7 +628,7 @@ async function sendColdEmail(lead, sender) {
       <p>MonkFlow LLC | 1600 Sayles Blvd, Abilene, TX 79605</p>
       <p><a href="${unsubUrl}" style="color: #999;">Unsubscribe</a></p>
     </div>
-    <img src="${(env.apiUrl || 'https://api.getmonkflow.com')}/api/v1/outreach/track/open/${lead.unsubscribe_token}" width="1" height="1" style="display:none" alt="" />
+    <img src="${SENDING_DOMAIN_BASE}/api/v1/outreach/track/open/${lead.unsubscribe_token}" width="1" height="1" style="display:none" alt="" />
   `;
 
   // Format the from address: "Display Name <email>"

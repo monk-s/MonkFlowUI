@@ -289,7 +289,7 @@ async function sendAiEmail(leadId) {
   // List-Unsubscribe (Gmail/Yahoo requirement for bulk senders)
   const unsubToken = lead.unsubscribe_token;
   if (unsubToken) {
-    const unsubUrl = `${env.frontendUrl || 'https://getmonkflow.com'}/api/v1/leadgen/unsubscribe/${unsubToken}`;
+    const unsubUrl = `https://getmonkflow.com/api/v1/leadgen/unsubscribe/${unsubToken}`;
     emailHeaders['List-Unsubscribe'] = `<${unsubUrl}>`;
     emailHeaders['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
   }

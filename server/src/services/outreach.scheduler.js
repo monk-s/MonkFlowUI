@@ -62,7 +62,7 @@ function start() {
         const reSubject = `Re: ${origSubject}`;
 
         const unsubToken = lead.unsubscribe_token;
-        const unsubUrl = unsubToken ? `${env.frontendUrl || 'https://getmonkflow.com'}/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
+        const unsubUrl = unsubToken ? `https://getmonkflow.com/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
         const unsubFooter = unsubUrl
           ? `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`
           : '';
@@ -87,15 +87,15 @@ function start() {
       // Format AI-generated follow-up body into HTML with unsubscribe footer
       function formatFollowupHtml(body, lead) {
         const unsubToken = lead.unsubscribe_token;
-        const unsubUrl = unsubToken ? `${env.frontendUrl || 'https://getmonkflow.com'}/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
+        const unsubUrl = unsubToken ? `https://getmonkflow.com/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
         const unsubFooter = unsubUrl
           ? `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`
           : '';
 
         // Tracking pixel (uses unsubscribe_token as stable ID, looked up in /track/open endpoint)
-        const apiBase = env.apiUrl || 'https://api.getmonkflow.com';
+        // Use sending domain for tracking pixel so URLs match From domain (avoids spam filters)
         const trackingPixel = lead.unsubscribe_token
-          ? `<img src="${apiBase}/api/v1/outreach/track/open/${lead.unsubscribe_token}" width="1" height="1" style="display:none" alt="" />`
+          ? `<img src="https://getmonkflow.com/api/v1/outreach/track/open/${lead.unsubscribe_token}" width="1" height="1" style="display:none" alt="" />`
           : '';
 
         const htmlBody = `<div style="font-family:sans-serif;max-width:600px;">${body.split('\n').map(line =>
@@ -168,7 +168,7 @@ function start() {
           // List-Unsubscribe for one-click unsubscribe (Gmail/Yahoo requirement)
           const unsubToken = lead.unsubscribe_token;
           if (unsubToken) {
-            const unsubUrl = `${env.frontendUrl || 'https://getmonkflow.com'}/api/v1/leadgen/unsubscribe/${unsubToken}`;
+            const unsubUrl = `https://getmonkflow.com/api/v1/leadgen/unsubscribe/${unsubToken}`;
             emailHeaders['List-Unsubscribe'] = `<${unsubUrl}>`;
             emailHeaders['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
           }
