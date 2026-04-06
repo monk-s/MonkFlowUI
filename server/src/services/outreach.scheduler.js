@@ -201,9 +201,9 @@ function start() {
           const gmailId = emailResult?.data?.id || emailResult?.id || null;
 
           await query(
-            `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [lead.id, nextTouch, template.subject, template.body, gmailId]
+            `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || 'B']
           );
 
           const nextFollowup = getNextFollowupDate(nextTouch);

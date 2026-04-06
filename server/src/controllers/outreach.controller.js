@@ -338,9 +338,9 @@ const processDueFollowups = catchAsync(async (req, res) => {
 
       // Record the email
       await query(
-        `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [lead.id, nextTouch, template.subject, template.body, gmailId]
+        `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || 'B']
       );
 
       // Update lead — close sequence after touch 4

@@ -333,9 +333,9 @@ async function sendAiEmail(leadId) {
 
   // Record in outreach_emails as touch 0 (AI pre-sequence email)
   await query(
-    `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id)
-     VALUES ($1, 0, $2, $3, $4)`,
-    [leadId, lead.ai_email_subject, lead.ai_email_body, gmailId]
+    `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant)
+     VALUES ($1, 0, $2, $3, $4, $5)`,
+    [leadId, lead.ai_email_subject, lead.ai_email_body, gmailId, lead.email_variant || 'B']
   );
 
   // Store original message ID and subject for follow-up threading
