@@ -2,6 +2,7 @@ const env = require('../config/env');
 const leadModel = require('../models/leadgen.model');
 const { sendEmail } = require('./email.service');
 const { query: dbQuery } = require('../config/database');
+const { getFirstName, cleanCompanyName } = require('../utils/nameParser');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
@@ -487,7 +488,8 @@ async function generateOutreachEmail(lead, diagnosis, onRetry, variant) {
 This email needs to stand out. The recipient gets cold emails daily. Yours must feel different from the "I noticed your website..." template everyone else uses.
 
 BUSINESS INFO:
-- Name: ${lead.business_name}
+- Name: ${cleanCompanyName(lead.business_name)}
+- Contact First Name: ${getFirstName(lead.contact_person, lead.email)}
 - Type: ${lead.business_type}
 - City: ${lead.city}, ${lead.state}
 - Website: ${lead.website_url || 'None'}
@@ -516,12 +518,12 @@ CASE STUDIES (pick the most relevant):
 
 HARD RULES:
 - Under 100 words total. 3-4 short paragraphs max.
-- Start with "Hey [first name or 'there']," — never "Hi" (too formal for cold email).
+- Start with "Hey ${getFirstName(lead.contact_person, lead.email)}," — ALWAYS use this exact name. Never "Hi" (too formal for cold email).
 - NEVER start the first sentence with "I". Lead with them, a question, or an insight.
 - NEVER use: "I noticed your site", "I came across", "I was checking out", "reaching out", "touching base", "hope this finds you well", "I'd love to".
 - Subject line: 2-5 words, lowercase, no punctuation. Must feel like a text from a coworker. Good: "{company} + automation", "your booking page", "saving 10 hrs/week". Bad: "idea for your website", "quick thought".
-- CTA: one soft question — "Worth a quick chat?" or "Open to exploring this?" NEVER mention "15-minute call" or any specific time commitment.
-- Sign off as just "Nathan" — no last name, no company, no URL.
+- CTA: one soft question, and include a booking link naturally. Example: "Worth a quick chat? Here's my calendar: ${env.bookingUrl}" — but keep it casual. NEVER mention "15-minute call" or any specific time commitment.
+- Sign off as just "Nathan" — no last name, no company, no title.
 - Case study should be ONE sentence woven in, never its own paragraph.
 
 Return JSON: {"subject": "...", "body": "..."}`;
@@ -688,7 +690,7 @@ async function sendColdEmail(lead, sender) {
           lead.diagnosis_json ? JSON.stringify(lead.diagnosis_json) : null, // diagnosis_scores
           lead.outreach_body || null,             // original_email_body
           leadScore,                              // lead_score
-          lead.email_variant || 'A',              // email_variant (A/B test)
+          lead.email_variant || 'B',              // email_variant (always B — proven winner)
           leadScore >= 75,                        // priority (auto-flag high-scoring leads)
         ]
       );
@@ -993,13 +995,9 @@ async function runDailyLeadGeneration() {
   await logExec('info', `Email generation starting for ${toEmail.length} leads`, { leadCount: toEmail.length });
   for (const lead of toEmail) {
     try {
-      // Assign A/B variant: 50/50 split, or 80/20 if we have a winner
-      let variant;
-      if (abWinner) {
-        variant = Math.random() < 0.8 ? abWinner : (abWinner === 'A' ? 'B' : 'A');
-      } else {
-        variant = Math.random() < 0.5 ? 'A' : 'B';
-      }
+      // Always use Variant B — proven 51% open rate vs 6.4% for Variant A
+      // (A/B infrastructure kept intact for future testing)
+      let variant = 'B';
       lead.email_variant = variant;
 
       const { subject, body } = await generateOutreachEmail(lead, lead.diagnosis_json, (attempt, maxRetries, errMsg) => {

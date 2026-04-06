@@ -559,12 +559,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+// ── Hash route handler (for direct links like #schedule) ──
+function handleHashRoute() {
+  const hash = window.location.hash;
+  if (hash === '#schedule') {
+    // Auto-open scheduling modal when visiting monkflow.io/#schedule
+    setTimeout(() => showSchedulingModal(), 300);
+  }
+}
+window.addEventListener('hashchange', handleHashRoute);
+
 // ── Landing Page ──────────────────────────────────────────
 function showLanding() {
   document.getElementById('auth-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
   document.getElementById('landing-container').classList.remove('hidden');
   renderLandingPage();
+  // Check for hash routes after landing page renders
+  handleHashRoute();
 }
 
 function showAuth() {

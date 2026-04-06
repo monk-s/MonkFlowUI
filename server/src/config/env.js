@@ -30,6 +30,7 @@ const env = {
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
   apiUrl: process.env.API_URL || 'http://localhost:8080',
   inboundWebhookSecret: process.env.INBOUND_WEBHOOK_SECRET || '',
+  bookingUrl: process.env.BOOKING_URL || 'https://monkflow.io/#schedule',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production',
 };

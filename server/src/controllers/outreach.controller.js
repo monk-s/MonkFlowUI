@@ -5,6 +5,7 @@ const env = require('../config/env');
 const { sendEmail } = require('../services/email.service');
 const outreachAI = require('../services/outreach-ai.service');
 const { processInboundReply } = require('../services/reply-detector.service');
+const { getFirstName, cleanCompanyName } = require('../utils/nameParser');
 
 // ── Follow-up templates ────────────────────────────────────
 // Touch 1 = original cold email (sent manually / externally)
@@ -13,8 +14,9 @@ const { processInboundReply } = require('../services/reply-detector.service');
 // Touch 4 = Day 14 breakup
 
 function getFollowupTemplate(touchNumber, lead) {
-  const firstName = (lead.contact_name || '').split(' ')[0] || 'there';
-  const company = lead.company ? ` at ${lead.company}` : '';
+  const firstName = getFirstName(lead.contact_name, lead.contact_email);
+  const rawCompany = lead.company ? cleanCompanyName(lead.company) : '';
+  const company = rawCompany ? ` at ${rawCompany}` : '';
   // Use original subject from touch 1 for proper threading
   const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';
   const reSubject = `Re: ${origSubject}`;
@@ -32,17 +34,17 @@ function getFollowupTemplate(touchNumber, lead) {
         body: `<div style="font-family:sans-serif;max-width:600px;">
           <p>Hey ${firstName},</p>
           <p>Quick example of what I mean — we built a client onboarding system for a financial services firm that cut their new-client setup from 45 minutes to under 5. Contracts, CRM sync, everything automated.</p>
-          <p>Curious if${company ? ` ${lead.company}` : ' your team'} deals with anything similar on the operations side?</p>
+          <p>Curious if${rawCompany ? ` ${rawCompany}` : ' your team'} deals with anything similar on the operations side? Happy to walk you through it — <a href="${env.bookingUrl}">grab 15 min here</a>.</p>
           <p>Nathan</p>
         </div>${unsubFooter}`,
       };
     case 3:
       return {
-        subject: `${lead.company || firstName} + automation`,
+        subject: `${rawCompany || firstName} + automation`,
         body: `<div style="font-family:sans-serif;max-width:600px;">
           <p>Hey ${firstName},</p>
           <p>No worries if the timing isn't right — figured I'd leave you with something useful either way.</p>
-          <p>Based on what I saw on${company ? ` ${lead.company}'s` : ' your'} site, there are a couple of quick automation wins that could free up real hours each week. Happy to share specifics if you're interested — no strings attached.</p>
+          <p>Based on what I saw on${rawCompany ? ` ${rawCompany}'s` : ' your'} site, there are a couple of quick automation wins that could free up real hours each week. If you're curious, happy to share over a quick call — <a href="${env.bookingUrl}">here's my calendar</a>.</p>
           <p>Nathan</p>
         </div>${unsubFooter}`,
       };
@@ -52,7 +54,7 @@ function getFollowupTemplate(touchNumber, lead) {
         body: `<div style="font-family:sans-serif;max-width:600px;">
           <p>Hey ${firstName},</p>
           <p>Last note from me — going to assume the timing isn't right, and that's totally fine.</p>
-          <p>If automating any part of${company ? ` ${lead.company}'s` : ' your'} operations ever moves up the priority list, I'm easy to find. Wishing you a great rest of the quarter.</p>
+          <p>If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the priority list, <a href="${env.bookingUrl}">my calendar's here</a>. Wishing you a great rest of the quarter.</p>
           <p>Nathan</p>
         </div>${unsubFooter}`,
       };

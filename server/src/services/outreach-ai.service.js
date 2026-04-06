@@ -1,6 +1,7 @@
 const env = require('../config/env');
 const { query } = require('../config/database');
 const { sendEmail } = require('./email.service');
+const { getFirstName, cleanCompanyName } = require('../utils/nameParser');
 const dns = require('dns');
 const { promisify } = require('util');
 const https = require('https');
@@ -143,7 +144,7 @@ HARD RULES:
 - NEVER use "I was checking out your site", "I came across your website", "I noticed", or any variation. These are the most common cold email openers in existence — they signal mass outreach instantly.
 - NEVER use the phrases "reaching out", "touching base", "hope this finds you well", or "I'd love to".
 - Subject line: 2-5 words, lowercase, no punctuation. Must feel like a text from a colleague, not a marketing email. Examples of good patterns: "{company} + automation", "your booking page", "saving 10 hrs/week", "{firstName}, quick question". NEVER use the word "thought" or "idea" in the subject.
-- CTA: one soft question. "Worth a quick chat?" or "Open to exploring this?" — NEVER mention a specific time commitment like "15-minute call" or "30-minute demo".
+- CTA: one soft question, and include a booking link naturally. Example: "Worth a quick chat? Here's my calendar: {bookingUrl}" — but make it feel casual, not salesy. NEVER mention a specific time commitment like "15-minute call" or "30-minute demo".
 - Sign off as just "Nathan" — no last name, no company name, no URL, no title.
 - The case study mention should be ONE sentence woven into the email, never a separate paragraph.
 
@@ -160,15 +161,17 @@ async function generateEmailForLead(lead, websiteAnalysis, variant) {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
-  const firstName = (lead.contact_name || '').split(' ')[0] || 'there';
+  const firstName = getFirstName(lead.contact_name, lead.contact_email);
+  const company = cleanCompanyName(lead.company || 'Unknown');
   let userPrompt = `Write a personalized cold email for this prospect:
 
-Name: ${lead.contact_name}
+Name: ${firstName}
 Email: ${lead.contact_email}
-Company: ${lead.company || 'Unknown'}
+Company: ${company}
 Website Analysis: ${websiteAnalysis}
+Booking URL: ${env.bookingUrl}
 
-Address them as "${firstName}".`;
+Address them as "${firstName}". Use the booking URL naturally in the CTA.`;
 
   // A/B variant override: instruct the AI to use a specific framework
   if (variant === 'A') {
@@ -346,6 +349,7 @@ HARD RULES:
 - NEVER start with "I" — start with value or a question.
 - NEVER use "following up", "circling back", "checking in", "bumping this", "just wanted to".
 - Be conversational, not salesy. Sound like a real person continuing a conversation.
+- Include the booking link naturally in the CTA when provided. Example: "Here's my calendar if easier: {bookingUrl}" — keep it casual.
 - No sign-off block — just "Nathan".
 - Output valid JSON only: {"subject": "...", "body": "..."}
 - Body is plain text with \\n for line breaks.`;
@@ -358,8 +362,8 @@ async function generateFollowup(lead, touchNumber) {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
-  const firstName = (lead.contact_name || '').split(' ')[0] || 'there';
-  const company = lead.company || '';
+  const firstName = getFirstName(lead.contact_name, lead.contact_email);
+  const company = cleanCompanyName(lead.company || '');
   const industry = lead.industry || 'small business';
   const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';
 
@@ -399,12 +403,15 @@ Subject: Use "Re: ${origSubject}" for email threading.`;
 Name: ${firstName}
 Company: ${company}
 Industry: ${industry}
+Booking URL: ${env.bookingUrl}
 ${diagnosisContext}
 
 Original email subject: "${origSubject}"
 ${lead.original_email_body ? `Original email body summary: The first email mentioned their specific automation opportunities based on their website analysis.` : ''}
 
-${touchInstruction}`;
+${touchInstruction}
+
+Include the booking URL naturally in the CTA.`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-20250514',
