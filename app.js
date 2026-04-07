@@ -7111,12 +7111,17 @@ function renderOutreachAnalyticsPage() {
     const openedH = Math.round((opened / maxDaily) * 100);
     const repliedH = Math.round((replied / maxDaily) * 100);
     const dateLabel = new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const openPct = sent > 0 ? Math.round((opened / sent) * 1000) / 10 : 0;
+    const replyPct = sent > 0 ? Math.round((replied / sent) * 1000) / 10 : 0;
+    const sentTip = `${dateLabel} — Sent: ${sent}`;
+    const openTip = `${dateLabel} — Opened: ${opened} (${openPct}% of sent)`;
+    const replyTip = `${dateLabel} — Replied: ${replied} (${replyPct}% of sent)`;
     return `
-      <div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;" title="${dateLabel}: ${sent} sent, ${opened} opened, ${replied} replied">
+      <div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;">
         <div style="display:flex;gap:2px;align-items:flex-end;height:80px;width:100%;">
-          <div style="flex:1;background:#00cc6a;border-radius:2px 2px 0 0;height:${sentH}%;min-height:${sent > 0 ? 2 : 0}px;"></div>
-          <div style="flex:1;background:#3b82f6;border-radius:2px 2px 0 0;height:${openedH}%;min-height:${opened > 0 ? 2 : 0}px;"></div>
-          <div style="flex:1;background:#8b5cf6;border-radius:2px 2px 0 0;height:${repliedH}%;min-height:${replied > 0 ? 2 : 0}px;"></div>
+          <div title="${sentTip}" style="flex:1;background:#00cc6a;border-radius:2px 2px 0 0;height:${sentH}%;min-height:${sent > 0 ? 2 : 0}px;cursor:help;"></div>
+          <div title="${openTip}" style="flex:1;background:#3b82f6;border-radius:2px 2px 0 0;height:${openedH}%;min-height:${opened > 0 ? 2 : 0}px;cursor:help;"></div>
+          <div title="${replyTip}" style="flex:1;background:#8b5cf6;border-radius:2px 2px 0 0;height:${repliedH}%;min-height:${replied > 0 ? 2 : 0}px;cursor:help;"></div>
         </div>
         <div style="font-size:9px;color:var(--text-tertiary);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${dateLabel}</div>
       </div>`;
