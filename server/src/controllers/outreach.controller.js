@@ -338,8 +338,8 @@ const processDueFollowups = catchAsync(async (req, res) => {
 
       // Record the email
       await query(
-        `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, delivered_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
         [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || 'B']
       );
 

@@ -11,8 +11,16 @@ function start() {
   // Run at 9:00 AM Central Time, weekdays only
   job = cron.schedule('0 9 * * 1-5', async () => {
     console.log('[OUTREACH] Cron triggered — processing due follow-ups...');
+    const { query } = require('../config/database');
+    // Heartbeat: mark cron fire (before run, so we can detect errors)
     try {
-      const { query } = require('../config/database');
+      await query(
+        `INSERT INTO scheduler_heartbeats (name, last_run_at, last_status, updated_at)
+         VALUES ('outreach', NOW(), 'started', NOW())
+         ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), last_status = 'started', updated_at = NOW()`
+      );
+    } catch (_) {}
+    try {
       const { sendEmail } = require('./email.service');
       const env = require('../config/env');
       const { generateFollowup } = require('./outreach-ai.service');
@@ -201,8 +209,8 @@ function start() {
           const gmailId = emailResult?.data?.id || emailResult?.id || null;
 
           await query(
-            `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
+            `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, delivered_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
             [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || 'B']
           );
 
@@ -229,8 +237,20 @@ function start() {
       }
 
       console.log(`[OUTREACH] Done: ${sent} sent (${aiGenerated} AI-generated), ${completed} completed, ${errors} errors`);
+      try {
+        await query(
+          `UPDATE scheduler_heartbeats SET last_status = 'success', last_detail = $1, updated_at = NOW() WHERE name = 'outreach'`,
+          [JSON.stringify({ sent, aiGenerated, completed, errors })]
+        );
+      } catch (_) {}
     } catch (err) {
       console.error('[OUTREACH] Cron FAILED:', err.message, err.stack);
+      try {
+        await query(
+          `UPDATE scheduler_heartbeats SET last_status = 'failed', last_detail = $1, updated_at = NOW() WHERE name = 'outreach'`,
+          [JSON.stringify({ error: err.message })]
+        );
+      } catch (_) {}
     }
   }, { timezone: 'America/Chicago' });
 
