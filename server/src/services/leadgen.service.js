@@ -701,6 +701,19 @@ async function sendColdEmail(lead, sender) {
       console.warn(`[LEADGEN] Bridge insert failed for ${lead.email}:`, bridgeErr.message);
     }
 
+    // ── Mirror into outreach_emails so analytics dashboards see this send ──
+    try {
+      await dbQuery(
+        `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, sent_at, delivered_at)
+         SELECT id, 0, $2, $3, $4, $5, NOW(), NOW()
+         FROM outreach_leads WHERE contact_email = $1
+         LIMIT 1`,
+        [lead.email, lead.outreach_subject, lead.outreach_body || '', emailId, lead.email_variant || 'B']
+      );
+    } catch (mirrorErr) {
+      console.warn(`[LEADGEN] outreach_emails mirror failed for ${lead.email}:`, mirrorErr.message);
+    }
+
     return { success: true, emailId };
   } catch (err) {
     console.error(`[LEADGEN] Failed to send to ${lead.email}:`, err.message);
