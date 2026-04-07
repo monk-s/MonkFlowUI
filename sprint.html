@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Automation Sprint — $2,000, 7 Days | MonkFlow</title>
+  <meta name="description" content="I'll automate 3 of your worst manual workflows in 7 days. $2,000 flat. Built by the founder of MonkFlow." />
+  <meta property="og:title" content="AI Automation Sprint — $2,000, 7 Days" />
+  <meta property="og:description" content="I'll automate 3 of your worst manual workflows in 7 days. $2,000 flat." />
+  <meta property="og:type" content="website" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="logo.svg" />
+  <meta name="theme-color" content="#00ff88" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #0a0a0a;
+      color: #f5f5f5;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: #00ff88; text-decoration: none; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+    nav { padding: 24px 0; border-bottom: 1px solid #1f1f1f; }
+    nav .wrap { display: flex; align-items: center; justify-content: space-between; }
+    .logo { font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
+    .logo span { color: #00ff88; }
+    .hero { padding: 80px 0 40px; text-align: center; }
+    h1 {
+      font-size: clamp(36px, 6vw, 60px);
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+      margin-bottom: 24px;
+    }
+    h1 .accent { color: #00ff88; }
+    .sub {
+      font-size: clamp(17px, 2.2vw, 21px);
+      color: #a0a0a0;
+      max-width: 580px;
+      margin: 0 auto 36px;
+    }
+    .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+    .btn {
+      display: inline-block;
+      padding: 16px 28px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 16px;
+      transition: transform .15s, box-shadow .15s;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: #00ff88;
+      color: #0a0a0a;
+      box-shadow: 0 0 0 1px #00ff88, 0 8px 24px rgba(0,255,136,.25);
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px #00ff88, 0 12px 32px rgba(0,255,136,.4); }
+    .btn-ghost {
+      background: transparent;
+      color: #f5f5f5;
+      border: 1px solid #2a2a2a;
+    }
+    .btn-ghost:hover { border-color: #00ff88; color: #00ff88; }
+    .micro { font-size: 13px; color: #707070; margin-top: 8px; }
+    section { padding: 60px 0; border-top: 1px solid #1f1f1f; }
+    h2 {
+      font-size: clamp(26px, 3.5vw, 34px);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 28px;
+    }
+    .steps { display: grid; gap: 20px; }
+    .step {
+      background: #111;
+      border: 1px solid #1f1f1f;
+      border-radius: 14px;
+      padding: 24px;
+      display: flex;
+      gap: 18px;
+      align-items: flex-start;
+    }
+    .step-num {
+      flex-shrink: 0;
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: rgba(0,255,136,.12);
+      color: #00ff88;
+      font-weight: 800;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .step h3 { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+    .step p { color: #a0a0a0; font-size: 15px; }
+    .price-card {
+      background: linear-gradient(180deg, #0f1f15 0%, #0a0a0a 100%);
+      border: 1px solid #00ff88;
+      border-radius: 16px;
+      padding: 36px;
+      text-align: center;
+    }
+    .price { font-size: 56px; font-weight: 900; letter-spacing: -0.03em; }
+    .price small { font-size: 18px; color: #a0a0a0; font-weight: 500; }
+    .price-sub { color: #a0a0a0; margin: 8px 0 24px; }
+    ul.includes { list-style: none; text-align: left; max-width: 420px; margin: 0 auto 28px; }
+    ul.includes li {
+      padding: 10px 0;
+      border-bottom: 1px solid #1f1f1f;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    ul.includes li::before {
+      content: '✓';
+      color: #00ff88;
+      font-weight: 800;
+    }
+    .faq-item {
+      border-bottom: 1px solid #1f1f1f;
+      padding: 20px 0;
+    }
+    .faq-q { font-weight: 700; margin-bottom: 8px; font-size: 17px; }
+    .faq-a { color: #a0a0a0; font-size: 15px; }
+    footer {
+      padding: 40px 0 60px;
+      text-align: center;
+      color: #707070;
+      font-size: 13px;
+      border-top: 1px solid #1f1f1f;
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 12px;
+      background: rgba(0,255,136,.1);
+      color: #00ff88;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 20px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="wrap">
+      <a href="/" class="logo">Monk<span>Flow</span></a>
+      <a href="https://monkflow.io/#schedule" class="btn btn-ghost" style="padding:10px 18px;font-size:14px;">Book a call</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="wrap">
+      <div class="badge">April Cohort — 3 Spots Left</div>
+      <h1>I'll automate <span class="accent">3 of your worst</span> manual workflows in 7 days.</h1>
+      <p class="sub">$2,000 flat. No retainer. No bloated software. Built by the founder of MonkFlow — a real automation platform running in production.</p>
+      <div class="cta-row">
+        <a href="https://monkflow.io/#schedule" class="btn btn-primary">Book a free 30-min call →</a>
+        <a href="#how" class="btn btn-ghost">How it works</a>
+      </div>
+      <div class="micro">No credit card. No commitment. Just a conversation.</div>
+    </div>
+  </header>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>How the Sprint Works</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div>
+            <h3>Discovery call (Day 0)</h3>
+            <p>30 minutes. We map your day and find the 3 manual workflows eating the most hours — invoicing, client onboarding, lead intake, reporting, follow-ups, whatever's bleeding you.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div>
+            <h3>I build (Days 1–7)</h3>
+            <p>You get daily progress updates. I build all 3 automations in MonkFlow, connected to the tools you already use (Gmail, Sheets, Stripe, QuickBooks, Calendly, etc.).</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div>
+            <h3>Handoff + 30 days support</h3>
+            <p>Live walkthrough, recorded training video, and 30 days of free tweaks. If something breaks or you want a small change, I fix it.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="wrap">
+      <div class="price-card">
+        <div class="price">$2,000<small> flat</small></div>
+        <div class="price-sub">$1,000 deposit to start (invoiced via QuickBooks). $1,000 on delivery.</div>
+        <ul class="includes">
+          <li>3 custom automations built end-to-end</li>
+          <li>Discovery + scoping call</li>
+          <li>Daily progress updates</li>
+          <li>Live handoff + recorded training</li>
+          <li>30 days of free tweaks &amp; support</li>
+          <li>Hosted on MonkFlow — no extra software cost</li>
+        </ul>
+        <a href="https://monkflow.io/#schedule" class="btn btn-primary">Book a free call →</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Who this is for</h2>
+      <p style="color:#a0a0a0;font-size:16px;margin-bottom:20px;">5–50 person service businesses where the owner or ops lead is drowning in manual work:</p>
+      <div class="steps">
+        <div class="step"><div class="step-num">→</div><div><h3>Agencies &amp; consultants</h3><p>Onboarding, reporting, client comms, invoicing.</p></div></div>
+        <div class="step"><div class="step-num">→</div><div><h3>Contractors &amp; trades</h3><p>Lead intake, quoting, scheduling, follow-ups.</p></div></div>
+        <div class="step"><div class="step-num">→</div><div><h3>Med spas, clinics, salons</h3><p>Booking reminders, reviews, no-show recovery.</p></div></div>
+        <div class="step"><div class="step-num">→</div><div><h3>Bookkeepers &amp; firms</h3><p>Document intake, client portals, recurring tasks.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="book">
+    <div class="wrap" style="text-align:center;">
+      <h2>Book your free discovery call</h2>
+      <p class="sub" style="margin-bottom:32px;">30 minutes. We'll find your 3 highest-leverage automations together — even if you don't hire me.</p>
+      <a href="https://monkflow.io/#schedule" class="btn btn-primary">Pick a time →</a>
+      <div class="micro">Or email <a href="mailto:nathan@mail.getmonkflow.com">nathan@mail.getmonkflow.com</a></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>FAQ</h2>
+      <div class="faq-item">
+        <div class="faq-q">What if you can't deliver in 7 days?</div>
+        <div class="faq-a">If I miss the deadline, you don't pay the second $1,000. Full stop.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">What tools do you connect to?</div>
+        <div class="faq-a">Gmail, Outlook, Google Sheets, Calendly, Stripe, QuickBooks, HubSpot, Slack, Notion, Airtable, plus anything with an API or webhook.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Do I need to pay for MonkFlow separately?</div>
+        <div class="faq-a">No. Hosting on MonkFlow is included for the first 90 days. After that, $50/mo if you want to keep the automations running (cancel anytime).</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">What if I want more than 3 automations?</div>
+        <div class="faq-a">Add-ons are $500 each, decided after the discovery call. No surprises.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Why so cheap?</div>
+        <div class="faq-a">I'm building case studies for the April cohort. Price goes up in May.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      © 2026 MonkFlow · Built by Nathan Linder · <a href="mailto:nathan@mail.getmonkflow.com">nathan@mail.getmonkflow.com</a>
+    </div>
+  </footer>
+
+</body>
+</html>
