@@ -226,4 +226,20 @@ const getAlerts = catchAsync(async (req, res) => {
   });
 });
 
-module.exports = { getPlatformStats, getAccounts, getAccountDetail, getCostAnalytics, getAlerts };
+const getSchedulerHealth = catchAsync(async (req, res) => {
+  const { rows } = await query(
+    `SELECT name, last_run_at, last_status, last_detail, updated_at
+     FROM scheduler_heartbeats ORDER BY name ASC`
+  );
+  res.json({ data: rows });
+});
+
+const getClientErrors = catchAsync(async (req, res) => {
+  const { rows } = await query(
+    `SELECT id, user_id, message, stack, url, user_agent, ip, created_at
+     FROM client_errors ORDER BY created_at DESC LIMIT 20`
+  );
+  res.json({ data: rows });
+});
+
+module.exports = { getPlatformStats, getAccounts, getAccountDetail, getCostAnalytics, getAlerts, getSchedulerHealth, getClientErrors };

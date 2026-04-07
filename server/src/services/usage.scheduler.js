@@ -3,10 +3,23 @@ const { query } = require('../config/database');
 
 let task = null;
 
+async function hb(status, detail) {
+  try {
+    await query(
+      `INSERT INTO scheduler_heartbeats (name, last_run_at, last_status, last_detail, updated_at)
+       VALUES ('usage', NOW(), $1, $2, NOW())
+       ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), last_status = $1, last_detail = $2, updated_at = NOW()`,
+      [status, detail ? JSON.stringify(detail) : null]
+    );
+  } catch (_) {}
+}
+
 function start() {
   // Run daily at midnight UTC
   task = cron.schedule('0 0 * * *', async () => {
     console.log('[UsageScheduler] Running monthly usage reset check...');
+    await hb('started', null);
+    let overagesRecorded = 0;
     try {
       // Find users with stale usage_reset_at (from previous month)
       const { rows: staleUsers } = await query(
@@ -34,6 +47,7 @@ function start() {
             [user.id, periodStart, periodEnd, overageRuns, overageTasks, overageCost]
           );
           console.log(`[UsageScheduler] Recorded overage for user ${user.id}: ${overageRuns} runs, ${overageTasks} tasks`);
+          overagesRecorded++;
         }
 
         // Reset counters
@@ -46,8 +60,10 @@ function start() {
       if (staleUsers.length > 0) {
         console.log(`[UsageScheduler] Reset usage for ${staleUsers.length} users`);
       }
+      await hb('success', { usersReset: staleUsers.length, overagesRecorded });
     } catch (err) {
       console.error('[UsageScheduler] Error:', err.message);
+      await hb('failed', { error: err.message });
     }
   }, { timezone: 'UTC' });
 

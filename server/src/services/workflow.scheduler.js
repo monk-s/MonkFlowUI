@@ -1,8 +1,21 @@
 const cron = require('node-cron');
 const workflowModel = require('../models/workflow.model');
 const { executeWorkflow } = require('./workflow.engine');
+const { query } = require('../config/database');
 
 const jobs = new Map(); // workflowId -> cron job
+let heartbeatJob = null;
+
+async function hb(status, detail) {
+  try {
+    await query(
+      `INSERT INTO scheduler_heartbeats (name, last_run_at, last_status, last_detail, updated_at)
+       VALUES ('workflow', NOW(), $1, $2, NOW())
+       ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), last_status = $1, last_detail = $2, updated_at = NOW()`,
+      [status, detail ? JSON.stringify(detail) : null]
+    );
+  } catch (_) {}
+}
 
 async function loadScheduledWorkflows() {
   const workflows = await workflowModel.findActiveScheduled();
@@ -10,6 +23,14 @@ async function loadScheduledWorkflows() {
     scheduleWorkflow(wf);
   }
   console.log(`Loaded ${workflows.length} scheduled workflow(s)`);
+
+  // Start heartbeat cron — fires every 5 minutes to signal "workflow scheduler process alive"
+  if (!heartbeatJob) {
+    await hb('success', { activeJobs: jobs.size });
+    heartbeatJob = cron.schedule('*/5 * * * *', async () => {
+      await hb('success', { activeJobs: jobs.size });
+    });
+  }
 }
 
 function scheduleWorkflow(workflow) {
@@ -46,6 +67,10 @@ function stopAll() {
     job.stop();
   }
   jobs.clear();
+  if (heartbeatJob) {
+    heartbeatJob.stop();
+    heartbeatJob = null;
+  }
 }
 
 module.exports = { loadScheduledWorkflows, scheduleWorkflow, unscheduleWorkflow, stopAll };

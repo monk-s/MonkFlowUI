@@ -30,6 +30,7 @@ const billingRoutes = require('./routes/billing.routes');
 const outreachRoutes = require('./routes/outreach.routes');
 const stonkbotRoutes = require('./routes/stonkbot.routes');
 const integrationRoutes = require('./routes/integration.routes');
+const clientErrorRoutes = require('./routes/clientError.routes');
 
 const app = express();
 
@@ -79,6 +80,7 @@ app.use('/api/v1/billing', billingRoutes);
 app.use('/api/v1/outreach', outreachRoutes);
 app.use('/api/v1/stonkbot', stonkbotRoutes);
 app.use('/api/v1/integrations', integrationRoutes);
+app.use('/api/v1/client-errors', clientErrorRoutes);
 
 // 404 handler
 app.use((req, res) => {

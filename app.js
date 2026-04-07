@@ -144,6 +144,8 @@ let billingPlans = null;
 let qboConnected = false;
 let billingInvoices = [];
 let adminQboStatus = null;
+let adminSchedulerHealth = null;
+let adminClientErrors = [];
 
 // ── Type Mappings ──────────────────────────────────────────
 const FRONTEND_TO_BACKEND_TYPE = {
@@ -536,6 +538,49 @@ async function loadAgentsData() {
     console.error('Failed to load agents:', err);
   }
 }
+
+// ── Global error reporter ───────────────────────────────
+(function setupErrorReporter() {
+  const seen = new Map();
+  const SENT = [];
+  const MAX_PER_MIN = 10;
+  function hash(s) { let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return h; }
+  function shouldSend(k) {
+    const now = Date.now();
+    while (SENT.length && now - SENT[0] > 60000) SENT.shift();
+    if (SENT.length >= MAX_PER_MIN) return false;
+    const last = seen.get(k);
+    if (last && now - last < 60000) return false;
+    seen.set(k, now); SENT.push(now); return true;
+  }
+  function send(p) {
+    try {
+      const body = JSON.stringify(p);
+      if (body.length > 5120) return;
+      fetch('/api/v1/client-errors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+    } catch {}
+  }
+  function build(msg, stack) {
+    return {
+      message: (msg || 'unknown').slice(0, 2000),
+      stack: (stack || '').slice(0, 8000),
+      url: location.href,
+      userAgent: navigator.userAgent,
+      timestamp: new Date().toISOString(),
+    };
+  }
+  window.addEventListener('error', (e) => {
+    const p = build(e.message, e.error && e.error.stack);
+    const k = hash(p.message + '|' + p.stack);
+    if (shouldSend(k)) send(p);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const r = e.reason || {};
+    const p = build(r.message || String(r), r.stack);
+    const k = hash(p.message + '|' + p.stack);
+    if (shouldSend(k)) send(p);
+  });
+})();
 
 // ── Initialize ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -5540,13 +5585,17 @@ async function handleSendInvite() {
 
 async function loadAdminData() {
   try {
-    const [statsRes, accountsRes, alertsRes] = await Promise.all([
+    const [statsRes, accountsRes, alertsRes, schedRes, errRes] = await Promise.all([
       api.get('/admin/stats'),
       api.get('/admin/accounts?limit=100'),
       api.get('/admin/alerts').catch(() => ({ data: [] })),
+      api.get('/admin/scheduler-health').catch(() => ({ data: [] })),
+      api.get('/admin/client-errors').catch(() => ({ data: [] })),
     ]);
     adminData = statsRes.data || statsRes;
     adminAccounts = accountsRes.data || accountsRes;
+    adminSchedulerHealth = (schedRes && (schedRes.data || schedRes)) || [];
+    adminClientErrors = (errRes && (errRes.data || errRes)) || [];
     // Also load QBO status for admin
     try {
       const qboRes = await api.get('/quickbooks/status');
@@ -5777,6 +5826,33 @@ async function handleAdminFileSelect(event, userId) {
   event.target.value = '';
 }
 
+function renderSchedulerHealthCards(rows) {
+  const expected = ['leadgen', 'outreach', 'billing', 'usage', 'workflow'];
+  const byName = Object.fromEntries((rows || []).map(r => [r.name, r]));
+  return expected.map(name => {
+    const row = byName[name];
+    if (!row) {
+      return `<div class="stat-card" style="border:1px dashed #555;"><div style="font-weight:600;text-transform:capitalize;">${name}</div><div style="color:var(--text-secondary);font-size:12px;margin-top:4px;">No heartbeat yet</div></div>`;
+    }
+    const ageMs = Date.now() - new Date(row.last_run_at).getTime();
+    const stale = ageMs > 24 * 60 * 60 * 1000;
+    let color = '#888';
+    if (row.last_status === 'success') color = '#00cc6a';
+    else if (row.last_status === 'started') color = '#f59e0b';
+    else if (row.last_status === 'failed') color = '#ef4444';
+    if (stale) color = '#ef4444';
+    let detail = '';
+    try { detail = row.last_detail ? (typeof row.last_detail === 'string' ? row.last_detail : JSON.stringify(row.last_detail)) : ''; } catch { detail = ''; }
+    return `
+      <div class="stat-card" style="border-left:3px solid ${color};">
+        <div style="font-weight:600;text-transform:capitalize;">${escapeHtml(row.name)}</div>
+        <div style="font-size:12px;color:${color};margin-top:2px;">${escapeHtml(row.last_status || 'unknown')}${stale ? ' (stale)' : ''}</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">${timeAgo(row.last_run_at)}</div>
+        ${detail ? `<details style="margin-top:6px;font-size:11px;color:var(--text-secondary);"><summary style="cursor:pointer;">detail</summary><pre style="white-space:pre-wrap;margin:4px 0 0;">${escapeHtml(detail)}</pre></details>` : ''}
+      </div>`;
+  }).join('');
+}
+
 function renderAdminDashboard() {
   if (!adminData) {
     return `
@@ -5884,6 +5960,42 @@ function renderAdminDashboard() {
         <div class="stat-value" style="color:#00cc6a;">${formatCost(platformCost.baseCost)}</div>
         <div class="stat-label">Platform Cost</div>
         <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">Base cost (excl. fee)</div>
+      </div>
+    </div>
+
+    <!-- Scheduler Health -->
+    <div class="card" style="padding:0;margin-bottom:24px;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div class="card-title" style="margin:0;">Scheduler Health</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Last cron heartbeats</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;padding:16px 20px;">
+        ${renderSchedulerHealthCards(adminSchedulerHealth)}
+      </div>
+    </div>
+
+    <!-- Recent Frontend Errors -->
+    <div class="card" style="padding:0;margin-bottom:24px;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div class="card-title" style="margin:0;">Recent Frontend Errors</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Last 20 client-side errors</div>
+      </div>
+      <div style="padding:8px 20px;">
+        ${(adminClientErrors || []).length === 0
+          ? '<div style="color:var(--text-secondary);font-size:13px;padding:12px;">No errors reported.</div>'
+          : adminClientErrors.map(e => `
+            <details style="border-bottom:1px solid var(--border);padding:10px 0;">
+              <summary style="cursor:pointer;">
+                <span style="color:#ef4444;font-family:monospace;">${escapeHtml(e.message || '')}</span>
+                <span style="color:var(--text-secondary);font-size:11px;margin-left:8px;">${timeAgo(e.created_at)} — ${escapeHtml(e.user_id || 'anon')}</span>
+              </summary>
+              <div style="font-size:11px;color:var(--text-secondary);margin-top:6px;">
+                <div>URL: ${escapeHtml(e.url || '')}</div>
+                <div>UA: ${escapeHtml(e.user_agent || '')}</div>
+                <pre style="white-space:pre-wrap;background:#111;padding:8px;border-radius:6px;overflow:auto;max-height:240px;">${escapeHtml(e.stack || '')}</pre>
+              </div>
+            </details>
+          `).join('')}
       </div>
     </div>
 

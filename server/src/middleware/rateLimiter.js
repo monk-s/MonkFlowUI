@@ -34,4 +34,21 @@ const webhook = rateLimit({
   message: { error: { message: 'Webhook rate limit reached' } },
 });
 
-module.exports = { global, auth, agentExecute, webhook };
+const clientErrorsGlobal = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { message: 'Too many error reports' } },
+});
+
+const clientErrorsPerIp = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip,
+  message: { error: { message: 'Too many error reports from this IP' } },
+});
+
+module.exports = { global, auth, agentExecute, webhook, clientErrorsGlobal, clientErrorsPerIp };

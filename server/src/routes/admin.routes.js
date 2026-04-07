@@ -10,5 +10,7 @@ router.get('/accounts', adminController.getAccounts);
 router.get('/accounts/:userId', adminController.getAccountDetail);
 router.get('/cost-analytics', adminController.getCostAnalytics);
 router.get('/alerts', adminController.getAlerts);
+router.get('/scheduler-health', adminController.getSchedulerHealth);
+router.get('/client-errors', adminController.getClientErrors);
 
 module.exports = router;
