@@ -23,13 +23,13 @@ function getFollowupTemplate(touchNumber, lead) {
 
   const unsubToken = lead.unsubscribe_token;
   // Use sending domain (getmonkflow.com) for unsub links — must match From domain to avoid spam filters
-  const unsubUrl = unsubToken ? `https://getmonkflow.com/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
+  const unsubUrl = unsubToken ? `https://monkflow.io/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
   const unsubFooter = unsubUrl
     ? `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`
     : '';
   // Tracking pixel for open detection
   const trackingPixel = unsubToken
-    ? `<img src="https://getmonkflow.com/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`
+    ? `<img src="https://monkflow.io/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`
     : '';
 
   switch (touchNumber) {

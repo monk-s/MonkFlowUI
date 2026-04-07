@@ -297,7 +297,7 @@ async function sendAiEmail(leadId) {
   // List-Unsubscribe (Gmail/Yahoo requirement for bulk senders)
   const unsubToken = lead.unsubscribe_token;
   if (unsubToken) {
-    const unsubUrl = `https://getmonkflow.com/api/v1/leadgen/unsubscribe/${unsubToken}`;
+    const unsubUrl = `https://monkflow.io/api/v1/leadgen/unsubscribe/${unsubToken}`;
     emailHeaders['List-Unsubscribe'] = `<${unsubUrl}>`;
     emailHeaders['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
   }
@@ -305,9 +305,9 @@ async function sendAiEmail(leadId) {
   // Append tracking pixel and unsub footer if not already in the body
   let htmlBody = lead.ai_email_body;
   if (unsubToken && !htmlBody.includes('track/open/')) {
-    const unsubUrl = `https://getmonkflow.com/api/v1/leadgen/unsubscribe/${unsubToken}`;
+    const unsubUrl = `https://monkflow.io/api/v1/leadgen/unsubscribe/${unsubToken}`;
     const unsubFooter = `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`;
-    const trackingPixel = `<img src="https://getmonkflow.com/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`;
+    const trackingPixel = `<img src="https://monkflow.io/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`;
     htmlBody = `${htmlBody}${unsubFooter}${trackingPixel}`;
   }
 
