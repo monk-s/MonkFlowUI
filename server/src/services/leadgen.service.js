@@ -116,7 +116,9 @@ async function getHealthySenders() {
 // Static fallbacks kept only for any external references
 // Use the sending domain for all email links (unsubscribe, tracking) so URLs
 // match the From domain — mismatched domains trigger spam filters.
-const SENDING_DOMAIN_BASE = 'https://getmonkflow.com';
+// Tracking pixel + unsubscribe links must use monkflow.io because that's
+// where /api/* is proxied to Railway. getmonkflow.com doesn't route /api/*.
+const SENDING_DOMAIN_BASE = 'https://monkflow.io';
 const UNSUBSCRIBE_BASE = SENDING_DOMAIN_BASE;
 
 // Rotate across 10 sender identities to protect deliverability
