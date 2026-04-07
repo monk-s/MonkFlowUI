@@ -25,6 +25,24 @@ function start() {
     try {
       const stats = await runDailyLeadGeneration();
       console.log('[LEADGEN] Daily run complete:', stats);
+
+      // Reconcile: backfill any outreach_leads sends that weren't mirrored
+      // into outreach_emails (safety net so dashboard analytics never miss data)
+      try {
+        const r = await query(`
+          INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, sent_at, delivered_at, opened_at)
+          SELECT ol.id, 0, ol.ai_email_subject, ol.original_email_body, ol.original_message_id, ol.email_variant, ol.last_sent_at, COALESCE(ol.last_sent_at, NOW()), ol.opened_at
+          FROM outreach_leads ol
+          WHERE ol.last_sent_at >= NOW() - INTERVAL '2 days'
+            AND ol.touch_count >= 1
+            AND NOT EXISTS (SELECT 1 FROM outreach_emails oe WHERE oe.lead_id = ol.id AND oe.touch_number = 0)
+        `);
+        if (r.rowCount > 0) console.log(`[LEADGEN] Reconciled ${r.rowCount} missing outreach_emails rows`);
+        stats.reconciled = r.rowCount;
+      } catch (recErr) {
+        console.warn('[LEADGEN] Reconcile failed:', recErr.message);
+      }
+
       try {
         await query(
           `UPDATE scheduler_heartbeats SET last_status = 'success', last_detail = $1, updated_at = NOW() WHERE name = 'leadgen'`,
