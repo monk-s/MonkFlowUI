@@ -8,6 +8,25 @@ function escapeHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ── Bar tooltip (Daily Activity chart) ─────────────────────
+window.showBarTip = function(e, text) {
+  let t = document.getElementById('__barTip');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = '__barTip';
+    t.style.cssText = 'position:fixed;z-index:99999;background:#1a1a1a;color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;pointer-events:none;border:1px solid #333;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.4);';
+    document.body.appendChild(t);
+  }
+  t.textContent = text;
+  t.style.left = (e.clientX + 12) + 'px';
+  t.style.top = (e.clientY + 12) + 'px';
+  t.style.display = 'block';
+};
+window.hideBarTip = function() {
+  const t = document.getElementById('__barTip');
+  if (t) t.style.display = 'none';
+};
+
 // ── SVG Icons ──────────────────────────────────────────────
 const icons = {
   dashboard: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>`,
@@ -7113,15 +7132,13 @@ function renderOutreachAnalyticsPage() {
     const dateLabel = new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const openPct = sent > 0 ? Math.round((opened / sent) * 1000) / 10 : 0;
     const replyPct = sent > 0 ? Math.round((replied / sent) * 1000) / 10 : 0;
-    const sentTip = `${dateLabel} — Sent: ${sent}`;
-    const openTip = `${dateLabel} — Opened: ${opened} (${openPct}% of sent)`;
-    const replyTip = `${dateLabel} — Replied: ${replied} (${replyPct}% of sent)`;
+    const tip = (label, n, pct) => `${dateLabel} — ${label}: ${n}${pct !== null ? ` (${pct}% of sent)` : ''}`.replace(/'/g, '&#39;');
     return `
       <div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;">
         <div style="display:flex;gap:2px;align-items:flex-end;height:80px;width:100%;">
-          <div title="${sentTip}" style="flex:1;background:#00cc6a;border-radius:2px 2px 0 0;height:${sentH}%;min-height:${sent > 0 ? 2 : 0}px;cursor:help;"></div>
-          <div title="${openTip}" style="flex:1;background:#3b82f6;border-radius:2px 2px 0 0;height:${openedH}%;min-height:${opened > 0 ? 2 : 0}px;cursor:help;"></div>
-          <div title="${replyTip}" style="flex:1;background:#8b5cf6;border-radius:2px 2px 0 0;height:${repliedH}%;min-height:${replied > 0 ? 2 : 0}px;cursor:help;"></div>
+          <div onmouseenter="showBarTip(event,'${tip('Sent', sent, null)}')" onmouseleave="hideBarTip()" style="flex:1;background:#00cc6a;border-radius:2px 2px 0 0;height:${sentH}%;min-height:${sent > 0 ? 2 : 0}px;cursor:pointer;"></div>
+          <div onmouseenter="showBarTip(event,'${tip('Opened', opened, openPct)}')" onmouseleave="hideBarTip()" style="flex:1;background:#3b82f6;border-radius:2px 2px 0 0;height:${openedH}%;min-height:${opened > 0 ? 2 : 0}px;cursor:pointer;"></div>
+          <div onmouseenter="showBarTip(event,'${tip('Replied', replied, replyPct)}')" onmouseleave="hideBarTip()" style="flex:1;background:#8b5cf6;border-radius:2px 2px 0 0;height:${repliedH}%;min-height:${replied > 0 ? 2 : 0}px;cursor:pointer;"></div>
         </div>
         <div style="font-size:9px;color:var(--text-tertiary);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${dateLabel}</div>
       </div>`;
