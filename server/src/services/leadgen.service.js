@@ -612,7 +612,12 @@ async function sendColdEmail(lead, sender) {
 
   const htmlBody = `
     <div style="font-family: -apple-system, sans-serif; max-width: 600px; line-height: 1.6; color: #333;">
-      ${lead.outreach_body.split('\n').map(line => line.trim() ? `<p style="margin: 0 0 12px;">${escapeHtml(line)}</p>` : '<br>').join('')}
+      ${lead.outreach_body.split('\n').map(line => {
+        if (!line.trim()) return '<br>';
+        const escaped = escapeHtml(line);
+        const linked = escaped.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#00cc6a;text-decoration:none;font-weight:600;">$1</a>');
+        return `<p style="margin: 0 0 12px;">${linked}</p>`;
+      }).join('')}
     </div>
     <div style="margin-top: 24px; padding-top: 16px; border-top: 2px solid #00cc6a;">
       <table cellpadding="0" cellspacing="0" style="font-family: -apple-system, sans-serif;">
