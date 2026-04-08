@@ -510,25 +510,25 @@ STRUCTURE — use the framework specified below (C, D, E, or F). Each has a dist
 FRAMEWORK C — "Loom Bait" (low-friction CTA):
 - Open with a one-line observation tied to a specific gap from the diagnosis (e.g., "Saw CrossKeys' booking still routes through a contact form — that usually costs 2-3 leads a week").
 - One sentence of proof: a blinded but specific case ("A 4-provider dental office in Tulsa now handles their entire intake before the patient walks in — built in 9 days").
-- CTA is a yes/no reply, NOT a calendar link: "Want me to record a 2-min Loom showing exactly how I'd set this up for {company}? Just reply 'yes' and I'll send it over."
-- DO NOT include the booking URL in this variant. The CTA is purely a reply.
+- CTA must be a single close-ended interest question (yes/no, no meeting ask, no "thoughts?"). Use this pattern, filling {company}: "Open to a 2-min Loom of exactly how I'd fix this for {company} — yes or no?"
+- DO NOT include the booking URL in this variant. One question, one ask, nothing else.
 
 FRAMEWORK D — "Teardown Offer" (direct + value-first):
 - Open by naming exactly what you'd build, in 2-3 bullets, based on the diagnosis. Example: "For {company} I'd build: (1) online booking that writes back to your CRM, (2) digital intake forms that auto-populate charts, (3) a client portal for document upload."
 - One sentence of social proof with a specific number and a blinded client ("Did this for a 3-provider chiropractic office in Columbus — 11 hrs/week back, 3-week build").
-- CTA: "Want the 5-min teardown I already wrote up for your site? Reply 'send it' and it's yours."
+- CTA must be a single close-ended interest ask. Use this pattern: "Should I send the full 5-min teardown? Just reply 'send it'." No meeting ask, no second question.
 - DO NOT include the booking URL. Reply-only CTA.
 
 FRAMEWORK E — "Sharp Question" (disqualify, don't sell):
 - Open with a disqualifying question that makes them self-select: "Are you the right person to talk to about {company}'s intake/scheduling stack?"
 - Then ONE sentence of concrete proof with a named blinded client and a specific number ("We just took a Tulsa dental office from 18 hrs/week on scheduling to under 2 — 3-week build").
-- CTA: soft question + calendar link: "If you're the right person, worth a look? ${env.bookingUrl}"
+- CTA: a single close-ended interest question followed by the calendar link on its own line. Pattern: "Is fixing this a priority for {company} in the next 30 days? If yes: ${env.bookingUrl}". One question, one link.
 - This is the only variant that uses the booking link.
 
 FRAMEWORK F — "Cost of Inaction" (numeric stake):
 - Open with a cost-of-current-state line grounded in their diagnosis: "Rough math: if your front desk spends ~10 hrs/week on booking and intake at $22/hr, that's ~$11K/year going to paperwork before you count no-shows."
 - One sentence of what you'd replace it with, and a blinded client result.
-- CTA: "Worth me sending a 2-min breakdown of how I'd cut that in half? Reply 'yes'."
+- CTA must be a single close-ended interest question. Pattern: "Want the 2-min breakdown of how I'd cut that number in half? Reply 'yes' and it's in your inbox today." One ask, no meeting request.
 - DO NOT include the booking URL. Reply-only CTA.
 
 CASE STUDIES (use one that matches their industry; blind the client name but keep the city/size/number specific):
