@@ -1,6 +1,7 @@
 const { query } = require('../config/database');
 const env = require('../config/env');
 const { sendEmail } = require('./email.service');
+const pushover = require('./pushover.client');
 
 // HTML escape for safe injection into email notifications
 function escapeHtml(str) {
@@ -172,6 +173,9 @@ async function processInboundReply({ from, to, subject, body, inReplyTo }) {
     return { matched: false, reason: `No matching lead found for ${senderEmail}` };
   }
 
+  // Capture whether this is the first reply BEFORE we update the row
+  const isFirstReply = !lead.replied_at;
+
   // Classify the reply
   const { sentiment, summary } = await classifyReply(cleanBody);
 
@@ -253,6 +257,20 @@ async function processInboundReply({ from, to, subject, body, inReplyTo }) {
         <p><a href="${env.frontendUrl}/outreach" style="background:#00cc6a;color:#000;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">View in Dashboard</a></p>
       </div>`,
     }).catch(err => console.error('[ReplyDetector] Failed to send admin email:', err.message));
+  }
+
+  // Instant phone push on FIRST reply only, skip OOO + negative to avoid alert fatigue
+  if (isFirstReply && (sentiment === 'positive' || sentiment === 'neutral')) {
+    const leadName = lead.contact_name || senderEmail;
+    const company = lead.company ? ` (${lead.company})` : '';
+    const emoji = sentiment === 'positive' ? '🔥' : '💬';
+    pushover.sendPush({
+      title: `${emoji} Cold reply: ${leadName}${company}`,
+      message: (summary || cleanBody).slice(0, 240),
+      url: `${env.frontendUrl}/admin#triage-${lead.id}`,
+      urlTitle: 'Open triage',
+      priority: sentiment === 'positive' ? 1 : 0,
+    }).catch(err => console.error('[ReplyDetector] Pushover error:', err.message));
   }
 
   console.log(`[ReplyDetector] Classified reply from ${senderEmail}: ${sentiment} — ${summary}`);

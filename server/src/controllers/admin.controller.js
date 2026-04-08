@@ -242,4 +242,58 @@ const getClientErrors = catchAsync(async (req, res) => {
   res.json({ data: rows });
 });
 
-module.exports = { getPlatformStats, getAccounts, getAccountDetail, getCostAnalytics, getAlerts, getSchedulerHealth, getClientErrors };
+// ── Reply Triage ──────────────────────────────────────────
+// Lists replied cold-email leads needing human action.
+const getReplyTriage = catchAsync(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
+  const includeArchived = req.query.includeArchived === 'true';
+  const archivedClause = includeArchived ? '' : `AND ol.triage_status IN ('new','snoozed')`;
+  const { rows } = await query(
+    `SELECT
+       ol.id,
+       ol.contact_name,
+       ol.contact_email,
+       ol.company,
+       ol.replied_at,
+       ol.reply_sentiment,
+       ol.reply_summary,
+       ol.reply_is_ooo,
+       ol.triage_status,
+       ol.triage_note,
+       ol.triage_updated_at,
+       ol.ai_email_subject,
+       ol.ai_email_body,
+       (SELECT reply_body FROM outreach_emails WHERE lead_id = ol.id AND reply_body IS NOT NULL ORDER BY reply_received_at DESC LIMIT 1) AS reply_body
+     FROM outreach_leads ol
+     WHERE ol.replied_at IS NOT NULL
+       ${archivedClause}
+     ORDER BY ol.replied_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  res.json({ data: rows });
+});
+
+const updateReplyTriage = catchAsync(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) throw new ApiError(400, 'Invalid lead id');
+  const { triage_status, triage_note } = req.body;
+  const allowed = ['new', 'booked', 'not_interested', 'snoozed', 'closed'];
+  if (!allowed.includes(triage_status)) {
+    throw new ApiError(400, `triage_status must be one of: ${allowed.join(', ')}`);
+  }
+  const { rows } = await query(
+    `UPDATE outreach_leads
+     SET triage_status = $2,
+         triage_note = COALESCE($3, triage_note),
+         triage_updated_at = NOW(),
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING id, triage_status, triage_note, triage_updated_at`,
+    [id, triage_status, triage_note || null]
+  );
+  if (!rows[0]) throw new ApiError(404, 'Lead not found');
+  res.json({ data: rows[0] });
+});
+
+module.exports = { getPlatformStats, getAccounts, getAccountDetail, getCostAnalytics, getAlerts, getSchedulerHealth, getClientErrors, getReplyTriage, updateReplyTriage };

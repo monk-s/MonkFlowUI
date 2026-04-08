@@ -18,3 +18,7 @@ npm-debug.log*
 .vscode/
 .idea/
 google-service-account.json
+
+# Local artifacts (not code)
+Client Kickoff/
+DIRECTORY_LISTINGS_RESEARCH.md

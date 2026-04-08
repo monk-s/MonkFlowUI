@@ -165,6 +165,7 @@ let billingInvoices = [];
 let adminQboStatus = null;
 let adminSchedulerHealth = null;
 let adminClientErrors = [];
+let adminReplyTriage = [];
 
 // ── Type Mappings ──────────────────────────────────────────
 const FRONTEND_TO_BACKEND_TYPE = {
@@ -5604,17 +5605,19 @@ async function handleSendInvite() {
 
 async function loadAdminData() {
   try {
-    const [statsRes, accountsRes, alertsRes, schedRes, errRes] = await Promise.all([
+    const [statsRes, accountsRes, alertsRes, schedRes, errRes, triageRes] = await Promise.all([
       api.get('/admin/stats'),
       api.get('/admin/accounts?limit=100'),
       api.get('/admin/alerts').catch(() => ({ data: [] })),
       api.get('/admin/scheduler-health').catch(() => ({ data: [] })),
       api.get('/admin/client-errors').catch(() => ({ data: [] })),
+      api.get('/admin/reply-triage').catch(() => ({ data: [] })),
     ]);
     adminData = statsRes.data || statsRes;
     adminAccounts = accountsRes.data || accountsRes;
     adminSchedulerHealth = (schedRes && (schedRes.data || schedRes)) || [];
     adminClientErrors = (errRes && (errRes.data || errRes)) || [];
+    adminReplyTriage = (triageRes && (triageRes.data || triageRes)) || [];
     // Also load QBO status for admin
     try {
       const qboRes = await api.get('/quickbooks/status');
@@ -5872,6 +5875,80 @@ function renderSchedulerHealthCards(rows) {
   }).join('');
 }
 
+// ── Reply Triage card ─────────────────────────────────────
+function renderReplyTriageCard(replies) {
+  const list = Array.isArray(replies) ? replies : [];
+  const sentimentBadge = (s, ooo) => {
+    if (ooo) return '<span style="background:#71717a22;color:#a1a1aa;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">💤 OOO</span>';
+    if (s === 'positive') return '<span style="background:#00cc6a22;color:#00cc6a;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">🟢 Positive</span>';
+    if (s === 'negative') return '<span style="background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">🔴 Negative</span>';
+    return '<span style="background:#3b82f622;color:#3b82f6;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">🟡 Neutral</span>';
+  };
+  const triageBadge = (t) => {
+    const map = { new: ['#f59e0b','New'], snoozed: ['#71717a','Snoozed'], booked: ['#00cc6a','Booked'], not_interested: ['#ef4444','Not interested'], closed: ['#52525b','Closed'] };
+    const [c, label] = map[t] || ['#52525b', t || ''];
+    return `<span style="background:${c}22;color:${c};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${label}</span>`;
+  };
+  const rows = list.length === 0
+    ? `<div style="padding:24px;color:var(--text-secondary);font-size:13px;text-align:center;">No replies yet — first cron run hasn't fired or no replies received.</div>`
+    : list.map(r => {
+        const name = escapeHtml(r.contact_name || r.contact_email || 'Unknown');
+        const company = r.company ? ` · ${escapeHtml(r.company)}` : '';
+        const replyExcerpt = escapeHtml((r.reply_body || r.reply_summary || '').slice(0, 280));
+        const mailtoSubject = encodeURIComponent('Re: ' + (r.ai_email_subject || ''));
+        return `
+          <details id="triage-${r.id}" style="border-bottom:1px solid var(--border);padding:14px 20px;">
+            <summary style="cursor:pointer;display:flex;align-items:center;gap:12px;list-style:none;">
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                  <strong>${name}</strong>${company}
+                  ${sentimentBadge(r.reply_sentiment, r.reply_is_ooo)}
+                  ${triageBadge(r.triage_status)}
+                  <span style="color:var(--text-secondary);font-size:11px;">${timeAgo(r.replied_at)}</span>
+                </div>
+                <div style="color:var(--text-secondary);font-size:12px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${replyExcerpt}</div>
+              </div>
+            </summary>
+            <div style="margin-top:12px;display:grid;gap:10px;">
+              ${r.ai_email_subject ? `<div style="font-size:11px;color:var(--text-secondary);">Original sent: <strong>${escapeHtml(r.ai_email_subject)}</strong></div>` : ''}
+              ${r.ai_email_body ? `<details><summary style="cursor:pointer;font-size:12px;color:var(--text-secondary);">Show original AI email</summary><pre style="white-space:pre-wrap;background:#111;padding:10px;border-radius:6px;font-size:12px;margin-top:6px;">${escapeHtml(r.ai_email_body)}</pre></details>` : ''}
+              ${r.reply_body ? `<div><div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">Reply body</div><pre style="white-space:pre-wrap;background:#0a0a0a;border:1px solid var(--border);padding:10px;border-radius:6px;font-size:12px;">${escapeHtml(r.reply_body)}</pre></div>` : ''}
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <a class="btn btn-primary btn-sm" href="mailto:${encodeURIComponent(r.contact_email || '')}?subject=${mailtoSubject}" target="_blank">📧 Reply in Gmail</a>
+                <button class="btn btn-ghost btn-sm" onclick="updateTriage(${r.id}, 'booked')">📅 Booked</button>
+                <button class="btn btn-ghost btn-sm" onclick="updateTriage(${r.id}, 'snoozed')">💤 Snooze</button>
+                <button class="btn btn-ghost btn-sm" onclick="updateTriage(${r.id}, 'not_interested')">❌ Not interested</button>
+                <button class="btn btn-ghost btn-sm" onclick="updateTriage(${r.id}, 'closed')">✓ Close</button>
+              </div>
+            </div>
+          </details>
+        `;
+      }).join('');
+
+  const newCount = list.filter(r => r.triage_status === 'new').length;
+  return `
+    <div class="card" style="padding:0;margin-bottom:24px;border:1px solid ${newCount > 0 ? 'rgba(245,158,11,0.4)' : 'var(--border)'};">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div class="card-title" style="margin:0;">📬 Reply Triage ${newCount > 0 ? `<span style="background:#f59e0b;color:#000;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;">${newCount} new</span>` : ''}</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Cold-email replies needing your action — respond fast for max conversion</div>
+        </div>
+      </div>
+      ${rows}
+    </div>
+  `;
+}
+
+async function updateTriage(id, status) {
+  try {
+    await api.patch(`/admin/reply-triage/${id}`, { triage_status: status });
+    showToast(`Marked ${status.replace('_', ' ')}`, 'success');
+    await loadAdminData();
+  } catch (err) {
+    showToast(err.message || 'Failed to update', 'error');
+  }
+}
+
 function renderAdminDashboard() {
   if (!adminData) {
     return `
@@ -5981,6 +6058,9 @@ function renderAdminDashboard() {
         <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">Base cost (excl. fee)</div>
       </div>
     </div>
+
+    <!-- Reply Triage (highest-priority card — first replies = revenue) -->
+    ${renderReplyTriageCard(adminReplyTriage)}
 
     <!-- Scheduler Health -->
     <div class="card" style="padding:0;margin-bottom:24px;">

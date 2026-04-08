@@ -12,5 +12,7 @@ router.get('/cost-analytics', adminController.getCostAnalytics);
 router.get('/alerts', adminController.getAlerts);
 router.get('/scheduler-health', adminController.getSchedulerHealth);
 router.get('/client-errors', adminController.getClientErrors);
+router.get('/reply-triage', adminController.getReplyTriage);
+router.patch('/reply-triage/:id', adminController.updateReplyTriage);
 
 module.exports = router;
