@@ -162,6 +162,16 @@ async function processDueFollowups() {
           const threadRef = messageId.includes('<') ? messageId : `<${messageId}>`;
           emailHeaders['In-Reply-To'] = threadRef;
           emailHeaders['References'] = threadRef;
+        } else {
+          // No original Message-ID means we cannot RFC-5322 thread this as a reply.
+          // Strip any "Re:" prefix the template/AI added so the email doesn't look
+          // like a fake reply in inboxes that don't nest it (major deliverability
+          // hit otherwise). Logged so we can audit orphaned leads.
+          if (template.subject && /^re:\s*/i.test(template.subject)) {
+            template.subject = template.subject.replace(/^re:\s*/i, '').trim();
+            if (!template.subject) template.subject = lead.ai_email_subject || 'quick follow-up';
+          }
+          console.warn(`[OUTREACH] No Message-ID for ${lead.contact_email} (lead ${lead.id}) — sending as non-threaded follow-up`);
         }
 
         const unsubToken = lead.unsubscribe_token;
