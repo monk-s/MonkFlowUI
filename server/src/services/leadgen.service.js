@@ -505,37 +505,59 @@ WEBSITE DIAGNOSIS:
 - Design: ${diagnosis.design_age_estimate}
 - Issues: ${diagnosis.issues.join(', ') || 'None major'}
 
-STRUCTURE — randomly pick ONE of these two frameworks:
+STRUCTURE — use the framework specified below (C, D, E, or F). Each has a distinct voice, opener, and CTA. Follow it exactly.
 
-FRAMEWORK A — "Insight Lead":
-Open with a specific, useful stat or insight relevant to their industry (e.g., "${lead.business_type} businesses that add online self-scheduling typically see 30-40% fewer no-shows and free up 8-10 hours/week"). Use the diagnosis to make it relevant. Then connect it to a concrete result you've delivered — one sentence. Close with a soft question CTA.
+FRAMEWORK C — "Loom Bait" (low-friction CTA):
+- Open with a one-line observation tied to a specific gap from the diagnosis (e.g., "Saw CrossKeys' booking still routes through a contact form — that usually costs 2-3 leads a week").
+- One sentence of proof: a blinded but specific case ("A 4-provider dental office in Tulsa now handles their entire intake before the patient walks in — built in 9 days").
+- CTA is a yes/no reply, NOT a calendar link: "Want me to record a 2-min Loom showing exactly how I'd set this up for {company}? Just reply 'yes' and I'll send it over."
+- DO NOT include the booking URL in this variant. The CTA is purely a reply.
 
-FRAMEWORK B — "Question Lead":
-Open with a specific question about their operations they can't ignore (e.g., "Curious — how much of your week goes to [specific task from diagnosis]?"). Then share one concrete result. Close with a soft question CTA.
+FRAMEWORK D — "Teardown Offer" (direct + value-first):
+- Open by naming exactly what you'd build, in 2-3 bullets, based on the diagnosis. Example: "For {company} I'd build: (1) online booking that writes back to your CRM, (2) digital intake forms that auto-populate charts, (3) a client portal for document upload."
+- One sentence of social proof with a specific number and a blinded client ("Did this for a 3-provider chiropractic office in Columbus — 11 hrs/week back, 3-week build").
+- CTA: "Want the 5-min teardown I already wrote up for your site? Reply 'send it' and it's yours."
+- DO NOT include the booking URL. Reply-only CTA.
 
-CASE STUDIES (pick the most relevant):
-1. Wealth management firm: automated client onboarding + CRM integration. Cut onboarding from 45 min to under 5.
-2. Healthcare practice: online scheduling + automated intake forms. Freed 12 hrs/week, reduced no-shows 35%.
-3. E-commerce brand: order-to-fulfillment automation. Eliminated 15 hrs/week of manual processing.
+FRAMEWORK E — "Sharp Question" (disqualify, don't sell):
+- Open with a disqualifying question that makes them self-select: "Are you the right person to talk to about {company}'s intake/scheduling stack?"
+- Then ONE sentence of concrete proof with a named blinded client and a specific number ("We just took a Tulsa dental office from 18 hrs/week on scheduling to under 2 — 3-week build").
+- CTA: soft question + calendar link: "If you're the right person, worth a look? ${env.bookingUrl}"
+- This is the only variant that uses the booking link.
 
-HARD RULES:
-- Under 100 words total. 3-4 short paragraphs max.
-- Start with "Hey ${getFirstName(lead.contact_person, lead.email)}," — ALWAYS use this exact name. Never "Hi" (too formal for cold email).
-- NEVER start the first sentence with "I". Lead with them, a question, or an insight.
-- NEVER use: "I noticed your site", "I came across", "I was checking out", "reaching out", "touching base", "hope this finds you well", "I'd love to".
-- Subject line: 2-5 words, lowercase, no punctuation. Must feel like a text from a coworker. Good: "{company} + automation", "your booking page", "saving 10 hrs/week". Bad: "idea for your website", "quick thought".
-- CTA: one soft question, and include a booking link naturally. Example: "Worth a quick chat? Here's my calendar: ${env.bookingUrl}" — but keep it casual. NEVER mention "15-minute call" or any specific time commitment.
+FRAMEWORK F — "Cost of Inaction" (numeric stake):
+- Open with a cost-of-current-state line grounded in their diagnosis: "Rough math: if your front desk spends ~10 hrs/week on booking and intake at $22/hr, that's ~$11K/year going to paperwork before you count no-shows."
+- One sentence of what you'd replace it with, and a blinded client result.
+- CTA: "Worth me sending a 2-min breakdown of how I'd cut that in half? Reply 'yes'."
+- DO NOT include the booking URL. Reply-only CTA.
+
+CASE STUDIES (use one that matches their industry; blind the client name but keep the city/size/number specific):
+1. Wealth management firm (4-advisor, Dallas): automated client onboarding + CRM. 45 min → under 5.
+2. Dental practice (4-provider, Tulsa): online scheduling + intake forms. 18 hrs/week → 2 hrs/week. Build: 3 weeks.
+3. Chiropractic office (3-provider, Columbus): digital intake + scheduling. 11 hrs/week saved.
+4. E-commerce brand (Shopify, Austin): order-to-fulfillment automation. 15 hrs/week eliminated.
+
+HARD RULES (apply to ALL frameworks):
+- Under 90 words total. The email must be skimmable in under 10 seconds.
+- Start with "Hey ${getFirstName(lead.contact_person, lead.email)}," — use this exact name. Never "Hi".
+- The first sentence after the greeting must reference something CONCRETE about them: their company name, a specific gap from the diagnosis, or an observable fact. Never start with a generic industry stat.
+- NEVER use these phrases: "Curious —", "Worth exploring", "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to", "looking forward".
+- The case study line must include a specific number AND a specific blinded client descriptor (size + city or industry). Never "a healthcare practice" — always "a 4-provider dental office in Tulsa" or similar.
+- Subject line: 2-5 words, lowercase, no punctuation, no emoji. Must reference something specific to them (company name, a word from their niche, or the gap). Good: "{company} + intake", "your booking page", "tulsa dental automation". Bad: "scheduling headaches", "quick thought".
 - Sign off as just "Nathan" — no last name, no company, no title.
-- Case study should be ONE sentence woven in, never its own paragraph.
 
 Return JSON: {"subject": "...", "body": "..."}`;
 
-  // A/B variant override: if a specific variant is requested, instruct the AI accordingly
+  // Variant → framework mapping. Each variant hard-locks the AI to one framework.
+  const frameworkMap = {
+    C: 'C ("Loom Bait")',
+    D: 'D ("Teardown Offer")',
+    E: 'E ("Sharp Question")',
+    F: 'F ("Cost of Inaction")',
+  };
   let variantInstruction = '';
-  if (variant === 'A') {
-    variantInstruction = '\n\nIMPORTANT: You MUST use FRAMEWORK A ("Insight Lead") for this email. Do NOT use Framework B.';
-  } else if (variant === 'B') {
-    variantInstruction = '\n\nIMPORTANT: You MUST use FRAMEWORK B ("Question Lead") for this email. Do NOT use Framework A.';
+  if (frameworkMap[variant]) {
+    variantInstruction = `\n\nIMPORTANT: You MUST use FRAMEWORK ${frameworkMap[variant]} for this email. Do NOT use any other framework. Follow its CTA rules exactly — especially whether or not to include the booking URL.`;
   }
 
   const MAX_RETRIES = 5;
@@ -838,9 +860,18 @@ async function runDailyLeadGeneration() {
         const recSenders = await getHealthySenders();
         const recCounts = new Map(recSenders.map(s => [s.email, 0]));
         let recIdx = 0;
+        const REC_VARIANTS = ['C', 'D', 'E', 'F'];
+        let recVariantCursor = 0;
         for (const lead of stuckLeads) {
+          // Skip nameless leads — don't send "Hey there" blasts
+          const fn = getFirstName(lead.contact_person, lead.email);
+          if (!fn || fn === 'there') {
+            try { await dbQuery(`UPDATE leads SET status = 'skipped_no_name' WHERE id = $1`, [lead.id]); } catch (_) {}
+            continue;
+          }
           try {
-            const variant = 'B';
+            const variant = REC_VARIANTS[recVariantCursor % REC_VARIANTS.length];
+            recVariantCursor++;
             const { subject, body } = await generateOutreachEmail(lead, lead.diagnosis_json, null, variant);
             await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated', email_variant: variant });
             lead.outreach_subject = subject;
@@ -1081,12 +1112,45 @@ async function runDailyLeadGeneration() {
     } catch (_) { /* no winner yet */ }
   }
 
+  // Filter out leads where we can't find a real first name. Sending "Hey there"
+  // tanks reply rate — previous data showed 25% of sends going to "Hey there"
+  // with 0 replies. Better to skip than blast generic greetings.
+  const beforeFilter = toEmail.length;
+  const skippedNoName = [];
+  const withName = [];
+  for (const lead of toEmail) {
+    const fn = getFirstName(lead.contact_person, lead.email);
+    if (!fn || fn === 'there') {
+      skippedNoName.push(lead);
+    } else {
+      withName.push(lead);
+    }
+  }
+  if (skippedNoName.length > 0) {
+    console.log(`[LEADGEN] Skipping ${skippedNoName.length}/${beforeFilter} leads with no identifiable first name (would send "Hey there")`);
+    await logExec('info', `Skipped ${skippedNoName.length} nameless leads`, { count: skippedNoName.length, total: beforeFilter });
+    // Mark them so we don't re-process tomorrow
+    try {
+      const ids = skippedNoName.map(l => l.id);
+      if (ids.length > 0) {
+        await dbQuery(`UPDATE leads SET status = 'skipped_no_name' WHERE id = ANY($1::int[])`, [ids]);
+      }
+    } catch (_) {}
+  }
+  // Use the name-filtered list from here on
+  toEmail.length = 0;
+  toEmail.push(...withName);
+
   await logExec('info', `Email generation starting for ${toEmail.length} leads`, { leadCount: toEmail.length });
+  // A/B/C/D test: distribute evenly across 4 new frameworks (C, D, E, F).
+  // Previous variants A and B are retired — existing data preserved for
+  // historical comparison. Round-robin ensures exact 25% split per run.
+  const TEST_VARIANTS = ['C', 'D', 'E', 'F'];
+  let variantCursor = 0;
   for (const lead of toEmail) {
     try {
-      // Always use Variant B — proven 51% open rate vs 6.4% for Variant A
-      // (A/B infrastructure kept intact for future testing)
-      let variant = 'B';
+      const variant = TEST_VARIANTS[variantCursor % TEST_VARIANTS.length];
+      variantCursor++;
       lead.email_variant = variant;
 
       const { subject, body } = await generateOutreachEmail(lead, lead.diagnosis_json, (attempt, maxRetries, errMsg) => {
