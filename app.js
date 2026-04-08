@@ -7054,8 +7054,11 @@ function switchOutreachTab(tab, el) {
 async function loadOutreachAnalytics(days) {
   if (days !== undefined) outreachAnalyticsDays = days;
   try {
-    const res = await api.get(`/outreach/analytics?days=${outreachAnalyticsDays}`);
-    outreachAnalyticsData = res;
+    const [res, ab] = await Promise.all([
+      api.get(`/outreach/analytics?days=${outreachAnalyticsDays}`),
+      api.get('/outreach/ab-results').catch(() => ({ data: [] })),
+    ]);
+    outreachAnalyticsData = { ...res, abResults: ab.data || [] };
     if (currentPage === 'outreach') renderMainContent();
   } catch (err) {
     showToast(err.message || 'Failed to load outreach analytics', 'error');
@@ -7091,6 +7094,62 @@ function renderOutreachAnalyticsPage() {
   const byIndustry = (d.byIndustry || []).sort((a, b) => (parseFloat(b.reply_rate) || 0) - (parseFloat(a.reply_rate) || 0));
   const byTouch = d.byTouch || [];
   const senderHealth = d.senderHealth || [];
+  const abResults = d.abResults || [];
+
+  // A/B/C/D variant breakdown — highlight active test variants (C-F), show retired A/B greyed out
+  const ACTIVE_VARIANTS = ['C', 'D', 'E', 'F'];
+  const sortedAb = [...abResults].sort((a, b) => {
+    const aActive = ACTIVE_VARIANTS.includes(a.variant) ? 0 : 1;
+    const bActive = ACTIVE_VARIANTS.includes(b.variant) ? 0 : 1;
+    if (aActive !== bActive) return aActive - bActive;
+    return (parseFloat(b.reply_rate) || 0) - (parseFloat(a.reply_rate) || 0);
+  });
+  const activeAb = sortedAb.filter(r => ACTIVE_VARIANTS.includes(r.variant));
+  const winnerVariant = activeAb.length > 0
+    ? activeAb.reduce((best, cur) => {
+        const bestReply = parseFloat(best.reply_rate) || 0;
+        const curReply = parseFloat(cur.reply_rate) || 0;
+        if (curReply !== bestReply) return curReply > bestReply ? cur : best;
+        // tiebreak on open rate
+        return (parseFloat(cur.open_rate) || 0) > (parseFloat(best.open_rate) || 0) ? cur : best;
+      }).variant
+    : null;
+
+  const variantHtml = sortedAb.length > 0 ? sortedAb.map(row => {
+    const isActive = ACTIVE_VARIANTS.includes(row.variant);
+    const isWinner = isActive && row.variant === winnerVariant && parseInt(row.sent) >= 20;
+    const sent = parseInt(row.sent) || 0;
+    const openRate = parseFloat(row.open_rate) || 0;
+    const replyRate = parseFloat(row.reply_rate) || 0;
+    const opacity = isActive ? 1 : 0.45;
+    const borderColor = isWinner ? '#00cc6a' : 'var(--border)';
+    const bgTint = isWinner ? 'linear-gradient(135deg, rgba(0,204,106,0.06), transparent)' : 'transparent';
+    const label = escapeHtml(row.label || row.variant);
+    return `
+      <div style="padding:14px 16px;border:1px solid ${borderColor};border-radius:8px;opacity:${opacity};background:${bgTint};position:relative;">
+        ${isWinner ? '<span style="position:absolute;top:-8px;right:12px;background:#00cc6a;color:#000;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.5px;">LEADER</span>' : ''}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${label}</div>
+          <div style="font-size:11px;color:var(--text-tertiary);">${sent} sent</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:2px;">Open rate</div>
+            <div style="font-size:18px;font-weight:700;color:var(--text-primary);">${openRate}%</div>
+            <div style="height:4px;background:var(--bg-primary);border-radius:2px;margin-top:4px;overflow:hidden;">
+              <div style="height:100%;width:${Math.min(openRate, 100)}%;background:#3b82f6;"></div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:2px;">Reply rate</div>
+            <div style="font-size:18px;font-weight:700;color:${replyRate > 0 ? '#00cc6a' : 'var(--text-primary)'};">${replyRate}%</div>
+            <div style="height:4px;background:var(--bg-primary);border-radius:2px;margin-top:4px;overflow:hidden;">
+              <div style="height:100%;width:${Math.min(replyRate * 10, 100)}%;background:#8b5cf6;"></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join('') : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No variant data yet — send some emails to start the test.</div>';
 
   // Funnel visualization
   const funnelSteps = [
@@ -7252,6 +7311,19 @@ function renderOutreachAnalyticsPage() {
     <div class="card" style="padding:20px;margin-bottom:20px;">
       <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:16px;">Conversion Funnel</div>
       ${funnelHtml}
+    </div>
+
+    <!-- A/B Variant Breakdown -->
+    <div class="card" style="padding:20px;margin-bottom:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div>
+          <div style="font-size:16px;font-weight:600;color:var(--text-primary);">Email Variant Test</div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">C/D/E/F are the active 4-way test. A/B are retired (historical).</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;">
+        ${variantHtml}
+      </div>
     </div>
 
     <!-- Daily Trend -->

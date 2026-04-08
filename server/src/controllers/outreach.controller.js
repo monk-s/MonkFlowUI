@@ -636,6 +636,14 @@ const getAnalytics = catchAsync(async (req, res) => {
 // ── A/B Testing Results ──────────────────────────────────
 
 const getAbResults = catchAsync(async (req, res) => {
+  const VARIANT_LABELS = {
+    A: 'A — Insight Lead (retired)',
+    B: 'B — Question Lead (retired)',
+    C: 'C — Loom Bait',
+    D: 'D — Teardown Offer',
+    E: 'E — Sharp Question',
+    F: 'F — Cost of Inaction',
+  };
   const { rows } = await query(`
     SELECT
       ol.email_variant AS variant,
@@ -647,12 +655,12 @@ const getAbResults = catchAsync(async (req, res) => {
       ROUND(COUNT(*) FILTER (WHERE ol.replied_at IS NOT NULL OR ol.status = 'replied')::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS reply_rate
     FROM outreach_leads ol
     WHERE ol.touch_count >= 1
-      AND ol.email_variant IN ('A', 'B')
-      AND ol.source_lead_id IS NOT NULL
+      AND ol.email_variant IN ('A', 'B', 'C', 'D', 'E', 'F')
     GROUP BY ol.email_variant
     ORDER BY variant
   `);
-  res.json({ data: rows });
+  const data = rows.map(r => ({ ...r, label: VARIANT_LABELS[r.variant] || r.variant }));
+  res.json({ data });
 });
 
 // ── Lead email timeline (for sidebar) ─────────────────────
