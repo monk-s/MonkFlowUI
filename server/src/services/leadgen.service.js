@@ -817,6 +817,71 @@ async function runDailyLeadGeneration() {
     await logExec('error', `Resume unsent leads failed: ${resumeErr.message}`, { error: resumeErr.message });
   }
 
+  // 0b. Recover leads stuck in 'diagnosed' status (personalization never
+  // completed on a previous run — e.g. Claude API hang). Re-personalize
+  // and send inline, capped so they can't eat the whole daily quota.
+  try {
+    const RECOVERY_CAP = Math.max(0, Math.floor(resumeWarming.daily / 2));
+    if (RECOVERY_CAP > 0) {
+      const { rows: stuckLeads } = await dbQuery(
+        `SELECT * FROM leads
+         WHERE status = 'diagnosed'
+           AND diagnosis_json IS NOT NULL
+           AND (outreach_subject IS NULL OR outreach_body IS NULL)
+         ORDER BY COALESCE(lead_score, 0) DESC, created_at
+         LIMIT $1`,
+        [RECOVERY_CAP]
+      );
+      if (stuckLeads.length > 0) {
+        console.log(`[LEADGEN] Recovering ${stuckLeads.length} leads stuck in 'diagnosed' status`);
+        await logExec('info', `Recovering ${stuckLeads.length} stuck 'diagnosed' leads`, { count: stuckLeads.length });
+        const recSenders = await getHealthySenders();
+        const recCounts = new Map(recSenders.map(s => [s.email, 0]));
+        let recIdx = 0;
+        for (const lead of stuckLeads) {
+          try {
+            const variant = 'B';
+            const { subject, body } = await generateOutreachEmail(lead, lead.diagnosis_json, null, variant);
+            await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated', email_variant: variant });
+            lead.outreach_subject = subject;
+            lead.outreach_body = body;
+            lead.email_variant = variant;
+            stats.emailsGenerated++;
+          } catch (genErr) {
+            console.error(`[LEADGEN] Recovery personalization failed for ${lead.email}:`, genErr.message);
+            stats.errors++;
+            await sleep(500);
+            continue;
+          }
+          // Send it now
+          let sender = null;
+          for (let j = 0; j < recSenders.length; j++) {
+            const cand = recSenders[(recIdx + j) % recSenders.length];
+            if (recCounts.get(cand.email) < resumeWarming.perSender) {
+              sender = cand;
+              recIdx = (recIdx + j + 1) % recSenders.length;
+              break;
+            }
+          }
+          if (!sender) { console.log('[LEADGEN] Recovery: senders maxed, stopping'); break; }
+          const result = await sendColdEmail(lead, sender);
+          if (result.success) {
+            stats.emailed++;
+            recCounts.set(sender.email, recCounts.get(sender.email) + 1);
+            trackSend(sender.email);
+          } else {
+            stats.errors++;
+          }
+          await sleep(1000);
+        }
+        console.log(`[LEADGEN] Recovery complete: ${stats.emailed} total sent so far`);
+      }
+    }
+  } catch (recErr) {
+    console.error('[LEADGEN] Diagnosed recovery error:', recErr.message);
+    await logExec('error', `Diagnosed recovery failed: ${recErr.message}`, { error: recErr.message });
+  }
+
   // 1. Pick firm types and cities — budget ~140 searches/day to stay under remaining monthly limit
   // 10 firm types × 22 cities = 220 searches/day × 22 weekdays = 4,840/month (of 5,000 limit)
   const cities = shuffle(US_CITIES).slice(0, 22);
