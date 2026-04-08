@@ -103,9 +103,9 @@ async function processDueFollowups() {
 
   try {
     await query(
-      `INSERT INTO scheduler_heartbeats (name, last_run_at, last_status, updated_at)
-       VALUES ('outreach', NOW(), 'started', NOW())
-       ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), last_status = 'started', updated_at = NOW()`
+      `INSERT INTO scheduler_heartbeats (name, last_run_at, last_status, last_detail, updated_at)
+       VALUES ('outreach', NOW(), 'started', NULL, NOW())
+       ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), last_status = 'started', last_detail = NULL, updated_at = NOW()`
     );
   } catch (_) {}
 

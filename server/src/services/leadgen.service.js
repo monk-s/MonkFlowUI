@@ -541,11 +541,15 @@ Return JSON: {"subject": "...", "body": "..."}`;
   const MAX_RETRIES = 5;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await client.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 500,
-        messages: [{ role: 'user', content: prompt + variantInstruction }],
-      });
+      // Hard 60s timeout — prevents silent hangs that stall the whole cron run
+      const response = await Promise.race([
+        client.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 500,
+          messages: [{ role: 'user', content: prompt + variantInstruction }],
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Claude API timeout after 60s')), 60000)),
+      ]);
 
       const text = response.content[0].text;
       const jsonMatch = text.match(/\{[\s\S]*\}/);

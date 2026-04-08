@@ -17,13 +17,18 @@ function start() {
     // Heartbeat: mark that the cron actually fired (before run, in case run errors)
     try {
       await query(
-        `INSERT INTO scheduler_heartbeats (name, last_run_at, last_status, updated_at)
-         VALUES ('leadgen', NOW(), 'started', NOW())
-         ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), last_status = 'started', updated_at = NOW()`
+        `INSERT INTO scheduler_heartbeats (name, last_run_at, last_status, last_detail, updated_at)
+         VALUES ('leadgen', NOW(), 'started', NULL, NOW())
+         ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), last_status = 'started', last_detail = NULL, updated_at = NOW()`
       );
     } catch (_) {}
     try {
-      const stats = await runDailyLeadGeneration();
+      // Global 30-min watchdog — if anything hangs silently, this forces failure
+      // so the heartbeat flips to 'failed' instead of stuck on 'started' forever.
+      const stats = await Promise.race([
+        runDailyLeadGeneration(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('runDailyLeadGeneration timeout after 30min')), 30 * 60 * 1000)),
+      ]);
       console.log('[LEADGEN] Daily run complete:', stats);
 
       // Reconcile: backfill any outreach_leads sends that weren't mirrored
