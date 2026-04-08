@@ -17,12 +17,12 @@ const emailExists = async (email) => {
 
 const insert = async (data) => {
   const { rows } = await query(
-    `INSERT INTO leads (business_name, business_type, city, state, website_url, facebook_url, email, phone,
+    `INSERT INTO leads (business_name, contact_person, business_type, city, state, website_url, facebook_url, email, phone,
        has_ssl, has_booking_software, booking_software_name, has_client_portal, has_intake_forms,
        design_age_estimate, diagnosis_json, outreach_subject, outreach_body, status, priority, batch_date, search_query, lead_score)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
      ON CONFLICT (email) DO NOTHING RETURNING *`,
-    [data.business_name, data.business_type, data.city, data.state, data.website_url, data.facebook_url,
+    [data.business_name, data.contact_person || null, data.business_type, data.city, data.state, data.website_url, data.facebook_url,
      data.email, data.phone, data.has_ssl, data.has_booking_software, data.booking_software_name,
      data.has_client_portal, data.has_intake_forms, data.design_age_estimate,
      JSON.stringify(data.diagnosis_json || {}), data.outreach_subject, data.outreach_body,

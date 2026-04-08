@@ -723,7 +723,7 @@ async function sendColdEmail(lead, sender) {
           lead.diagnosis_json ? JSON.stringify(lead.diagnosis_json) : null, // diagnosis_scores
           lead.outreach_body || null,             // original_email_body
           leadScore,                              // lead_score
-          lead.email_variant || 'B',              // email_variant (always B — proven winner)
+          lead.email_variant || 'C',              // email_variant (C/D/E/F rotation; fallback C)
           leadScore >= 75,                        // priority (auto-flag high-scoring leads)
         ]
       );
@@ -1082,35 +1082,7 @@ async function runDailyLeadGeneration() {
   qualifiedLeads.sort((a, b) => scoreLead(b.diagnosis_json) - scoreLead(a.diagnosis_json));
   const toEmail = qualifiedLeads.slice(0, warming.daily);
 
-  // 5. Generate personalized outreach via Claude API (with A/B variant assignment)
-  // Check current A/B counts to determine split ratio
-  let abCounts = { A: 0, B: 0 };
-  try {
-    const { rows: abRows } = await dbQuery(
-      `SELECT email_variant, COUNT(*)::int AS cnt FROM leads WHERE email_variant IS NOT NULL GROUP BY email_variant`
-    );
-    for (const row of abRows) abCounts[row.email_variant] = row.cnt;
-  } catch (_) { /* default to 50/50 if table not migrated yet */ }
-
-  // After 500 sends per variant, auto-promote the winner (80/20 split)
-  let abWinner = null;
-  if (abCounts.A >= 500 && abCounts.B >= 500) {
-    try {
-      const { rows: abStats } = await dbQuery(
-        `SELECT email_variant,
-                COUNT(*) FILTER (WHERE status = 'replied' OR replied_at IS NOT NULL)::numeric / NULLIF(COUNT(*), 0) AS reply_rate
-         FROM outreach_leads
-         WHERE email_variant IN ('A', 'B') AND touch_count >= 1
-         GROUP BY email_variant`
-      );
-      if (abStats.length === 2) {
-        const rateA = abStats.find(r => r.email_variant === 'A')?.reply_rate || 0;
-        const rateB = abStats.find(r => r.email_variant === 'B')?.reply_rate || 0;
-        abWinner = parseFloat(rateA) >= parseFloat(rateB) ? 'A' : 'B';
-        console.log(`[LEADGEN] A/B winner: ${abWinner} (A=${(rateA * 100).toFixed(1)}%, B=${(rateB * 100).toFixed(1)}%)`);
-      }
-    } catch (_) { /* no winner yet */ }
-  }
+  // 5. Generate personalized outreach via Claude API (4-way C/D/E/F rotation)
 
   // Filter out leads where we can't find a real first name. Sending "Hey there"
   // tanks reply rate — previous data showed 25% of sends going to "Hey there"
