@@ -58,17 +58,6 @@ app.get('/api/v1/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Temporary: test pushover wiring (remove after verification)
-app.get('/api/v1/_pushtest', async (req, res) => {
-  const pushover = require('./services/pushover.client');
-  const r = await pushover.sendDailySummary({
-    scheduler: 'Test',
-    lines: ['This is a test push', 'From /api/v1/_pushtest', 'If you see this, wiring works ✅'],
-    url: 'https://monkflow.io/admin',
-  });
-  res.json({ ok: true, result: r });
-});
-
 // Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
