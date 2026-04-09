@@ -439,17 +439,21 @@ async function sendConnects() {
   const limits = await getTodayLimits();
   const warming = await getWarmingLimits();
   const remaining = warming.connects - (limits.connects_sent || 0);
+  logger.info({ warmingCap: warming.connects, sent: limits.connects_sent, remaining }, '[linkedin] sendConnects limits');
   if (remaining <= 0) return { sent: 0, reason: 'cap_reached' };
 
   const { rows } = await query(
     `SELECT * FROM linkedin_leads WHERE status = 'personalized' ORDER BY score DESC, created_at ASC LIMIT $1`,
     [remaining]
   );
+  logger.info({ candidates: rows.length, ids: rows.map(r => r.id) }, '[linkedin] sendConnects candidates');
 
   let sent = 0;
   for (const lead of rows) {
     try {
+      logger.info({ leadId: lead.id, providerId: lead.linkedin_provider_id, noteLen: (lead.connect_note||'').length }, '[linkedin] sending connect');
       const result = await unipile.sendConnectionRequest(lead.linkedin_provider_id, lead.connect_note);
+      logger.info({ leadId: lead.id, result }, '[linkedin] connect result');
       const inviteId = (result && (result.invitation_id || result.id)) || null;
       await query(
         `UPDATE linkedin_leads SET status='connect_sent', connect_sent_at=NOW(), unipile_invite_id=$2, last_touch_at=NOW(), touch_count=touch_count+1, updated_at=NOW() WHERE id=$1`,
@@ -458,7 +462,7 @@ async function sendConnects() {
       await bumpLimit('connects_sent');
       sent++;
     } catch (err) {
-      logger.warn({ err: err.message, leadId: lead.id }, '[linkedin] connect request failed');
+      logger.warn({ err: err.message, status: err.status, body: err.body, leadId: lead.id }, '[linkedin] connect request failed');
       await query(`UPDATE linkedin_leads SET error=$2, updated_at=NOW() WHERE id=$1`, [lead.id, err.message.slice(0, 500)]);
       if (err.status === 429) break; // hard stop on rate limit
     }
@@ -568,9 +572,11 @@ async function runDailyLinkedInRun({ dryRun = false } = {}) {
       // 4. Send connects
       const c = await sendConnects();
       stats.connectsSent = c.sent;
+      stats._connectDebug = c;
       // 5. Send DMs to accepted
       const d = await sendDMs();
       stats.dmsSent = d.sent;
+      stats._dmDebug = d;
     }
 
     await sendOwnerSummary(stats);
