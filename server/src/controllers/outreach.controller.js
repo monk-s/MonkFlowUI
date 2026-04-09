@@ -549,30 +549,54 @@ const getAnalytics = catchAsync(async (req, res) => {
   const since = new Date();
   since.setDate(since.getDate() - days);
 
-  // Funnel stats
+  // Warming phase — derived from DOMAIN_LAUNCH_DATE
+  const domainLaunchDate = new Date(process.env.DOMAIN_LAUNCH_DATE || '2026-04-10');
+  const daysSinceLaunch = Math.floor((Date.now() - domainLaunchDate.getTime()) / (1000 * 60 * 60 * 24));
+  let warmingPhase;
+  if (daysSinceLaunch < 0) warmingPhase = { phase: 'pre-launch', daily: 0, perSender: 0, day: daysSinceLaunch };
+  else if (daysSinceLaunch < 7) warmingPhase = { phase: 'warm-1', daily: 15, perSender: 5, day: daysSinceLaunch };
+  else if (daysSinceLaunch < 14) warmingPhase = { phase: 'warm-2', daily: 30, perSender: 10, day: daysSinceLaunch };
+  else if (daysSinceLaunch < 21) warmingPhase = { phase: 'warm-3', daily: 60, perSender: 20, day: daysSinceLaunch };
+  else if (daysSinceLaunch < 28) warmingPhase = { phase: 'warm-4', daily: 75, perSender: 25, day: daysSinceLaunch };
+  else warmingPhase = { phase: 'full', daily: 90, perSender: 30, day: daysSinceLaunch };
+
+  // Funnel stats — focus on actionable metrics (delivery, replies), not vanity (opens)
   const { rows: [funnel] } = await query(
     `SELECT
        COUNT(*) AS total_leads,
        COUNT(*) FILTER (WHERE touch_count >= 1) AS emails_sent,
-       COUNT(*) FILTER (WHERE opened_at IS NOT NULL) AS emails_opened,
-       COUNT(*) FILTER (WHERE clicked_at IS NOT NULL) AS emails_clicked,
+       COUNT(*) FILTER (WHERE opened_at IS NOT NULL) AS opens_recorded,
        COUNT(*) FILTER (WHERE replied_at IS NOT NULL OR status = 'replied') AS replies_received,
        COUNT(*) FILTER (WHERE status = 'replied') AS positive_replies,
-       COUNT(*) FILTER (WHERE status = 'closed' AND notes LIKE '%converted%') AS clients_closed
+       COUNT(*) FILTER (WHERE status = 'unsubscribed') AS unsubscribed,
+       COUNT(*) FILTER (WHERE status = 'closed') AS sequence_completed
      FROM outreach_leads
      WHERE created_at >= $1`,
     [since]
   );
 
-  // Daily trend (JOIN to outreach_leads for opened_at / replied_at)
+  // Overall deliverability health (aggregate bounce/complaint across all senders, all time in window)
+  const { rows: [deliverability] } = await query(
+    `SELECT
+       COALESCE(SUM(sent_count), 0) AS total_sent,
+       COALESCE(SUM(bounce_count), 0) AS total_bounces,
+       COALESCE(SUM(complaint_count), 0) AS total_complaints,
+       ROUND(COALESCE(SUM(bounce_count), 0)::numeric / NULLIF(SUM(sent_count), 0) * 100, 2) AS bounce_rate,
+       ROUND(COALESCE(SUM(complaint_count), 0)::numeric / NULLIF(SUM(sent_count), 0) * 100, 2) AS complaint_rate,
+       ROUND((COALESCE(SUM(sent_count), 0) - COALESCE(SUM(bounce_count), 0))::numeric / NULLIF(SUM(sent_count), 0) * 100, 1) AS delivery_rate
+     FROM sender_health
+     WHERE date >= $1::date`,
+    [since]
+  );
+
+  // Daily trend — sent + replied only (opens are unreliable due to scanner filtering transition)
   const { rows: dailyTrend } = await query(
     `SELECT
        date_trunc('day', oe.sent_at)::date AS date,
        COUNT(*) AS sent,
-       COUNT(*) FILTER (WHERE ol.opened_at IS NOT NULL) AS opened,
-       COUNT(*) FILTER (WHERE oe.reply_received_at IS NOT NULL) AS replied
+       COUNT(*) FILTER (WHERE oe.reply_received_at IS NOT NULL) AS replied,
+       COUNT(DISTINCT oe.lead_id) AS unique_leads
      FROM outreach_emails oe
-     JOIN outreach_leads ol ON ol.id = oe.lead_id
      WHERE oe.sent_at >= $1
      GROUP BY date_trunc('day', oe.sent_at)::date
      ORDER BY date`,
@@ -583,8 +607,10 @@ const getAnalytics = catchAsync(async (req, res) => {
   const { rows: byIndustry } = await query(
     `SELECT
        COALESCE(industry, 'unknown') AS industry,
-       COUNT(*) AS sent,
-       ROUND(COUNT(*) FILTER (WHERE status = 'replied')::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS reply_rate
+       COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE touch_count >= 1) AS sent,
+       COUNT(*) FILTER (WHERE status = 'replied') AS replied,
+       ROUND(COUNT(*) FILTER (WHERE status = 'replied')::numeric / NULLIF(COUNT(*) FILTER (WHERE touch_count >= 1), 0) * 100, 1) AS reply_rate
      FROM outreach_leads
      WHERE created_at >= $1
      GROUP BY industry
@@ -593,7 +619,7 @@ const getAnalytics = catchAsync(async (req, res) => {
     [since]
   );
 
-  // By touch number (use reply_received_at which exists on outreach_emails)
+  // By touch number
   const { rows: byTouch } = await query(
     `SELECT
        touch_number,
@@ -612,15 +638,17 @@ const getAnalytics = catchAsync(async (req, res) => {
     `SELECT
        sender_email,
        SUM(sent_count) AS sent_7d,
+       SUM(bounce_count) AS bounces_7d,
        ROUND(SUM(bounce_count)::numeric / NULLIF(SUM(sent_count), 0) * 100, 1) AS bounce_rate,
-       ROUND(SUM(complaint_count)::numeric / NULLIF(SUM(sent_count), 0) * 100, 1) AS complaint_rate
+       ROUND(SUM(complaint_count)::numeric / NULLIF(SUM(sent_count), 0) * 100, 1) AS complaint_rate,
+       ROUND((SUM(sent_count) - SUM(bounce_count))::numeric / NULLIF(SUM(sent_count), 0) * 100, 1) AS delivery_rate
      FROM sender_health
      WHERE date >= CURRENT_DATE - INTERVAL '7 days'
      GROUP BY sender_email
      ORDER BY sent_7d DESC`
   );
 
-  // Emails per lead (for the sidebar detail view)
+  // Recent emails (for the sidebar detail view)
   const { rows: recentEmails } = await query(
     `SELECT oe.*, ol.contact_name, ol.company
      FROM outreach_emails oe
@@ -633,6 +661,8 @@ const getAnalytics = catchAsync(async (req, res) => {
 
   res.json({
     period: { start: since.toISOString(), end: new Date().toISOString(), days },
+    warmingPhase,
+    deliverability: deliverability || {},
     funnel,
     dailyTrend,
     byIndustry,
@@ -657,11 +687,11 @@ const getAbResults = catchAsync(async (req, res) => {
     SELECT
       ol.email_variant AS variant,
       COUNT(*) AS sent,
-      COUNT(*) FILTER (WHERE ol.opened_at IS NOT NULL) AS opened,
       COUNT(*) FILTER (WHERE ol.replied_at IS NOT NULL OR ol.status = 'replied') AS replied,
       COUNT(*) FILTER (WHERE ol.reply_sentiment = 'positive') AS positive,
-      ROUND(COUNT(*) FILTER (WHERE ol.opened_at IS NOT NULL)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS open_rate,
-      ROUND(COUNT(*) FILTER (WHERE ol.replied_at IS NOT NULL OR ol.status = 'replied')::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS reply_rate
+      COUNT(*) FILTER (WHERE ol.status = 'unsubscribed') AS unsubscribed,
+      ROUND(COUNT(*) FILTER (WHERE ol.replied_at IS NOT NULL OR ol.status = 'replied')::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS reply_rate,
+      ROUND(COUNT(*) FILTER (WHERE ol.status = 'unsubscribed')::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS unsub_rate
     FROM outreach_leads ol
     WHERE ol.touch_count >= 1
       AND ol.email_variant IN ('A', 'B', 'C', 'D', 'E', 'F')

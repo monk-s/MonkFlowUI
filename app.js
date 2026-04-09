@@ -7246,8 +7246,8 @@ function renderOutreachAnalyticsPage() {
     return `
       <div class="page-header">
         <div>
-          <h1>Outreach Sequences</h1>
-          <p class="page-desc">Automated follow-up emails on a 3-touch cadence (Day 3, Day 7, Day 14)</p>
+          <h1>Outreach Analytics</h1>
+          <p class="page-desc">Deliverability, reply rates, and sender health</p>
         </div>
       </div>
       <div class="tabs" style="margin-bottom:20px;">
@@ -7267,8 +7267,73 @@ function renderOutreachAnalyticsPage() {
   const byTouch = d.byTouch || [];
   const senderHealth = d.senderHealth || [];
   const abResults = d.abResults || [];
+  const warming = d.warmingPhase || {};
+  const dlv = d.deliverability || {};
 
-  // A/B/C/D variant breakdown — highlight active test variants (C-F), show retired A/B greyed out
+  // ── Warming + Deliverability Health Banner ──
+  const phaseLabels = {
+    'pre-launch': 'Pre-Launch',
+    'warm-1': 'Warming Phase 1',
+    'warm-2': 'Warming Phase 2',
+    'warm-3': 'Warming Phase 3',
+    'warm-4': 'Warming Phase 4',
+    'full': 'Full Volume',
+  };
+  const phaseLabel = phaseLabels[warming.phase] || warming.phase || 'Unknown';
+  const warmingPct = warming.phase === 'full' ? 100 : Math.min(Math.round(((warming.day || 0) / 28) * 100), 100);
+  const bounceRate = parseFloat(dlv.bounce_rate) || 0;
+  const complaintRate = parseFloat(dlv.complaint_rate) || 0;
+  const deliveryRate = parseFloat(dlv.delivery_rate) || 0;
+  const totalSent = parseInt(dlv.total_sent) || 0;
+
+  let healthStatus, healthColor, healthBg, healthIcon;
+  if (bounceRate > 5 || complaintRate > 0.3) {
+    healthStatus = 'Poor'; healthColor = '#ef4444'; healthBg = '#ef444415'; healthIcon = '\u26A0';
+  } else if (bounceRate > 2 || complaintRate > 0.1) {
+    healthStatus = 'Fair'; healthColor = '#f59e0b'; healthBg = '#f59e0b15'; healthIcon = '\u25CB';
+  } else if (totalSent > 0) {
+    healthStatus = 'Good'; healthColor = '#00cc6a'; healthBg = '#00cc6a15'; healthIcon = '\u2713';
+  } else {
+    healthStatus = 'No Data'; healthColor = 'var(--text-tertiary)'; healthBg = 'var(--bg-secondary)'; healthIcon = '\u2014';
+  }
+
+  const warmingHtml = `
+    <div class="card" style="padding:20px;margin-bottom:20px;border-left:3px solid ${healthColor};">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+        <div>
+          <div style="font-size:16px;font-weight:600;color:var(--text-primary);">Deliverability Health</div>
+          <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px;">Domain: mail.getmonkflow.com &middot; ${phaseLabel} (Day ${warming.day || 0}/28) &middot; ${warming.daily || 0}/day limit</div>
+        </div>
+        <span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;background:${healthBg};color:${healthColor};">${healthIcon} ${healthStatus}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;">
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Delivery Rate</div>
+          <div style="font-size:22px;font-weight:700;color:${deliveryRate >= 95 ? '#00cc6a' : deliveryRate >= 90 ? '#f59e0b' : '#ef4444'};">${totalSent > 0 ? deliveryRate + '%' : '\u2014'}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Bounce Rate</div>
+          <div style="font-size:22px;font-weight:700;color:${bounceRate > 3 ? '#ef4444' : bounceRate > 1 ? '#f59e0b' : 'var(--text-primary)'};">${totalSent > 0 ? bounceRate + '%' : '\u2014'}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Complaint Rate</div>
+          <div style="font-size:22px;font-weight:700;color:${complaintRate > 0.1 ? '#ef4444' : 'var(--text-primary)'};">${totalSent > 0 ? complaintRate + '%' : '\u2014'}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Total Sent</div>
+          <div style="font-size:22px;font-weight:700;color:var(--text-primary);">${totalSent}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Warming</div>
+          <div style="height:8px;background:var(--bg-primary);border-radius:4px;margin-top:8px;overflow:hidden;">
+            <div style="height:100%;width:${warmingPct}%;background:${warming.phase === 'full' ? '#00cc6a' : '#3b82f6'};border-radius:4px;transition:width 0.4s ease;"></div>
+          </div>
+          <div style="font-size:10px;color:var(--text-tertiary);margin-top:4px;">${warmingPct}%</div>
+        </div>
+      </div>
+    </div>`;
+
+  // ── A/B Variant Breakdown — reply rate is the only real metric ──
   const ACTIVE_VARIANTS = ['C', 'D', 'E', 'F'];
   const sortedAb = [...abResults].sort((a, b) => {
     const aActive = ACTIVE_VARIANTS.includes(a.variant) ? 0 : 1;
@@ -7281,9 +7346,7 @@ function renderOutreachAnalyticsPage() {
     ? activeAb.reduce((best, cur) => {
         const bestReply = parseFloat(best.reply_rate) || 0;
         const curReply = parseFloat(cur.reply_rate) || 0;
-        if (curReply !== bestReply) return curReply > bestReply ? cur : best;
-        // tiebreak on open rate
-        return (parseFloat(cur.open_rate) || 0) > (parseFloat(best.open_rate) || 0) ? cur : best;
+        return curReply > bestReply ? cur : best;
       }).variant
     : null;
 
@@ -7291,8 +7354,11 @@ function renderOutreachAnalyticsPage() {
     const isActive = ACTIVE_VARIANTS.includes(row.variant);
     const isWinner = isActive && row.variant === winnerVariant && parseInt(row.sent) >= 20;
     const sent = parseInt(row.sent) || 0;
-    const openRate = parseFloat(row.open_rate) || 0;
     const replyRate = parseFloat(row.reply_rate) || 0;
+    const replied = parseInt(row.replied) || 0;
+    const positive = parseInt(row.positive) || 0;
+    const unsubs = parseInt(row.unsubscribed) || 0;
+    const unsubRate = parseFloat(row.unsub_rate) || 0;
     const opacity = isActive ? 1 : 0.45;
     const borderColor = isWinner ? '#00cc6a' : 'var(--border)';
     const bgTint = isWinner ? 'linear-gradient(135deg, rgba(0,204,106,0.06), transparent)' : 'transparent';
@@ -7304,96 +7370,91 @@ function renderOutreachAnalyticsPage() {
           <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${label}</div>
           <div style="font-size:11px;color:var(--text-tertiary);">${sent} sent</div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:8px;">
           <div>
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:2px;">Open rate</div>
-            <div style="font-size:18px;font-weight:700;color:var(--text-primary);">${openRate}%</div>
-            <div style="height:4px;background:var(--bg-primary);border-radius:2px;margin-top:4px;overflow:hidden;">
-              <div style="height:100%;width:${Math.min(openRate, 100)}%;background:#3b82f6;"></div>
-            </div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:2px;">Reply Rate</div>
+            <div style="font-size:24px;font-weight:700;color:${replyRate > 0 ? '#00cc6a' : 'var(--text-primary)'};">${replyRate}%</div>
           </div>
-          <div>
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:2px;">Reply rate</div>
-            <div style="font-size:18px;font-weight:700;color:${replyRate > 0 ? '#00cc6a' : 'var(--text-primary)'};">${replyRate}%</div>
-            <div style="height:4px;background:var(--bg-primary);border-radius:2px;margin-top:4px;overflow:hidden;">
-              <div style="height:100%;width:${Math.min(replyRate * 10, 100)}%;background:#8b5cf6;"></div>
-            </div>
-          </div>
+          <div style="font-size:12px;color:var(--text-tertiary);">${replied} replies${positive > 0 ? ` (${positive} positive)` : ''}</div>
         </div>
+        <div style="height:4px;background:var(--bg-primary);border-radius:2px;overflow:hidden;margin-bottom:6px;">
+          <div style="height:100%;width:${Math.min(replyRate * 10, 100)}%;background:#00cc6a;"></div>
+        </div>
+        ${unsubs > 0 ? `<div style="font-size:10px;color:var(--text-tertiary);">${unsubs} unsub${unsubs > 1 ? 's' : ''} (${unsubRate}%)</div>` : ''}
       </div>`;
-  }).join('') : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No variant data yet — send some emails to start the test.</div>';
+  }).join('') : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No variant data yet.</div>';
 
-  // Funnel visualization
+  // ── Funnel — actionable steps only ──
   const funnelSteps = [
-    { label: 'Total Leads', key: 'total_leads' },
-    { label: 'Emails Sent', key: 'emails_sent' },
-    { label: 'Opened', key: 'emails_opened' },
-    { label: 'Clicked', key: 'emails_clicked' },
-    { label: 'Replied', key: 'replies_received' },
-    { label: 'Positive', key: 'positive_replies' },
+    { label: 'Total Leads', key: 'total_leads', color: '#6366f1' },
+    { label: 'Emails Sent', key: 'emails_sent', color: '#3b82f6' },
+    { label: 'Replies', key: 'replies_received', color: '#00cc6a' },
+    { label: 'Positive Replies', key: 'positive_replies', color: '#10b981' },
+    { label: 'Unsubscribed', key: 'unsubscribed', color: '#f59e0b' },
+    { label: 'Sequence Done', key: 'sequence_completed', color: 'var(--text-tertiary)' },
   ];
   const maxFunnel = parseInt(funnel.total_leads) || 1;
   const funnelHtml = funnelSteps.map((step, i) => {
     const val = parseInt(funnel[step.key]) || 0;
-    const pct = Math.round((val / maxFunnel) * 100);
-    const prevVal = i > 0 ? (parseInt(funnel[funnelSteps[i - 1].key]) || 1) : val;
-    const convPct = i > 0 && prevVal > 0 ? Math.round((val / prevVal) * 100) : 100;
-    const opacity = 1 - (i * 0.12);
+    const pct = Math.max(Math.round((val / maxFunnel) * 100), val > 0 ? 2 : 0);
+    const prevVal = i > 0 && i < 4 ? (parseInt(funnel[funnelSteps[i - 1].key]) || 1) : null;
+    const convPct = prevVal && prevVal > 0 ? Math.round((val / prevVal) * 100) : null;
     return `
       <div style="margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
           <span style="font-size:13px;font-weight:500;color:var(--text-primary);">${step.label}</span>
-          <span style="font-size:13px;color:var(--text-tertiary);">${val} ${i > 0 ? `<span style="font-size:11px;color:${convPct >= 50 ? '#00cc6a' : convPct >= 20 ? '#f59e0b' : '#ef4444'};">(${convPct}%)</span>` : ''}</span>
+          <span style="font-size:13px;color:var(--text-tertiary);">${val}${convPct !== null ? ` <span style="font-size:11px;color:${convPct >= 5 ? '#00cc6a' : convPct > 0 ? '#f59e0b' : 'var(--text-tertiary)'};">(${convPct}%)</span>` : ''}</span>
         </div>
-        <div style="height:24px;background:var(--bg-primary);border-radius:6px;overflow:hidden;">
-          <div style="height:100%;width:${pct}%;background:#00cc6a;opacity:${opacity};border-radius:6px;transition:width 0.4s ease;"></div>
+        <div style="height:20px;background:var(--bg-primary);border-radius:6px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${step.color};border-radius:6px;transition:width 0.4s ease;"></div>
         </div>
       </div>`;
   }).join('');
 
-  // Daily trend chart
-  const maxDaily = Math.max(1, ...dailyTrend.map(d => parseInt(d.sent) || 0));
+  // ── Daily trend — sent + replied (opens removed — unreliable) ──
+  const maxDaily = Math.max(1, ...dailyTrend.map(r => parseInt(r.sent) || 0));
   const trendHtml = dailyTrend.length > 0 ? dailyTrend.map(day => {
     const sent = parseInt(day.sent) || 0;
-    const opened = parseInt(day.opened) || 0;
     const replied = parseInt(day.replied) || 0;
+    const leads = parseInt(day.unique_leads) || 0;
     const sentH = Math.round((sent / maxDaily) * 100);
-    const openedH = Math.round((opened / maxDaily) * 100);
-    const repliedH = Math.round((replied / maxDaily) * 100);
+    const repliedH = replied > 0 ? Math.max(Math.round((replied / maxDaily) * 100), 4) : 0;
     const dateLabel = new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    const openPct = sent > 0 ? Math.round((opened / sent) * 1000) / 10 : 0;
     const replyPct = sent > 0 ? Math.round((replied / sent) * 1000) / 10 : 0;
-    const tip = (label, n, pct) => `${dateLabel} — ${label}: ${n}${pct !== null ? ` (${pct}% of sent)` : ''}`.replace(/'/g, '&#39;');
+    const tip = (label, n, extra) => `${dateLabel} \u2014 ${label}: ${n}${extra || ''}`.replace(/'/g, '&#39;');
     return `
       <div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;">
         <div style="display:flex;gap:2px;align-items:flex-end;height:80px;width:100%;">
-          <div onmouseenter="showBarTip(event,'${tip('Sent', sent, null)}')" onmouseleave="hideBarTip()" style="flex:1;background:#00cc6a;border-radius:2px 2px 0 0;height:${sentH}%;min-height:${sent > 0 ? 2 : 0}px;cursor:pointer;"></div>
-          <div onmouseenter="showBarTip(event,'${tip('Opened', opened, openPct)}')" onmouseleave="hideBarTip()" style="flex:1;background:#3b82f6;border-radius:2px 2px 0 0;height:${openedH}%;min-height:${opened > 0 ? 2 : 0}px;cursor:pointer;"></div>
-          <div onmouseenter="showBarTip(event,'${tip('Replied', replied, replyPct)}')" onmouseleave="hideBarTip()" style="flex:1;background:#8b5cf6;border-radius:2px 2px 0 0;height:${repliedH}%;min-height:${replied > 0 ? 2 : 0}px;cursor:pointer;"></div>
+          <div onmouseenter="showBarTip(event,'${tip('Sent', sent, ' (' + leads + ' leads)')}')" onmouseleave="hideBarTip()" style="flex:1;background:#3b82f6;border-radius:2px 2px 0 0;height:${sentH}%;min-height:${sent > 0 ? 2 : 0}px;cursor:pointer;"></div>
+          <div onmouseenter="showBarTip(event,'${tip('Replied', replied, replied > 0 ? ' (' + replyPct + '%)' : '')}')" onmouseleave="hideBarTip()" style="flex:1;background:#00cc6a;border-radius:2px 2px 0 0;height:${repliedH}%;min-height:${replied > 0 ? 2 : 0}px;cursor:pointer;"></div>
         </div>
         <div style="font-size:9px;color:var(--text-tertiary);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${dateLabel}</div>
       </div>`;
   }).join('') : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No daily data for this period.</div>';
 
-  // By industry table
+  // ── By industry table ──
   const industryHtml = byIndustry.length > 0 ? `
     <div class="table-wrapper" style="border:0;border-radius:0;">
       <table>
         <thead>
           <tr>
             <th>Industry</th>
+            <th style="text-align:right;">Leads</th>
             <th style="text-align:right;">Sent</th>
+            <th style="text-align:right;">Replied</th>
             <th style="text-align:right;">Reply Rate</th>
           </tr>
         </thead>
         <tbody>
           ${byIndustry.map(row => {
             const rate = parseFloat(row.reply_rate) || 0;
-            const highlight = rate > 5;
+            const highlight = rate > 3;
             return `
               <tr>
                 <td style="font-size:13px;color:var(--text-primary);text-transform:capitalize;">${escapeHtml(row.industry)}</td>
+                <td style="text-align:right;font-size:13px;color:var(--text-secondary);">${row.total || row.sent}</td>
                 <td style="text-align:right;font-size:13px;color:var(--text-secondary);">${row.sent}</td>
+                <td style="text-align:right;font-size:13px;color:var(--text-secondary);">${row.replied || 0}</td>
                 <td style="text-align:right;font-size:13px;font-weight:${highlight ? '600' : '400'};color:${highlight ? '#00cc6a' : 'var(--text-secondary)'};">${rate}%</td>
               </tr>`;
           }).join('')}
@@ -7401,8 +7462,8 @@ function renderOutreachAnalyticsPage() {
       </table>
     </div>` : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No industry data available.</div>';
 
-  // By touch conversion
-  const touchLabels = { 1: 'Touch 1 (Initial)', 2: 'Touch 2 (Bump)', 3: 'Touch 3 (Value-add)', 4: 'Touch 4 (Breakup)' };
+  // ── By touch conversion ──
+  const touchLabels = { 0: 'Touch 0 (AI Initial)', 1: 'Touch 1 (Initial)', 2: 'Touch 2 (Bump)', 3: 'Touch 3 (Value-add)', 4: 'Touch 4 (Breakup)' };
   const touchHtml = byTouch.length > 0 ? byTouch.map(t => {
     const rate = parseFloat(t.reply_rate) || 0;
     const sent = parseInt(t.sent) || 0;
@@ -7415,17 +7476,18 @@ function renderOutreachAnalyticsPage() {
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <div style="width:80px;height:6px;background:var(--bg-primary);border-radius:3px;overflow:hidden;">
-            <div style="height:100%;width:${Math.min(rate, 100)}%;background:#00cc6a;border-radius:3px;"></div>
+            <div style="height:100%;width:${Math.min(rate * 5, 100)}%;background:#00cc6a;border-radius:3px;"></div>
           </div>
-          <span style="font-size:14px;font-weight:600;color:${rate > 5 ? '#00cc6a' : 'var(--text-secondary)'};">${rate}%</span>
+          <span style="font-size:14px;font-weight:600;color:${rate > 3 ? '#00cc6a' : 'var(--text-secondary)'};">${rate}%</span>
         </div>
       </div>`;
   }).join('') : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No touch data available.</div>';
 
-  // Sender health cards
+  // ── Sender health cards — now with delivery rate ──
   const senderHtml = senderHealth.length > 0 ? senderHealth.map(s => {
     const bounce = parseFloat(s.bounce_rate) || 0;
     const complaint = parseFloat(s.complaint_rate) || 0;
+    const senderDelivery = parseFloat(s.delivery_rate) || 0;
     let status, statusColor, statusBg;
     if (bounce > 5 || complaint > 0.5) {
       status = 'Unhealthy'; statusColor = '#ef4444'; statusBg = '#ef444422';
@@ -7437,13 +7499,17 @@ function renderOutreachAnalyticsPage() {
     return `
       <div class="card" style="padding:16px;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
-          <div style="font-size:13px;font-weight:500;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${escapeHtml(s.sender_email)}</div>
+          <div style="font-size:13px;font-weight:500;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%;">${escapeHtml(s.sender_email)}</div>
           <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;background:${statusBg};color:${statusColor};">${status}</span>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
           <div>
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Sent (7d)</div>
             <div style="font-size:18px;font-weight:600;color:var(--text-primary);">${s.sent_7d}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Delivery</div>
+            <div style="font-size:18px;font-weight:600;color:${senderDelivery >= 95 ? '#00cc6a' : senderDelivery >= 90 ? '#f59e0b' : '#ef4444'};">${parseInt(s.sent_7d) > 0 ? senderDelivery + '%' : '\u2014'}</div>
           </div>
           <div>
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Bounce</div>
@@ -7455,13 +7521,13 @@ function renderOutreachAnalyticsPage() {
           </div>
         </div>
       </div>`;
-  }).join('') : '<div class="card" style="padding:20px;text-align:center;color:var(--text-tertiary);font-size:13px;">No sender health data available.</div>';
+  }).join('') : '<div class="card" style="padding:20px;text-align:center;color:var(--text-tertiary);font-size:13px;">No sender health data yet. Data appears after first sends from new domain.</div>';
 
   return `
     <div class="page-header">
       <div>
-        <h1>Outreach Sequences</h1>
-        <p class="page-desc">Automated follow-up emails on a 3-touch cadence (Day 3, Day 7, Day 14)</p>
+        <h1>Outreach Analytics</h1>
+        <p class="page-desc">Deliverability, reply rates, and sender health</p>
       </div>
     </div>
 
@@ -7474,10 +7540,13 @@ function renderOutreachAnalyticsPage() {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
       <div style="font-size:14px;font-weight:500;color:var(--text-secondary);">
         Showing last ${outreachAnalyticsDays} days
-        <span style="font-size:12px;color:var(--text-tertiary);margin-left:8px;">${d.period ? new Date(d.period.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' — ' + new Date(d.period.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</span>
+        <span style="font-size:12px;color:var(--text-tertiary);margin-left:8px;">${d.period ? new Date(d.period.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' \u2014 ' + new Date(d.period.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</span>
       </div>
       <div style="display:flex;gap:4px;">${periodButtons}</div>
     </div>
+
+    <!-- Deliverability Health Banner -->
+    ${warmingHtml}
 
     <!-- Funnel -->
     <div class="card" style="padding:20px;margin-bottom:20px;">
@@ -7490,7 +7559,7 @@ function renderOutreachAnalyticsPage() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <div>
           <div style="font-size:16px;font-weight:600;color:var(--text-primary);">Email Variant Test</div>
-          <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">C/D/E/F are the active 4-way test. A/B are retired (historical).</div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">C/D/E/F active. Reply rate is the only reliable signal (open tracking is filtered for scanners).</div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;">
@@ -7503,9 +7572,8 @@ function renderOutreachAnalyticsPage() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <div style="font-size:16px;font-weight:600;color:var(--text-primary);">Daily Activity</div>
         <div style="display:flex;gap:12px;font-size:11px;">
-          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#00cc6a;"></span> Sent</span>
-          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;"></span> Opened</span>
-          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#8b5cf6;"></span> Replied</span>
+          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;"></span> Sent</span>
+          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#00cc6a;"></span> Replied</span>
         </div>
       </div>
       <div style="display:flex;gap:3px;align-items:flex-end;overflow-x:auto;padding-bottom:4px;">
@@ -7527,8 +7595,8 @@ function renderOutreachAnalyticsPage() {
 
     <!-- Sender Health -->
     <div style="margin-bottom:20px;">
-      <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:12px;">Sender Health</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
+      <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:12px;">Sender Health (7-day)</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;">
         ${senderHtml}
       </div>
     </div>
