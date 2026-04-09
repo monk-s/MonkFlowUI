@@ -111,13 +111,30 @@ async function discoverProspects({ maxBusinesses = 30 } = {}) {
 
 function pickBestOwner(searchResult, businessName) {
   const list = (searchResult && (searchResult.items || searchResult.data || [])) || [];
-  for (const p of list) {
-    const title = (p.headline || p.title || '').toLowerCase();
-    if (OWNER_TITLE_KEYWORDS.some(k => title.includes(k.toLowerCase()))) {
-      return p;
-    }
-  }
-  return list[0] || null;
+  const bizTokens = (businessName || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 3 && !['the', 'and', 'llc', 'inc', 'co'].includes(t));
+
+  // Hard quality gate: reject profiles with no headline at all (inactive/blank accounts).
+  const hasSignal = (p) => {
+    const headline = (p.headline || p.title || '').trim();
+    return headline.length >= 5;
+  };
+
+  const scored = list.filter(hasSignal).map(p => {
+    const headline = (p.headline || p.title || '').toLowerCase();
+    const titleHit = OWNER_TITLE_KEYWORDS.some(k => headline.includes(k.toLowerCase()));
+    const bizHit = bizTokens.length > 0 && bizTokens.some(t => headline.includes(t));
+    // Require at least one strong signal — owner title OR business-name overlap in headline.
+    const score = (titleHit ? 2 : 0) + (bizHit ? 2 : 0) + (headline.length > 30 ? 1 : 0);
+    return { p, score, titleHit, bizHit };
+  });
+
+  // Only accept profiles with at least one real signal (score >= 2).
+  const qualified = scored.filter(s => s.score >= 2).sort((a, b) => b.score - a.score);
+  return qualified.length > 0 ? qualified[0].p : null;
 }
 
 // ── 2. Insert + diagnose ──────────────────────────────────
