@@ -449,6 +449,7 @@ async function sendConnects() {
   logger.info({ candidates: rows.length, ids: rows.map(r => r.id) }, '[linkedin] sendConnects candidates');
 
   let sent = 0;
+  const errors = [];
   for (const lead of rows) {
     try {
       logger.info({ leadId: lead.id, providerId: lead.linkedin_provider_id, noteLen: (lead.connect_note||'').length }, '[linkedin] sending connect');
@@ -463,11 +464,12 @@ async function sendConnects() {
       sent++;
     } catch (err) {
       logger.warn({ err: err.message, status: err.status, body: err.body, leadId: lead.id }, '[linkedin] connect request failed');
+      errors.push({ leadId: lead.id, error: err.message.slice(0, 200), status: err.status });
       await query(`UPDATE linkedin_leads SET error=$2, updated_at=NOW() WHERE id=$1`, [lead.id, err.message.slice(0, 500)]);
       if (err.status === 429) break; // hard stop on rate limit
     }
   }
-  return { sent };
+  return { sent, candidates: rows.length, remaining, warmingCap: warming.connects, todaySent: limits.connects_sent, errors };
 }
 
 // ── 5. Send first DMs to accepted connections ────────────
