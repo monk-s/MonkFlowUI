@@ -166,6 +166,8 @@ let adminQboStatus = null;
 let adminSchedulerHealth = null;
 let adminClientErrors = [];
 let adminReplyTriage = [];
+let adminLinkedInStats = null;
+let adminLinkedInLeads = [];
 
 // ── Type Mappings ──────────────────────────────────────────
 const FRONTEND_TO_BACKEND_TYPE = {
@@ -5605,19 +5607,23 @@ async function handleSendInvite() {
 
 async function loadAdminData() {
   try {
-    const [statsRes, accountsRes, alertsRes, schedRes, errRes, triageRes] = await Promise.all([
+    const [statsRes, accountsRes, alertsRes, schedRes, errRes, triageRes, liStatsRes, liLeadsRes] = await Promise.all([
       api.get('/admin/stats'),
       api.get('/admin/accounts?limit=100'),
       api.get('/admin/alerts').catch(() => ({ data: [] })),
       api.get('/admin/scheduler-health').catch(() => ({ data: [] })),
       api.get('/admin/client-errors').catch(() => ({ data: [] })),
       api.get('/admin/reply-triage').catch(() => ({ data: [] })),
+      api.get('/linkedin/stats').catch(() => ({ data: null })),
+      api.get('/linkedin/leads?limit=10').catch(() => ({ data: [] })),
     ]);
     adminData = statsRes.data || statsRes;
     adminAccounts = accountsRes.data || accountsRes;
     adminSchedulerHealth = (schedRes && (schedRes.data || schedRes)) || [];
     adminClientErrors = (errRes && (errRes.data || errRes)) || [];
     adminReplyTriage = (triageRes && (triageRes.data || triageRes)) || [];
+    adminLinkedInStats = (liStatsRes && (liStatsRes.data || liStatsRes)) || null;
+    adminLinkedInLeads = (liLeadsRes && (liLeadsRes.data || liLeadsRes)) || [];
     // Also load QBO status for admin
     try {
       const qboRes = await api.get('/quickbooks/status');
@@ -5939,6 +5945,68 @@ function renderReplyTriageCard(replies) {
   `;
 }
 
+// ── LinkedIn Outreach card ─────────────────────────────────
+function renderLinkedInCard(stats, leads) {
+  const today = (stats && stats.today) || {};
+  const caps = (stats && stats.caps) || { connects: 20, dms: 15 };
+  const byStatus = (stats && stats.byStatus) || {};
+  const list = Array.isArray(leads) ? leads : [];
+
+  const statusBadge = (s) => {
+    const map = {
+      discovered: '#71717a', enriched: '#71717a', personalized: '#3b82f6',
+      connect_sent: '#f59e0b', connected: '#00cc6a', dm_sent: '#0a66c2',
+      replied: '#ef4444', closed: '#52525b',
+    };
+    return `<span style="background:${(map[s] || '#52525b')}22;color:${map[s] || '#52525b'};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${(s || '').replace('_', ' ')}</span>`;
+  };
+
+  const rows = list.length === 0
+    ? `<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:20px;">No leads yet — run the cron or click "Run Now"</td></tr>`
+    : list.map(l => `
+        <tr>
+          <td><strong>${escapeHtml(l.contact_name || '—')}</strong><div style="font-size:11px;color:var(--text-secondary);">${escapeHtml(l.contact_title || '')}</div></td>
+          <td>${escapeHtml(l.business_name || '')}<div style="font-size:11px;color:var(--text-secondary);">${escapeHtml(l.business_city || '')}</div></td>
+          <td>${statusBadge(l.status)}</td>
+          <td style="font-size:11px;color:var(--text-secondary);">${l.last_touch_at ? timeAgo(l.last_touch_at) : '—'}</td>
+          <td>${l.linkedin_url ? `<a href="${escapeHtml(l.linkedin_url)}" target="_blank" style="color:#0a66c2;font-size:11px;">View →</a>` : ''}</td>
+        </tr>
+      `).join('');
+
+  return `
+    <div class="card" style="padding:0;margin-bottom:24px;border:1px solid rgba(10,102,194,0.3);">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div class="card-title" style="margin:0;">💼 LinkedIn Outreach</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Unipile → connect requests + first DMs</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="runLinkedInNow()">Run Now</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:16px 20px;">
+        <div><div style="font-size:20px;font-weight:600;">${today.connects_sent || 0}<span style="font-size:12px;color:var(--text-secondary);"> / ${caps.connects}</span></div><div style="font-size:11px;color:var(--text-secondary);">Connects today</div></div>
+        <div><div style="font-size:20px;font-weight:600;">${today.dms_sent || 0}<span style="font-size:12px;color:var(--text-secondary);"> / ${caps.dms}</span></div><div style="font-size:11px;color:var(--text-secondary);">DMs today</div></div>
+        <div><div style="font-size:20px;font-weight:600;color:#00cc6a;">${today.accepts_received || 0}</div><div style="font-size:11px;color:var(--text-secondary);">Accepts today</div></div>
+        <div><div style="font-size:20px;font-weight:600;color:#ef4444;">${today.replies_received || 0}</div><div style="font-size:11px;color:var(--text-secondary);">Replies today</div></div>
+      </div>
+      <table class="data-table" style="margin:0;">
+        <thead><tr><th>Contact</th><th>Business</th><th>Status</th><th>Last touch</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function runLinkedInNow() {
+  try {
+    showToast('Triggering LinkedIn run...', 'info');
+    const result = await api.post('/linkedin/run');
+    showToast(`LinkedIn run: ${result.stats?.connectsSent || 0}c / ${result.stats?.dmsSent || 0}d`, 'success');
+    await loadAdminData();
+  } catch (err) {
+    showToast(err.message || 'LinkedIn run failed', 'error');
+  }
+}
+
 async function updateTriage(id, status) {
   try {
     await api.patch(`/admin/reply-triage/${id}`, { triage_status: status });
@@ -6061,6 +6129,9 @@ function renderAdminDashboard() {
 
     <!-- Reply Triage (highest-priority card — first replies = revenue) -->
     ${renderReplyTriageCard(adminReplyTriage)}
+
+    <!-- LinkedIn Outreach -->
+    ${renderLinkedInCard(adminLinkedInStats, adminLinkedInLeads)}
 
     <!-- Scheduler Health -->
     <div class="card" style="padding:0;margin-bottom:24px;">

@@ -31,6 +31,7 @@ const outreachRoutes = require('./routes/outreach.routes');
 const stonkbotRoutes = require('./routes/stonkbot.routes');
 const integrationRoutes = require('./routes/integration.routes');
 const clientErrorRoutes = require('./routes/clientError.routes');
+const linkedinRoutes = require('./routes/linkedin.routes');
 
 const app = express();
 
@@ -44,7 +45,7 @@ app.use(express.json({
   limit: '50mb',
   verify: (req, _res, buf) => {
     // Preserve raw body for webhook signature verification
-    if (req.url && (req.url.includes('/quickbooks/webhook') || req.url.includes('/billing/webhook'))) {
+    if (req.url && (req.url.includes('/quickbooks/webhook') || req.url.includes('/billing/webhook') || req.url.includes('/linkedin/webhook'))) {
       req.rawBody = buf;
     }
   },
@@ -81,6 +82,7 @@ app.use('/api/v1/outreach', outreachRoutes);
 app.use('/api/v1/stonkbot', stonkbotRoutes);
 app.use('/api/v1/integrations', integrationRoutes);
 app.use('/api/v1/client-errors', clientErrorRoutes);
+app.use('/api/v1/linkedin', linkedinRoutes);
 
 // 404 handler
 app.use((req, res) => {

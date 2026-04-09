@@ -84,6 +84,14 @@ runMigrations().then(() => {
     } catch (err) {
       logger.error('Outreach scheduler failed to start: %s', err.message);
     }
+
+    // Start LinkedIn outreach cron (no-ops unless LINKEDIN_OUTREACH_ENABLED=true)
+    try {
+      const linkedinScheduler = require('./services/linkedin.scheduler');
+      linkedinScheduler.start();
+    } catch (err) {
+      logger.error('LinkedIn scheduler failed to start: %s', err.message);
+    }
   });
 
   // Graceful shutdown
@@ -109,6 +117,8 @@ runMigrations().then(() => {
         billingScheduler.stop();
         const outreachScheduler = require('./services/outreach.scheduler');
         outreachScheduler.stop();
+        const linkedinScheduler = require('./services/linkedin.scheduler');
+        linkedinScheduler.stop();
         logger.info('Cron jobs stopped');
       } catch { /* scheduler not loaded yet */ }
 
