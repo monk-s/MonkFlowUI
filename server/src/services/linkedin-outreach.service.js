@@ -20,6 +20,7 @@ const logger = require('../utils/logger');
 const unipile = require('./unipile.client');
 const { sendEmail } = require('./email.service');
 const leadgen = require('./leadgen.service');
+const pushover = require('./pushover.client');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -574,12 +575,27 @@ async function runDailyLinkedInRun({ dryRun = false } = {}) {
 
     await sendOwnerSummary(stats);
     await writeHeartbeat(`ok: ${stats.connectsSent}c/${stats.dmsSent}d`);
+    // Fire-and-forget daily summary push (no await so a push hiccup can't break the run)
+    if (!dryRun) {
+      pushover.sendDailySummary({
+        scheduler: 'LinkedIn',
+        lines: [
+          `Discovered: ${stats.discovered}`,
+          `Personalized: ${stats.personalized}`,
+          `Connects sent: ${stats.connectsSent}`,
+          `DMs sent: ${stats.dmsSent}`,
+          stats.errors ? `⚠️ Errors: ${stats.errors}` : null,
+        ],
+        url: `${env.frontendUrl}/admin`,
+      }).catch(() => {});
+    }
     return { ok: true, stats };
   } catch (err) {
     stats.error = err.message;
     logger.error({ err: err.message, stack: err.stack }, '[linkedin] daily run failed');
     await writeHeartbeat(`error: ${err.message.slice(0, 100)}`);
     await sendOwnerSummary(stats);
+    pushover.sendSchedulerFailure({ scheduler: 'LinkedIn', error: err.message }).catch(() => {});
     return { ok: false, stats, error: err.message };
   }
 }

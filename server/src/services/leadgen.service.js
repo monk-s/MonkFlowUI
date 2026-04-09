@@ -3,6 +3,7 @@ const leadModel = require('../models/leadgen.model');
 const { sendEmail } = require('./email.service');
 const { query: dbQuery } = require('../config/database');
 const { getFirstName, cleanCompanyName } = require('../utils/nameParser');
+const pushover = require('./pushover.client');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
@@ -1180,6 +1181,17 @@ async function runDailyLeadGeneration() {
     console.error('[LEADGEN] Failed to send owner summary:', err.message);
   }
 
+  pushover.sendDailySummary({
+    scheduler: 'LeadGen (Email)',
+    lines: [
+      `Searched: ${stats.searched}`,
+      `Discovered: ${stats.discovered}`,
+      `Emailed: ${stats.emailed}`,
+      stats.errors ? `⚠️ Errors: ${stats.errors}` : null,
+    ],
+    url: `${env.frontendUrl}/admin`,
+  }).catch(() => {});
+
   console.log(`[LEADGEN] === Complete: ${JSON.stringify(stats)} ===`);
 
   // ── Mark workflow execution as completed ──
@@ -1235,6 +1247,7 @@ async function runDailyLeadGeneration() {
     } catch (wfFailErr) {
       console.warn('[LEADGEN] Workflow execution failure tracking failed:', wfFailErr.message);
     }
+    pushover.sendSchedulerFailure({ scheduler: 'LeadGen (Email)', error: pipelineErr.message }).catch(() => {});
     // Re-throw so callers still see the error
     throw pipelineErr;
   }

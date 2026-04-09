@@ -55,4 +55,23 @@ async function sendPush({ title, message, url, urlTitle, priority = 0 }) {
   }
 }
 
-module.exports = { sendPush };
+/**
+ * Send a daily scheduler summary push (priority 0).
+ * Used at the end of each daily cron run so Nathan knows the job fired.
+ */
+async function sendDailySummary({ scheduler, lines = [], url }) {
+  const title = `📊 ${scheduler} daily run`;
+  const message = lines.filter(Boolean).join('\n').slice(0, 1024);
+  return sendPush({ title, message, url, urlTitle: 'Open admin', priority: 0 });
+}
+
+/**
+ * Send a scheduler failure alert (priority 1 — bypasses quiet hours).
+ */
+async function sendSchedulerFailure({ scheduler, error }) {
+  const title = `🚨 ${scheduler} scheduler failed`;
+  const message = (error || 'unknown error').toString().slice(0, 900);
+  return sendPush({ title, message, priority: 1 });
+}
+
+module.exports = { sendPush, sendDailySummary, sendSchedulerFailure };

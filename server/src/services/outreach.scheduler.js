@@ -262,6 +262,9 @@ function start() {
       await processDueFollowups();
     } catch (err) {
       console.error('[OUTREACH] Cron tick failed:', err.message);
+      try {
+        require('./pushover.client').sendSchedulerFailure({ scheduler: 'Outreach (Follow-ups)', error: err.message }).catch(() => {});
+      } catch (_) {}
     }
   }, { timezone: 'America/Chicago' });
 
