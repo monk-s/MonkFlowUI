@@ -484,21 +484,30 @@ const TRACKING_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAAB
 const trackOpen = catchAsync(async (req, res) => {
   const { emailId } = req.params;
   if (emailId) {
-    // Try to match by: outreach_emails.gmail_message_id, outreach_emails.id, or outreach_leads.unsubscribe_token
-    await query(
-      `UPDATE outreach_leads SET opened_at = COALESCE(opened_at, NOW()), updated_at = NOW()
-       WHERE id = (SELECT lead_id FROM outreach_emails WHERE gmail_message_id = $1 OR id::text = $1 LIMIT 1)
-          OR unsubscribe_token::text = $1`,
-      [emailId]
-    ).catch(() => {}); // never fail the pixel response
+    // Filter out spam scanner opens — they fire within seconds of delivery
+    // and produce fake open data that makes diagnostics impossible.
+    const ua = (req.headers['user-agent'] || '').toLowerCase();
+    const isScanner = !ua
+      || ua.length < 20
+      || /barracuda|mimecast|proofpoint|symantec|forefront|microsoft office|outlook-scan|google-safety|postfix|mailscanner|spamassassin|clamav|amavis|rspamd|messagelabs/.test(ua);
 
-    // Also update opened_at on the specific outreach_email (if matched by email ID)
-    await query(
-      `UPDATE outreach_emails SET opened_at = COALESCE(opened_at, NOW())
-       WHERE gmail_message_id = $1 OR id::text = $1`,
-      [emailId]
-    ).catch(() => {});
+    if (!isScanner) {
+      // Only record opens from likely-human clients
+      await query(
+        `UPDATE outreach_leads SET opened_at = COALESCE(opened_at, NOW()), updated_at = NOW()
+         WHERE id = (SELECT lead_id FROM outreach_emails WHERE gmail_message_id = $1 OR id::text = $1 LIMIT 1)
+            OR unsubscribe_token::text = $1`,
+        [emailId]
+      ).catch(() => {});
+
+      await query(
+        `UPDATE outreach_emails SET opened_at = COALESCE(opened_at, NOW())
+         WHERE gmail_message_id = $1 OR id::text = $1`,
+        [emailId]
+      ).catch(() => {});
+    }
   }
+  // Always serve the pixel regardless of scanner detection
   res.set({ 'Content-Type': 'image/gif', 'Cache-Control': 'no-cache, no-store', 'Expires': '0' });
   res.send(TRACKING_PIXEL);
 });

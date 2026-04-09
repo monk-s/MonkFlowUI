@@ -16,25 +16,30 @@ const SEARCH_API_BASE = SEARCH_API_PROVIDER === 'serpapi'
   ? 'https://serpapi.com/search.json'
   : 'https://www.searchapi.io/api/v1/search';
 // ── Domain warming schedule ────────────────────────────
-// getmonkflow.com launch date — used to auto-ramp sending volume
-const DOMAIN_LAUNCH_DATE = new Date(process.env.DOMAIN_LAUNCH_DATE || '2026-04-01');
+// Reset date for mail.getmonkflow.com subdomain — previous sends on root domain
+// had 20-40% bounce rates on several senders, poisoning reputation.
+// Conservative ramp: 3 senders × perSender = daily total.
+const DOMAIN_LAUNCH_DATE = new Date(process.env.DOMAIN_LAUNCH_DATE || '2026-04-10');
 
 function getWarmingLimits() {
   const daysSinceLaunch = Math.floor((Date.now() - DOMAIN_LAUNCH_DATE.getTime()) / (1000 * 60 * 60 * 24));
 
   if (daysSinceLaunch < 7) {
-    // Days 0-6: conservative post-SPF-fix recovery — 10 per sender × 10 = 100/day
-    return { daily: 100, perSender: 10, phase: 'warm-1' };
+    // Days 0-6: very conservative — 5 per sender × 3 = 15/day
+    return { daily: 15, perSender: 5, phase: 'warm-1' };
   } else if (daysSinceLaunch < 14) {
-    // Days 7-13: gradual ramp — 20 per sender × 10 = 200/day
-    return { daily: 200, perSender: 20, phase: 'warm-2' };
+    // Days 7-13: light ramp — 10 per sender × 3 = 30/day
+    return { daily: 30, perSender: 10, phase: 'warm-2' };
+  } else if (daysSinceLaunch < 21) {
+    // Days 14-20: moderate — 20 per sender × 3 = 60/day
+    return { daily: 60, perSender: 20, phase: 'warm-3' };
   } else if (daysSinceLaunch < 28) {
-    // Days 14-27: near full — 25 per sender × 10 = 250/day
-    return { daily: 250, perSender: 25, phase: 'warm-3' };
+    // Days 21-27: near full — 25 per sender × 3 = 75/day
+    return { daily: 75, perSender: 25, phase: 'warm-4' };
   } else {
-    // Day 28+: full capacity — 30 per sender × 10 = 300/day
+    // Day 28+: full capacity — 30 per sender × 3 = 90/day
     return {
-      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 300,
+      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 90,
       perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 30,
       phase: 'full',
     };
@@ -122,22 +127,14 @@ async function getHealthySenders() {
 const SENDING_DOMAIN_BASE = 'https://monkflow.io';
 const UNSUBSCRIBE_BASE = SENDING_DOMAIN_BASE;
 
-// Rotate across 10 sender identities to protect deliverability
-// TODO: Once mail.getmonkflow.com DNS is verified on Resend, set
-//       OUTREACH_SENDING_DOMAIN=mail.getmonkflow.com in Railway env
-//       to migrate senders to the subdomain (protects root domain reputation).
-const SENDER_DOMAIN = process.env.OUTREACH_SENDING_DOMAIN || 'getmonkflow.com';
+// 3 personal sender identities on the dedicated outreach subdomain.
+// Role-based addresses (outreach@, hello@, team@, etc.) removed — they're
+// a spam signal and the system's own BAD_PATTERNS would reject them on receive.
+const SENDER_DOMAIN = process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com';
 const SENDERS = [
   { email: `nathan@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
   { email: `nate@${SENDER_DOMAIN}`, name: 'Nate Linder' },
   { email: `nathan.linder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
-  { email: `n.linder@${SENDER_DOMAIN}`, name: 'Nathan L.' },
-  { email: `outreach@${SENDER_DOMAIN}`, name: 'Nathan at MonkFlow' },
-  { email: `hello@${SENDER_DOMAIN}`, name: 'Nathan from MonkFlow' },
-  { email: `growth@${SENDER_DOMAIN}`, name: 'Nathan — MonkFlow' },
-  { email: `team@${SENDER_DOMAIN}`, name: 'Nathan at MonkFlow' },
-  { email: `connect@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
-  { email: `info@${SENDER_DOMAIN}`, name: 'Nathan at MonkFlow' },
 ];
 
 const US_CITIES = [
@@ -155,17 +152,12 @@ const US_CITIES = [
   'Anchorage AK', 'Honolulu HI', 'Burlington VT', 'Santa Fe NM',
 ];
 
+// Narrowed to 3 industries that match existing case studies and have the
+// strongest product-market fit. Depth > breadth for personalization quality.
 const FIRM_TYPES = [
-  { type: 'cpa', queries: ['small CPA firm', 'accounting firm small business', 'CPA tax accountant'] },
-  { type: 'law', queries: ['small law firm estate planning', 'family law attorney small firm', 'business attorney small practice'] },
-  { type: 'financial', queries: ['financial advisor independent', 'wealth management small firm', 'financial planner independent'] },
-  { type: 'dental', queries: ['dental office small practice', 'family dentist private practice', 'dentist office small town'] },
-  { type: 'chiropractic', queries: ['chiropractor small practice', 'chiropractic office independent', 'chiropractor private practice'] },
-  { type: 'real_estate', queries: ['real estate agent independent', 'small real estate brokerage', 'realtor independent agent'] },
-  { type: 'insurance', queries: ['insurance agent independent', 'small insurance agency', 'insurance broker local'] },
-  { type: 'veterinary', queries: ['veterinary clinic small', 'vet office private practice', 'animal hospital small'] },
-  { type: 'contractor', queries: ['plumbing company small business', 'HVAC contractor local', 'general contractor small business'] },
-  { type: 'physical_therapy', queries: ['physical therapy private practice', 'PT clinic independent', 'physical therapist small office'] },
+  { type: 'cpa', queries: ['"CPA firm" "contact us" -yelp -yellowpages', '"accounting firm" "meet our team" -bbb -avvo', 'small CPA firm'] },
+  { type: 'dental', queries: ['"family dentistry" "contact us" -yelp -yellowpages', '"dental practice" "meet our team" -healthgrades', 'dental office small practice'] },
+  { type: 'financial', queries: ['"financial advisor" "contact us" -yelp -yellowpages', '"wealth management" "our team" -investopedia', 'financial advisor independent'] },
 ];
 
 const BOOKING_PLATFORMS = [
@@ -637,31 +629,18 @@ function scoreLead(diagnosis) {
 async function sendColdEmail(lead, sender) {
   const unsubUrl = `${UNSUBSCRIBE_BASE}/api/v1/leadgen/unsubscribe/${lead.unsubscribe_token}`;
 
+  // Plain-text-style HTML — no branding, no tables, no gradient logos.
+  // Looks like a real person typed this in Gmail, not a marketing tool.
   const htmlBody = `
     <div style="font-family: -apple-system, sans-serif; max-width: 600px; line-height: 1.6; color: #333;">
       ${lead.outreach_body.split('\n').map(line => {
         if (!line.trim()) return '<br>';
         const escaped = escapeHtml(line);
-        const linked = escaped.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#00cc6a;text-decoration:none;font-weight:600;">$1</a>');
+        const linked = escaped.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#333;text-decoration:underline;">$1</a>');
         return `<p style="margin: 0 0 12px;">${linked}</p>`;
       }).join('')}
     </div>
-    <div style="margin-top: 24px; padding-top: 16px; border-top: 2px solid #00cc6a;">
-      <table cellpadding="0" cellspacing="0" style="font-family: -apple-system, sans-serif;">
-        <tr>
-          <td style="padding-right: 12px; vertical-align: top;">
-            <div style="width: 40px; height: 40px; background: linear-gradient(135deg, #00cc6a, #0a2e1a); border-radius: 8px; text-align: center; line-height: 40px; color: white; font-weight: bold; font-size: 18px;">M</div>
-          </td>
-          <td style="vertical-align: top;">
-            <div style="font-weight: 600; color: #1a1a1a; font-size: 14px;">Nathan Linder</div>
-            <div style="color: #666; font-size: 13px;">Founder, <a href="https://getmonkflow.com" style="color: #00cc6a; text-decoration: none;">MonkFlow</a></div>
-            <div style="color: #999; font-size: 12px; margin-top: 2px;">AI-powered workflows for small businesses</div>
-          </td>
-        </tr>
-      </table>
-    </div>
     <div style="margin-top: 20px; font-size: 11px; color: #999;">
-      <p>MonkFlow LLC | 1600 Sayles Blvd, Abilene, TX 79605</p>
       <p><a href="${unsubUrl}" style="color: #999;">Unsubscribe</a></p>
     </div>
     <img src="${SENDING_DOMAIN_BASE}/api/v1/outreach/track/open/${lead.unsubscribe_token}" width="1" height="1" style="display:none" alt="" />
@@ -674,7 +653,7 @@ async function sendColdEmail(lead, sender) {
     const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@mail.getmonkflow.com';
 
     // Plain-text alternative (improves deliverability — HTML-only emails score higher on spam filters)
-    const plainText = `${lead.outreach_body}\n\n--\nNathan Linder\nFounder, MonkFlow\nAI-powered workflows for small businesses\n\nMonkFlow LLC | 1600 Sayles Blvd, Abilene, TX 79605\nUnsubscribe: ${unsubUrl}`;
+    const plainText = `${lead.outreach_body}\n\nUnsubscribe: ${unsubUrl}`;
 
     const result = await sendEmail({
       to: lead.email,
@@ -999,6 +978,13 @@ async function runDailyLeadGeneration() {
       });
       const bestEmail = sortedEmails[0];
       if (!bestEmail) continue;
+
+      // Skip leads where the only email is a role-based address (info@, contact@, etc.)
+      // These mailboxes are rarely monitored by decision-makers.
+      if (ROLE_PREFIXES.test(bestEmail)) {
+        console.log(`[LEADGEN] Skipping ${raw.link}: only role-based email ${bestEmail}`);
+        continue;
+      }
 
       // Verify email before adding (pattern + MX check + domain suppression)
       const { verifyEmail } = require('./outreach-ai.service');

@@ -58,40 +58,6 @@ app.get('/api/v1/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Temporary: email deliverability diagnostics (remove after analysis)
-app.get('/api/v1/_diag/email', async (req, res) => {
-  try {
-    const { query } = require('./config/database');
-    const [openTiming, senderHealth, sampleOpens] = await Promise.all([
-      query(`SELECT CASE
-        WHEN EXTRACT(EPOCH FROM (ol.opened_at - oe.delivered_at)) < 10 THEN 'under_10s'
-        WHEN EXTRACT(EPOCH FROM (ol.opened_at - oe.delivered_at)) < 60 THEN '10s_to_1m'
-        WHEN EXTRACT(EPOCH FROM (ol.opened_at - oe.delivered_at)) < 3600 THEN '1m_to_1h'
-        ELSE 'over_1h'
-        END AS bucket, COUNT(*)::int AS count
-        FROM outreach_leads ol
-        JOIN outreach_emails oe ON oe.lead_id = ol.id AND oe.touch_number = 0
-        WHERE ol.opened_at IS NOT NULL AND oe.delivered_at IS NOT NULL
-        GROUP BY bucket ORDER BY bucket`),
-      query(`SELECT sender_email, SUM(sent_count)::int AS sent, SUM(bounce_count)::int AS bounces,
-        SUM(complaint_count)::int AS complaints,
-        ROUND(SUM(bounce_count)::numeric / NULLIF(SUM(sent_count),0) * 100, 2) AS bounce_pct
-        FROM sender_health GROUP BY sender_email ORDER BY sent DESC`),
-      query(`SELECT ol.contact_email, oe.delivered_at, ol.opened_at,
-        ROUND(EXTRACT(EPOCH FROM (ol.opened_at - oe.delivered_at)))::int AS secs_to_open
-        FROM outreach_leads ol
-        JOIN outreach_emails oe ON oe.lead_id = ol.id AND oe.touch_number = 0
-        WHERE ol.opened_at IS NOT NULL AND oe.delivered_at IS NOT NULL
-        ORDER BY secs_to_open ASC LIMIT 20`),
-    ]);
-    res.json({
-      openTiming: openTiming.rows,
-      senderHealth: senderHealth.rows,
-      sampleOpens: sampleOpens.rows,
-    });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
 // Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
