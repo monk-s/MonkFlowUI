@@ -511,7 +511,7 @@ async function runDailyLinkedInRun({ dryRun = false } = {}) {
     }
 
     // 3. Personalize all `enriched` leads
-    const { rows: enriched } = await query(`SELECT * FROM linkedin_leads WHERE status='enriched' ORDER BY score DESC LIMIT $1`, [env.linkedinDailyConnectLimit * 2]);
+    const { rows: enriched } = await query(`SELECT * FROM linkedin_leads WHERE status='enriched' ORDER BY score DESC, created_at DESC LIMIT 30`);
     for (const lead of enriched) {
       try {
         const { connectNote, firstDM } = await personalize(lead);
