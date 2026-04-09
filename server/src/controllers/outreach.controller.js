@@ -312,7 +312,7 @@ const processDueFollowups = catchAsync(async (req, res) => {
 
       const unsubToken = lead.unsubscribe_token;
       if (unsubToken) {
-        const unsubUrl = `${env.frontendUrl || 'https://getmonkflow.com'}/api/v1/leadgen/unsubscribe/${unsubToken}`;
+        const unsubUrl = `https://monkflow.io/api/v1/leadgen/unsubscribe/${unsubToken}`;
         emailHeaders['List-Unsubscribe'] = `<${unsubUrl}>`;
         emailHeaders['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
       }

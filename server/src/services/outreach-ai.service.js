@@ -321,7 +321,7 @@ async function sendAiEmail(leadId) {
     .trim();
 
   const emailResult = await sendEmail({
-    from: env.outreachFromEmail || 'Nathan Linder <nathan@getmonkflow.com>',
+    from: env.outreachFromEmail,
     to: lead.contact_email,
     subject: lead.ai_email_subject,
     html: htmlBody,
