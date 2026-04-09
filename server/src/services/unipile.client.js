@@ -95,7 +95,7 @@ async function sendConnectionRequest(providerId, note) {
   return call('POST', '/users/invite', {
     account_id: env.unipileAccountId,
     provider_id: providerId,
-    message: (note || '').slice(0, 300),
+    message: (note || '').slice(0, 200),
   });
 }
 

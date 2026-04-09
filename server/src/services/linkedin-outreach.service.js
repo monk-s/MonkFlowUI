@@ -331,7 +331,7 @@ async function insertProspect({ business, profile }, diagnosis) {
 //   - Personalization beyond first name → +340% reply rate (Outreaches 2025)
 //   - Recent-post reference boosts reply 32% (Reply.io)
 //   - First DM ≤ 500 chars with ONE concrete outcome + ONE close-ended CTA
-const CONNECT_NOTE_MAX = 300;
+const CONNECT_NOTE_MAX = 200; // LinkedIn non-premium hard cap
 const FIRST_DM_MAX = 500;
 
 function buildPersonalizePrompt(lead, { tighten = false } = {}) {
