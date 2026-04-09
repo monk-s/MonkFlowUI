@@ -41,11 +41,12 @@ const INDUSTRY_KEYWORDS = {
   physical_therapy:['physical therapy', 'physical therapist', 'PT clinic'],
 };
 
+// Unipile rejects boolean queries over ~80 chars ("content_too_large"). So we
+// emit a short plain-text query: one owner word + one industry word. The result
+// set is then filtered in pickBestOwner against the full OWNER_TITLE_KEYWORDS list.
 function buildOwnerBooleanQuery(firmType) {
-  const industry = INDUSTRY_KEYWORDS[firmType] || [firmType];
-  const owners = OWNER_TITLE_KEYWORDS.map(t => t.includes(' ') ? `"${t}"` : t).join(' OR ');
-  const industryStr = industry.map(t => t.includes(' ') ? `"${t}"` : t).join(' OR ');
-  return `(${owners}) AND (${industryStr})`;
+  const industry = (INDUSTRY_KEYWORDS[firmType] || [firmType])[0];
+  return `owner ${industry}`;
 }
 
 // ── Heartbeat ─────────────────────────────────────────────
