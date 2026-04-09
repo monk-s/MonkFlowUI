@@ -10,6 +10,14 @@ const logger = require('../utils/logger');
 // ── POST /linkedin/run — manual trigger (superadmin) ──
 const runNow = catchAsync(async (req, res) => {
   const dryRun = req.query.dryRun === 'true';
+  // ?repersonalize=true flips all still-unsent leads back to 'enriched' so the run
+  // regenerates their connect note + DM with the current prompt. Useful after prompt tweaks.
+  if (req.query.repersonalize === 'true') {
+    const { rowCount } = await query(
+      `UPDATE linkedin_leads SET status='enriched', connect_note=NULL, first_dm=NULL, updated_at=NOW() WHERE status='personalized'`
+    );
+    logger.info({ rowCount }, '[linkedin] repersonalize flip');
+  }
   const result = await linkedinService.runDailyLinkedInRun({ dryRun });
   res.json(result);
 });

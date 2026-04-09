@@ -307,21 +307,34 @@ function buildPersonalizePrompt(lead, { tighten = false } = {}) {
     : !diagnosis.has_client_portal ? 'no client portal'
     : 'outdated workflow';
 
+  // If the business name is really just "<First Last>, CPA, PC" style, strip the person's name
+  // so the hook says "your practice" instead of literally repeating their own name back at them.
+  const firstName = (lead.contact_first_name || '').trim();
+  const lastName = (lead.contact_name || '').replace(firstName, '').trim();
+  let displayBusiness = lead.business_name || '';
+  const looksLikePersonName = firstName && (
+    displayBusiness.toLowerCase().startsWith(firstName.toLowerCase()) ||
+    (lastName && displayBusiness.toLowerCase().includes(lastName.toLowerCase()))
+  );
+  if (looksLikePersonName) displayBusiness = 'your practice';
+  // Clean trailing "CPA, PC" / "LLC" / "DDS" suffixes from display
+  displayBusiness = displayBusiness.replace(/,?\s*(P\.?C\.?|L\.?L\.?C\.?|Inc\.?|PLLC|DDS|CPA|DMD|DVM|P\.?A\.?)\b.*$/i, '').trim() || 'your practice';
+
   // Hook priority: (1) recent post, (2) business + diagnosis finding, (3) city + industry.
   const hookHint = lead.recent_post_snippet
     ? `HOOK: Reference this recent post: "${lead.recent_post_snippet.slice(0, 200)}"`
-    : lead.business_name && lead.business_name !== 'their practice'
-      ? `HOOK: Reference ${lead.business_name} + the diagnosis finding "${topGap}"`
-      : `HOOK: Reference ${lead.business_city || 'their city'} ${lead.business_type || ''} scene`;
+    : displayBusiness && displayBusiness !== 'your practice'
+      ? `HOOK: Reference ${displayBusiness} + the diagnosis finding "${topGap}"`
+      : `HOOK: Reference the ${lead.business_city || 'local'} ${lead.business_type || ''} scene and the "${topGap}" gap — DO NOT use the business name, use "your practice" instead`;
 
-  return `You are Nathan Linder, founder of MonkFlow (automation for small service businesses).
+  return `You are Nate Linder — a student at Abilene Christian University (ACU) building MonkFlow, a small automation platform for service businesses. You are reaching out personally, founder-to-owner. Not a rep, not a sales team.
 
 Generate a LinkedIn connection note + first DM. Return ONLY valid JSON.
 
 PROSPECT
-- First name: ${lead.contact_first_name || 'there'}
+- First name: ${firstName || 'there'}
 - Title: ${lead.contact_title || 'unknown'}
-- Business: ${lead.business_name || 'unknown'}
+- Business (for context): ${displayBusiness}
 - City: ${lead.business_city || ''}
 - Industry: ${lead.business_type || ''}
 - Diagnosis gap: ${topGap}
@@ -331,17 +344,19 @@ PROSPECT
 ${hookHint}
 
 CONNECT NOTE — HARD RULES (≤${CONNECT_NOTE_MAX} chars${tighten ? ' — PREVIOUS ATTEMPT WAS TOO LONG, TIGHTEN' : ''}):
-- Open with "${lead.contact_first_name || 'Hey'}," then ONE specific reference from the hook above
-- Hook sentence must be 36–50 characters (research-backed)
-- End with a SOFT value line (e.g. "Thought you'd appreciate what I'm building") — NOT a CTA, NOT a question, NOT "let's chat"
-- NEVER: link, URL, "quick chat", "20 min", "would love to", "reaching out", "touching base", "I noticed", product pitch, mention of MonkFlow by name
+- Open with "${firstName || 'Hey'}," — use first name ONLY, never the full business name
+- Introduce yourself briefly: "I'm Nate, an ACU student building a tiny automation tool for ${lead.business_type || 'practices'} like yours"
+- Then ONE specific reference from the hook above (use "your practice" instead of repeating their name back at them)
+- End with a SOFT value line like "Figured you'd get what I'm building" — NOT a CTA, NOT a question
+- NEVER: link, URL, "quick chat", "20 min", "would love to", "reaching out", "touching base", "I noticed", repeat the business name if it contains the prospect's own name, the word "MonkFlow"
 - Sign nothing (LinkedIn shows your name)
 
 FIRST DM — HARD RULES (≤${FIRST_DM_MAX} chars${tighten ? ' — PREVIOUS ATTEMPT WAS TOO LONG, TIGHTEN' : ''}):
-- Reference the connect note hook conversationally for continuity
-- State ONE specific outcome with a NUMBER (e.g. "cut 4 hrs/week off booking coordination for a 3-provider ${lead.business_type || 'practice'}")
+- Thank them for connecting in 5 words max
+- Remind them you're a student founder: "Quick context — I'm building MonkFlow solo out of Abilene, focused on ${lead.business_type || 'small practices'}"
+- State ONE specific outcome with a NUMBER (e.g. "cut 4 hrs/week off booking coordination for a 3-person practice")
 - Exactly ONE close-ended CTA on its own line: "Worth a 15-min look? Yes or no."
-- Sign "— Nathan"
+- Sign "— Nate"
 
 Return ONLY: {"connectNote": "...", "firstDM": "..."}`;
 }
