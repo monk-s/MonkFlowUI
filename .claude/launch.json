@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "dev",
-      "runtimeExecutable": "/usr/bin/ruby",
-      "runtimeArgs": ["-e", "require 'webrick';s=WEBrick::HTTPServer.new(Port:3000,DocumentRoot:'/tmp/monkflow');trap('INT'){s.shutdown};s.start"],
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["/Users/nathanlinder/Desktop/MonkFlowUI/.claude/serve.sh"],
       "port": 3000
     }
   ]

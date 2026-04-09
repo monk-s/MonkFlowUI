@@ -74,14 +74,22 @@ async function discoverProspects({ maxBusinesses = 30 } = {}) {
         if (found.length >= maxBusinesses) break;
         // Look up the owner on LinkedIn via Unipile
         let people;
+        // Two-pass search: (1) business name + city for precision, (2) title + city fallback for recall.
+        const cityName = biz.city || city;
         try {
           people = await unipile.searchPeople({
-            keywords: `${biz.business_name} ${OWNER_TITLE_KEYWORDS.join(' OR ')}`,
-            location: `${biz.city || city}`,
-            limit: 3,
+            keywords: `${biz.business_name} ${cityName}`,
+            limit: 5,
           });
+          const hasResults = people && (people.items || people.data || []).length > 0;
+          if (!hasResults) {
+            people = await unipile.searchPeople({
+              keywords: `owner ${biz.business_type || firm.type} ${cityName}`,
+              limit: 5,
+            });
+          }
         } catch (err) {
-          logger.warn({ err: err.message, business: biz.business_name }, '[linkedin] people search failed');
+          logger.warn({ err: err.message, status: err.status, body: err.body, business: biz.business_name }, '[linkedin] people search failed');
           continue;
         }
         const profile = pickBestOwner(people, biz.business_name);
