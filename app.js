@@ -5967,9 +5967,20 @@ function renderLinkedInCard(stats, leads) {
         const pic = l.profile_picture_url
           ? `<img src="${escapeHtml(l.profile_picture_url)}" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
           : `<div style="width:32px;height:32px;border-radius:50%;background:var(--border);flex-shrink:0;"></div>`;
-        const note = l.connect_note
+        const preview = l.connect_note
           ? `<div style="font-size:11px;color:var(--text-secondary);font-style:italic;margin-top:4px;max-width:420px;">"${escapeHtml(l.connect_note.slice(0, 140))}${l.connect_note.length > 140 ? '…' : ''}"</div>`
           : '';
+        const full = (l.connect_note || l.first_dm)
+          ? `<details style="margin-top:6px;"><summary style="font-size:11px;color:#0a66c2;cursor:pointer;">Full outreach preview →</summary>
+              <div style="margin-top:8px;padding:10px;background:var(--bg-secondary);border-left:3px solid #0a66c2;border-radius:4px;font-size:12px;line-height:1.5;max-width:520px;">
+                <div style="font-weight:600;color:var(--text-secondary);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Connect note (${(l.connect_note || '').length}/300)</div>
+                <div style="white-space:pre-wrap;margin-bottom:12px;">${escapeHtml(l.connect_note || '—')}</div>
+                <div style="font-weight:600;color:var(--text-secondary);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">First DM — sent after they accept (${(l.first_dm || '').length}/500)</div>
+                <div style="white-space:pre-wrap;">${escapeHtml(l.first_dm || '—')}</div>
+                ${l.recent_post_snippet ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);"><div style="font-weight:600;color:var(--text-secondary);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Recent post hook used</div><div style="font-style:italic;color:var(--text-tertiary);">"${escapeHtml(l.recent_post_snippet.slice(0,280))}"</div></div>` : ''}
+              </div></details>`
+          : '';
+        const note = preview + full;
         const postFlag = l.recent_post_snippet
           ? `<span title="Has recent post hook" style="font-size:10px;color:#00cc6a;margin-left:6px;">● post</span>`
           : '';

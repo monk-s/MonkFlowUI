@@ -19,7 +19,7 @@ const listLeads = catchAsync(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
   const status = req.query.status || null;
   const params = [limit];
-  let sql = `SELECT id, business_name, contact_name, contact_title, business_city, status, score, connect_sent_at, connected_at, dm_sent_at, replied_at, linkedin_url, last_touch_at, connect_note, recent_post_snippet, profile_picture_url FROM linkedin_leads`;
+  let sql = `SELECT id, business_name, contact_name, contact_title, business_city, status, score, connect_sent_at, connected_at, dm_sent_at, replied_at, linkedin_url, last_touch_at, connect_note, first_dm, recent_post_snippet, profile_picture_url FROM linkedin_leads`;
   if (status) {
     sql += ` WHERE status = $2`;
     params.push(status);
