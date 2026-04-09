@@ -40,6 +40,7 @@ const env = {
   linkedinOutreachEnabled: process.env.LINKEDIN_OUTREACH_ENABLED === 'true',
   linkedinDailyConnectLimit: parseInt(process.env.LINKEDIN_DAILY_CONNECT_LIMIT, 10) || 20,
   linkedinDailyDmLimit: parseInt(process.env.LINKEDIN_DAILY_DM_LIMIT, 10) || 15,
+  linkedinDiscoveryMode: process.env.LINKEDIN_DISCOVERY_MODE || 'linkedin_boolean',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production',
 };

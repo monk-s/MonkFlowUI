@@ -5963,15 +5963,25 @@ function renderLinkedInCard(stats, leads) {
 
   const rows = list.length === 0
     ? `<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:20px;">No leads yet — run the cron or click "Run Now"</td></tr>`
-    : list.map(l => `
+    : list.map(l => {
+        const pic = l.profile_picture_url
+          ? `<img src="${escapeHtml(l.profile_picture_url)}" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
+          : `<div style="width:32px;height:32px;border-radius:50%;background:var(--border);flex-shrink:0;"></div>`;
+        const note = l.connect_note
+          ? `<div style="font-size:11px;color:var(--text-secondary);font-style:italic;margin-top:4px;max-width:420px;">"${escapeHtml(l.connect_note.slice(0, 140))}${l.connect_note.length > 140 ? '…' : ''}"</div>`
+          : '';
+        const postFlag = l.recent_post_snippet
+          ? `<span title="Has recent post hook" style="font-size:10px;color:#00cc6a;margin-left:6px;">● post</span>`
+          : '';
+        return `
         <tr>
-          <td><strong>${escapeHtml(l.contact_name || '—')}</strong><div style="font-size:11px;color:var(--text-secondary);">${escapeHtml(l.contact_title || '')}</div></td>
-          <td>${escapeHtml(l.business_name || '')}<div style="font-size:11px;color:var(--text-secondary);">${escapeHtml(l.business_city || '')}</div></td>
+          <td><div style="display:flex;gap:10px;align-items:flex-start;">${pic}<div><strong>${escapeHtml(l.contact_name || '—')}</strong>${postFlag}<div style="font-size:11px;color:var(--text-secondary);">${escapeHtml(l.contact_title || '')}</div></div></div></td>
+          <td>${escapeHtml(l.business_name || '')}<div style="font-size:11px;color:var(--text-secondary);">${escapeHtml(l.business_city || '')}</div>${note}</td>
           <td>${statusBadge(l.status)}</td>
           <td style="font-size:11px;color:var(--text-secondary);">${l.last_touch_at ? timeAgo(l.last_touch_at) : '—'}</td>
           <td>${l.linkedin_url ? `<a href="${escapeHtml(l.linkedin_url)}" target="_blank" style="color:#0a66c2;font-size:11px;">View →</a>` : ''}</td>
         </tr>
-      `).join('');
+      `; }).join('');
 
   return `
     <div class="card" style="padding:0;margin-bottom:24px;border:1px solid rgba(10,102,194,0.3);">

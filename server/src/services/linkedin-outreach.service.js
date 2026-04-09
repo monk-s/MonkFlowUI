@@ -25,6 +25,29 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const OWNER_TITLE_KEYWORDS = ['owner', 'founder', 'partner', 'president', 'CEO', 'managing director', 'principal'];
 
+// Boolean-search industry keywords per firm.type (mirrors leadgen.FIRM_TYPES).
+// Used by buildOwnerBooleanQuery to produce LinkedIn classic search strings that
+// target owners directly instead of going through SerpAPI first.
+const INDUSTRY_KEYWORDS = {
+  cpa:             ['CPA', 'accounting', 'tax', 'accountant'],
+  law:             ['attorney', 'law firm', 'lawyer', 'legal'],
+  financial:       ['financial advisor', 'wealth', 'RIA', 'planner'],
+  dental:          ['dental', 'dentist', 'DDS', 'orthodontist'],
+  chiropractic:    ['chiropractor', 'chiropractic', 'DC'],
+  real_estate:     ['real estate', 'realtor', 'broker'],
+  insurance:       ['insurance agency', 'insurance broker'],
+  veterinary:      ['veterinarian', 'veterinary', 'DVM', 'animal hospital'],
+  contractor:      ['contractor', 'construction', 'builder', 'HVAC', 'plumbing'],
+  physical_therapy:['physical therapy', 'physical therapist', 'PT clinic'],
+};
+
+function buildOwnerBooleanQuery(firmType) {
+  const industry = INDUSTRY_KEYWORDS[firmType] || [firmType];
+  const owners = OWNER_TITLE_KEYWORDS.map(t => t.includes(' ') ? `"${t}"` : t).join(' OR ');
+  const industryStr = industry.map(t => t.includes(' ') ? `"${t}"` : t).join(' OR ');
+  return `(${owners}) AND (${industryStr})`;
+}
+
 // ── Heartbeat ─────────────────────────────────────────────
 async function writeHeartbeat(detail = null) {
   await query(
@@ -54,52 +77,107 @@ async function bumpLimit(field) {
 }
 
 // ── 1. Discovery ──────────────────────────────────────────
-async function discoverProspects({ maxBusinesses = 30 } = {}) {
-  const found = [];
-  const firmTypes = leadgen.FIRM_TYPES.slice(0, 3); // small daily slice
-  const cities = leadgen.US_CITIES.slice(0, 5);
+// Direct LinkedIn boolean search: `(owner OR founder OR ...) AND (industry terms) city`.
+// Skips SerpAPI entirely for the LinkedIn channel. Research (linkedhelper, salesrobot 2025)
+// shows title+industry+city beats brand-name searches because most SMB owner headlines
+// don't include the business name but DO include the owner title + industry.
+async function discoverProspects({ maxProspects = 30 } = {}) {
+  const mode = env.linkedinDiscoveryMode || 'linkedin_boolean';
+  if (mode === 'serpapi_bridge') return discoverProspectsViaSerpAPI({ maxProspects });
+
+  const firmTypes = leadgen.FIRM_TYPES.slice(0, 5); // 5 firm types × 8 cities = 40 searches/run
+  const cities = leadgen.US_CITIES.slice(0, 8);
+  const rawCandidates = [];
 
   for (const firm of firmTypes) {
+    const boolQuery = buildOwnerBooleanQuery(firm.type);
     for (const city of cities) {
-      if (found.length >= maxBusinesses) break;
-      const queryStr = `${firm.queries[0]} ${city}`;
-      let businesses;
+      let people;
       try {
-        businesses = await leadgen.searchSerpAPI(queryStr);
+        people = await unipile.searchPeople({
+          keywords: `${boolQuery} ${city}`,
+          limit: 10,
+        });
       } catch (err) {
-        logger.warn({ err: err.message, queryStr }, '[linkedin] serpapi search failed');
+        logger.warn({ err: err.message, status: err.status, firm: firm.type, city }, '[linkedin] boolean search failed');
         continue;
       }
+      const list = (people && (people.items || people.data || [])) || [];
+      for (const p of list) {
+        rawCandidates.push({ profile: p, firmType: firm.type, city });
+      }
+    }
+  }
+
+  // Flatten unique by provider id
+  const seen = new Set();
+  const unique = [];
+  for (const c of rawCandidates) {
+    const pid = c.profile.provider_id || c.profile.id || c.profile.public_identifier;
+    if (!pid || seen.has(pid)) continue;
+    seen.add(pid);
+    unique.push({ ...c, providerId: pid });
+  }
+
+  // Dedupe against linkedin_leads rows already in the DB (any status)
+  if (unique.length > 0) {
+    const pids = unique.map(c => c.providerId);
+    const { rows: existing } = await query(
+      `SELECT linkedin_provider_id FROM linkedin_leads WHERE linkedin_provider_id = ANY($1)`,
+      [pids]
+    );
+    const existingSet = new Set(existing.map(r => r.linkedin_provider_id));
+    for (let i = unique.length - 1; i >= 0; i--) {
+      if (existingSet.has(unique[i].providerId)) unique.splice(i, 1);
+    }
+  }
+
+  // Quality-score + pick best per firm/city slot
+  const found = [];
+  for (const c of unique) {
+    if (found.length >= maxProspects) break;
+    const chosen = pickBestOwner({ items: [c.profile] }, '');
+    if (!chosen) continue;
+    // Derive business name from headline (best-effort — most headlines are "Title at Company")
+    const businessName = extractCompanyFromHeadline(chosen.headline || chosen.title || '') || 'their practice';
+    found.push({
+      business: {
+        business_name: businessName,
+        website_url: null,
+        city: c.city,
+        state: null,
+        business_type: c.firmType,
+      },
+      profile: chosen,
+    });
+  }
+  return found;
+}
+
+// Legacy path kept behind LINKEDIN_DISCOVERY_MODE=serpapi_bridge for A/B safety.
+async function discoverProspectsViaSerpAPI({ maxProspects = 30 } = {}) {
+  const found = [];
+  const firmTypes = leadgen.FIRM_TYPES.slice(0, 3);
+  const cities = leadgen.US_CITIES.slice(0, 5);
+  for (const firm of firmTypes) {
+    for (const city of cities) {
+      if (found.length >= maxProspects) break;
+      const queryStr = `${firm.queries[0]} ${city}`;
+      let businesses;
+      try { businesses = await leadgen.searchSerpAPI(queryStr); }
+      catch (err) { logger.warn({ err: err.message, queryStr }, '[linkedin] serpapi search failed'); continue; }
       for (const raw of businesses.slice(0, 2)) {
-        if (found.length >= maxBusinesses) break;
-        // SerpAPI returns {title, link, snippet} — normalize to our schema
+        if (found.length >= maxProspects) break;
         const biz = {
           business_name: (raw.title || '').replace(/\s*[-|–—].*$/, '').trim(),
           website_url: raw.link || null,
-          city: city,
-          state: null,
+          city, state: null,
         };
         if (!biz.business_name) continue;
-        // Look up the owner on LinkedIn via Unipile
         let people;
-        // Two-pass search: (1) business name + city for precision, (2) title + city fallback for recall.
-        const cityName = biz.city || city;
         try {
-          people = await unipile.searchPeople({
-            keywords: `${biz.business_name} ${cityName}`,
-            limit: 5,
-          });
-          const hasResults = people && (people.items || people.data || []).length > 0;
-          if (!hasResults) {
-            people = await unipile.searchPeople({
-              keywords: `owner ${biz.business_type || firm.type} ${cityName}`,
-              limit: 5,
-            });
-          }
-        } catch (err) {
-          logger.warn({ err: err.message, status: err.status, body: err.body, business: biz.business_name }, '[linkedin] people search failed');
-          continue;
-        }
+          people = await unipile.searchPeople({ keywords: `${biz.business_name} ${city}`, limit: 5 });
+        } catch (err) { logger.warn({ err: err.message, business: biz.business_name }, '[linkedin] people search failed'); continue; }
         const profile = pickBestOwner(people, biz.business_name);
         if (!profile) continue;
         found.push({ business: { ...biz, business_type: firm.type }, profile });
@@ -107,6 +185,14 @@ async function discoverProspects({ maxBusinesses = 30 } = {}) {
     }
   }
   return found;
+}
+
+// "Owner @ Smile Dental" / "Owner at Smile Dental | Orthodontist" → "Smile Dental"
+function extractCompanyFromHeadline(headline) {
+  if (!headline) return null;
+  const m = headline.match(/\b(?:at|@|—|-|\|)\s+([^|•\-—]{3,60})/i);
+  if (!m) return null;
+  return m[1].trim().replace(/\s+/g, ' ');
 }
 
 function pickBestOwner(searchResult, businessName) {
@@ -117,10 +203,14 @@ function pickBestOwner(searchResult, businessName) {
     .split(/\s+/)
     .filter(t => t.length >= 3 && !['the', 'and', 'llc', 'inc', 'co'].includes(t));
 
-  // Hard quality gate: reject profiles with no headline at all (inactive/blank accounts).
+  // Hard quality gate: reject inactive/blank accounts.
+  // Require (a) a profile picture and (b) a headline ≥ 20 chars.
   const hasSignal = (p) => {
     const headline = (p.headline || p.title || '').trim();
-    return headline.length >= 5;
+    if (headline.length < 20) return false;
+    const pic = p.profile_picture_url || p.profile_picture_url_large || p.picture_url || null;
+    if (!pic) return false;
+    return true;
   };
 
   const scored = list.filter(hasSignal).map(p => {
@@ -137,89 +227,159 @@ function pickBestOwner(searchResult, businessName) {
   return qualified.length > 0 ? qualified[0].p : null;
 }
 
-// ── 2. Insert + diagnose ──────────────────────────────────
+// ── 2. Insert + diagnose + enrich ─────────────────────────
+// Pulls the full profile (about, recent post, follower count) from Unipile so
+// the personalization prompt has concrete hooks. Falls back silently on error.
+async function fetchEnrichment(providerId) {
+  if (!providerId) return null;
+  try {
+    const full = await unipile.getProfile(providerId);
+    const about = full.summary || full.about || '';
+    // Unipile's profile response may include `activity` / `posts` depending on plan.
+    // Try a few likely shapes — defensive since schema varies.
+    const postCandidates = full.recent_posts || full.activity || full.posts || [];
+    const recentPost = Array.isArray(postCandidates) && postCandidates.length > 0
+      ? (postCandidates[0].text || postCandidates[0].content || postCandidates[0].summary || '').slice(0, 400)
+      : null;
+    return {
+      about_snippet: about.slice(0, 600) || null,
+      recent_post_snippet: recentPost || null,
+      profile_picture_url: full.profile_picture_url || full.profile_picture_url_large || null,
+    };
+  } catch (err) {
+    logger.warn({ err: err.message, providerId }, '[linkedin] profile enrichment failed');
+    return null;
+  }
+}
+
 async function insertProspect({ business, profile }, diagnosis) {
   const providerId = profile.provider_id || profile.id || profile.public_identifier || null;
-  const url = profile.profile_url || (providerId ? `https://www.linkedin.com/in/${providerId}` : null);
+  const url = profile.profile_url || profile.public_profile_url || (providerId ? `https://www.linkedin.com/in/${providerId}` : null);
   if (!url) return null;
   const firstName = (profile.first_name || (profile.name || '').split(' ')[0] || '').trim();
+
+  // Enrich via getProfile so we have a real recent-post hook if available.
+  const enrichment = await fetchEnrichment(providerId);
+  const aboutSnippet = (enrichment?.about_snippet) || (profile.summary || profile.about || '').slice(0, 600) || null;
+  const recentPost = enrichment?.recent_post_snippet || null;
+  const pictureUrl = enrichment?.profile_picture_url || profile.profile_picture_url || profile.profile_picture_url_large || null;
 
   const { rows } = await query(
     `INSERT INTO linkedin_leads (
        business_name, business_website, business_city, business_state, business_type,
        contact_name, contact_first_name, contact_title,
        linkedin_url, linkedin_provider_id, about_snippet, last_activity_at,
-       diagnosis_json, score, status
+       diagnosis_json, score, status,
+       recent_post_snippet, profile_picture_url
      ) VALUES (
-       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'enriched'
+       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'enriched',$15,$16
      )
      ON CONFLICT (linkedin_url) DO NOTHING
      RETURNING *`,
     [
       business.business_name, business.website_url || null, business.city || null, business.state || null, business.business_type || null,
       profile.name || null, firstName || null, profile.headline || profile.title || null,
-      url, providerId, (profile.summary || profile.about || '').slice(0, 1000), null,
+      url, providerId, aboutSnippet, null,
       diagnosis ? JSON.stringify(diagnosis) : null,
       diagnosis ? leadgen.scoreLead(diagnosis) : 0,
+      recentPost, pictureUrl,
     ]
   );
   return rows[0] || null;
 }
 
 // ── 3. Personalization ────────────────────────────────────
+// Research-backed prompt (2025 LinkedIn outreach benchmarks):
+//   - 300-char connect note cap (premium), NO link, NO pitch, NO CTA — research shows CTAs in connect notes LOWER accept rates
+//   - Personalization beyond first name → +340% reply rate (Outreaches 2025)
+//   - Recent-post reference boosts reply 32% (Reply.io)
+//   - First DM ≤ 500 chars with ONE concrete outcome + ONE close-ended CTA
+const CONNECT_NOTE_MAX = 300;
+const FIRST_DM_MAX = 500;
+
+function buildPersonalizePrompt(lead, { tighten = false } = {}) {
+  const diagnosis = lead.diagnosis_json
+    ? (typeof lead.diagnosis_json === 'string' ? JSON.parse(lead.diagnosis_json) : lead.diagnosis_json)
+    : {};
+  const topGap = !diagnosis.has_booking_software ? 'no online booking'
+    : !diagnosis.has_intake_forms ? 'paper intake forms'
+    : !diagnosis.has_client_portal ? 'no client portal'
+    : 'outdated workflow';
+
+  // Hook priority: (1) recent post, (2) business + diagnosis finding, (3) city + industry.
+  const hookHint = lead.recent_post_snippet
+    ? `HOOK: Reference this recent post: "${lead.recent_post_snippet.slice(0, 200)}"`
+    : lead.business_name && lead.business_name !== 'their practice'
+      ? `HOOK: Reference ${lead.business_name} + the diagnosis finding "${topGap}"`
+      : `HOOK: Reference ${lead.business_city || 'their city'} ${lead.business_type || ''} scene`;
+
+  return `You are Nathan Linder, founder of MonkFlow (automation for small service businesses).
+
+Generate a LinkedIn connection note + first DM. Return ONLY valid JSON.
+
+PROSPECT
+- First name: ${lead.contact_first_name || 'there'}
+- Title: ${lead.contact_title || 'unknown'}
+- Business: ${lead.business_name || 'unknown'}
+- City: ${lead.business_city || ''}
+- Industry: ${lead.business_type || ''}
+- Diagnosis gap: ${topGap}
+- About: ${(lead.about_snippet || '').slice(0, 300)}
+- Recent post: ${lead.recent_post_snippet ? lead.recent_post_snippet.slice(0, 200) : 'none'}
+
+${hookHint}
+
+CONNECT NOTE — HARD RULES (≤${CONNECT_NOTE_MAX} chars${tighten ? ' — PREVIOUS ATTEMPT WAS TOO LONG, TIGHTEN' : ''}):
+- Open with "${lead.contact_first_name || 'Hey'}," then ONE specific reference from the hook above
+- Hook sentence must be 36–50 characters (research-backed)
+- End with a SOFT value line (e.g. "Thought you'd appreciate what I'm building") — NOT a CTA, NOT a question, NOT "let's chat"
+- NEVER: link, URL, "quick chat", "20 min", "would love to", "reaching out", "touching base", "I noticed", product pitch, mention of MonkFlow by name
+- Sign nothing (LinkedIn shows your name)
+
+FIRST DM — HARD RULES (≤${FIRST_DM_MAX} chars${tighten ? ' — PREVIOUS ATTEMPT WAS TOO LONG, TIGHTEN' : ''}):
+- Reference the connect note hook conversationally for continuity
+- State ONE specific outcome with a NUMBER (e.g. "cut 4 hrs/week off booking coordination for a 3-provider ${lead.business_type || 'practice'}")
+- Exactly ONE close-ended CTA on its own line: "Worth a 15-min look? Yes or no."
+- Sign "— Nathan"
+
+Return ONLY: {"connectNote": "...", "firstDM": "..."}`;
+}
+
 async function personalize(lead) {
-  if (!env.anthropicApiKey) {
-    throw new Error('ANTHROPIC_API_KEY required');
-  }
+  if (!env.anthropicApiKey) throw new Error('ANTHROPIC_API_KEY required');
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
-  const diagnosis = lead.diagnosis_json ? (typeof lead.diagnosis_json === 'string' ? JSON.parse(lead.diagnosis_json) : lead.diagnosis_json) : {};
-  const topGap = !diagnosis.has_booking_software ? 'no online booking'
-    : !diagnosis.has_intake_forms ? 'paper intake forms'
-    : !diagnosis.has_client_portal ? 'no client portal' : 'outdated workflow';
+  async function callOnce(tighten) {
+    const prompt = buildPersonalizePrompt(lead, { tighten });
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: tighten ? 450 : 600,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const text = response.content[0].text;
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('Personalize: no JSON in response');
+    const parsed = JSON.parse(m[0]);
+    return {
+      connectNote: (parsed.connectNote || '').trim(),
+      firstDM: (parsed.firstDM || '').trim(),
+    };
+  }
 
-  const framework = Math.random() < 0.5 ? 'insight' : 'question';
-  const prompt = `You are Nathan Linder, founder of MonkFlow (an automation platform for small service businesses).
-
-Generate a LinkedIn connection note + first DM for this prospect. Return ONLY valid JSON.
-
-Prospect:
-- Name: ${lead.contact_first_name || 'there'} (${lead.contact_name || ''})
-- Title: ${lead.contact_title || 'unknown'}
-- Business: ${lead.business_name}
-- City: ${lead.business_city || ''}
-- Type: ${lead.business_type || ''}
-- Top gap: ${topGap}
-- About snippet: ${(lead.about_snippet || '').slice(0, 400)}
-
-FRAMEWORK: ${framework === 'insight' ? '"Insight lead" — open with one specific observation about their business that hints at the gap' : '"Question lead" — open with a single close-ended interest question about the gap'}
-
-CONNECT NOTE (≤280 chars):
-- Reference one CONCRETE thing about ${lead.business_name}
-- End with a single close-ended interest question (yes/no)
-- NEVER say "I noticed", "reaching out", "touching base", "quick chat", "I'd love to"
-- NO link
-- Sign nothing — LinkedIn shows your name
-
-FIRST DM (≤500 chars, sent ONLY after they accept):
-- Reference the connect note conversationally
-- Tie to one specific outcome with a number (e.g. "took a 4-provider Tulsa dental office from 18 hrs/week on scheduling to 2")
-- End with: "20-min call this week? Free, no pitch."
-- Sign "Nathan"
-
-Return: {"connectNote": "...", "firstDM": "..."}`;
-
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 600,
-    messages: [{ role: 'user', content: prompt }],
-  });
-  const text = response.content[0].text;
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('Personalize: no JSON in response');
-  const parsed = JSON.parse(m[0]);
-  return { connectNote: (parsed.connectNote || '').slice(0, 280), firstDM: (parsed.firstDM || '').slice(0, 500) };
+  let result = await callOnce(false);
+  // Pre-validate char counts; retry once if over, then hard-truncate as a last resort.
+  if (result.connectNote.length > CONNECT_NOTE_MAX || result.firstDM.length > FIRST_DM_MAX) {
+    try {
+      result = await callOnce(true);
+    } catch (err) {
+      logger.warn({ err: err.message, leadId: lead.id }, '[linkedin] personalize retry failed');
+    }
+  }
+  return {
+    connectNote: result.connectNote.slice(0, CONNECT_NOTE_MAX),
+    firstDM: result.firstDM.slice(0, FIRST_DM_MAX),
+  };
 }
 
 // ── 4. Send connect requests ──────────────────────────────
@@ -315,7 +475,7 @@ async function runDailyLinkedInRun({ dryRun = false } = {}) {
     }
 
     // 1. Discover
-    const discovered = await discoverProspects({ maxBusinesses: env.linkedinDailyConnectLimit * 2 });
+    const discovered = await discoverProspects({ maxProspects: env.linkedinDailyConnectLimit * 2 });
     stats.discovered = discovered.length;
 
     // 2. Diagnose business + insert
