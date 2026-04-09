@@ -74,13 +74,13 @@ async function listAccounts() {
  */
 async function searchPeople({ keywords, location, limit = 10 }) {
   if (!env.unipileAccountId) throw new Error('UNIPILE_ACCOUNT_ID not configured');
-  const params = new URLSearchParams({
-    account_id: env.unipileAccountId,
-    keywords: keywords || '',
-    limit: String(Math.min(limit, 25)),
-    ...(location ? { location } : {}),
-  });
-  return call('GET', `/linkedin/search/people?${params.toString()}`);
+  const body = {
+    api: 'classic',
+    category: 'people',
+    keywords: [keywords, location].filter(Boolean).join(' '),
+    limit: Math.min(limit, 25),
+  };
+  return call('POST', `/linkedin/search?account_id=${encodeURIComponent(env.unipileAccountId)}`, body);
 }
 
 async function getProfile(providerId) {
