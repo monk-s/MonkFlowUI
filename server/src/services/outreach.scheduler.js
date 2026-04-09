@@ -83,7 +83,7 @@ function formatFollowupHtml(body, lead) {
 
   const htmlBody = `<div style="font-family:sans-serif;max-width:600px;">${body.split('\n').map(line => {
     if (!line.trim()) return '';
-    const linked = line.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#00cc6a;text-decoration:none;font-weight:600;">$1</a>');
+    const linked = line.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#333;text-decoration:underline;">$1</a>');
     return `<p style="margin:0 0 12px;">${linked}</p>`;
   }).join('')}</div>${unsubFooter}${trackingPixel}`;
 
