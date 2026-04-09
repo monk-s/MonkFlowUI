@@ -60,9 +60,6 @@ app.get('/api/v1/health', (req, res) => {
 
 // Temporary: test pushover wiring (remove after verification)
 app.get('/api/v1/_pushtest', async (req, res) => {
-  if (req.query.key !== (process.env.INBOUND_WEBHOOK_SECRET || '')) {
-    return res.status(401).json({ ok: false });
-  }
   const pushover = require('./services/pushover.client');
   const r = await pushover.sendDailySummary({
     scheduler: 'Test',
