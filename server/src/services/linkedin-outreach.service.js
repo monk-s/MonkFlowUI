@@ -69,6 +69,41 @@ async function getTodayLimits() {
   return rows[0];
 }
 
+// ── Warming schedule ──────────────────────────────────────
+// LinkedIn enforces a soft cap of ~100 connects/week on regular accounts. New
+// automation must ramp slowly or LinkedIn will 30-day restrict the account.
+// Caps grow with "days since first connect ever sent" — not calendar days — so
+// a pause in automation doesn't reset the ramp.
+const WARMING_PHASES = [
+  { minDays: 0,  connects: 5,  dms: 5,  label: 'week-1' },
+  { minDays: 5,  connects: 8,  dms: 8,  label: 'week-2' },
+  { minDays: 10, connects: 12, dms: 12, label: 'week-3' },
+  { minDays: 15, connects: 18, dms: 15, label: 'steady' },
+];
+
+async function getWarmingLimits() {
+  const { rows } = await query(
+    `SELECT MIN(connect_sent_at) AS first_sent FROM linkedin_leads WHERE connect_sent_at IS NOT NULL`
+  );
+  const firstSent = rows[0]?.first_sent;
+  if (!firstSent) {
+    const p = WARMING_PHASES[0];
+    return { ...p, daysSinceStart: 0, source: 'warming' };
+  }
+  const days = Math.floor((Date.now() - new Date(firstSent).getTime()) / (24 * 60 * 60 * 1000));
+  const phase = [...WARMING_PHASES].reverse().find(p => days >= p.minDays) || WARMING_PHASES[0];
+  // Respect env-var ceiling if it's lower (allows emergency pause via Railway without redeploy)
+  const envConnects = env.linkedinDailyConnectLimit;
+  const envDms = env.linkedinDailyDmLimit;
+  return {
+    connects: Math.min(phase.connects, envConnects),
+    dms: Math.min(phase.dms, envDms),
+    label: phase.label,
+    daysSinceStart: days,
+    source: 'warming',
+  };
+}
+
 async function bumpLimit(field) {
   await query(
     `UPDATE linkedin_daily_limits
@@ -401,7 +436,8 @@ async function personalize(lead) {
 // ── 4. Send connect requests ──────────────────────────────
 async function sendConnects() {
   const limits = await getTodayLimits();
-  const remaining = env.linkedinDailyConnectLimit - (limits.connects_sent || 0);
+  const warming = await getWarmingLimits();
+  const remaining = warming.connects - (limits.connects_sent || 0);
   if (remaining <= 0) return { sent: 0, reason: 'cap_reached' };
 
   const { rows } = await query(
@@ -432,7 +468,8 @@ async function sendConnects() {
 // ── 5. Send first DMs to accepted connections ────────────
 async function sendDMs() {
   const limits = await getTodayLimits();
-  const remaining = env.linkedinDailyDmLimit - (limits.dms_sent || 0);
+  const warming = await getWarmingLimits();
+  const remaining = warming.dms - (limits.dms_sent || 0);
   if (remaining <= 0) return { sent: 0, reason: 'cap_reached' };
 
   const { rows } = await query(
@@ -554,6 +591,7 @@ module.exports = {
   sendConnects,
   sendDMs,
   getTodayLimits,
+  getWarmingLimits,
   bumpLimit,
   writeHeartbeat,
 };

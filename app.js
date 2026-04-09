@@ -5999,7 +5999,7 @@ function renderLinkedInCard(stats, leads) {
       <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
         <div>
           <div class="card-title" style="margin:0;">💼 LinkedIn Outreach</div>
-          <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Unipile → connect requests + first DMs</div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Unipile → connect requests + first DMs · ${stats && stats.warming ? `<span style="color:#0a66c2;font-weight:600;">${stats.warming.label}</span> (day ${stats.warming.daysSinceStart})` : ''}</div>
         </div>
         <button class="btn btn-primary btn-sm" onclick="runLinkedInNow()">Run Now</button>
       </div>

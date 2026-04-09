@@ -39,17 +39,19 @@ const listLeads = catchAsync(async (req, res) => {
 
 // ── GET /linkedin/stats ──
 const getStats = catchAsync(async (req, res) => {
-  const [byStatus, today, last7] = await Promise.all([
+  const [byStatus, today, last7, warming] = await Promise.all([
     query(`SELECT status, COUNT(*)::int AS count FROM linkedin_leads GROUP BY status`),
     query(`SELECT * FROM linkedin_daily_limits WHERE date = CURRENT_DATE`),
     query(`SELECT * FROM linkedin_daily_limits WHERE date >= CURRENT_DATE - 7 ORDER BY date DESC`),
+    linkedinService.getWarmingLimits(),
   ]);
   res.json({
     data: {
       byStatus: Object.fromEntries(byStatus.rows.map(r => [r.status, r.count])),
       today: today.rows[0] || null,
       last7: last7.rows,
-      caps: { connects: env.linkedinDailyConnectLimit, dms: env.linkedinDailyDmLimit },
+      caps: { connects: warming.connects, dms: warming.dms },
+      warming,
     },
   });
 });
