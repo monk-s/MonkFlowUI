@@ -27,7 +27,7 @@ function start() {
       // so the heartbeat flips to 'failed' instead of stuck on 'started' forever.
       const stats = await Promise.race([
         runDailyLeadGeneration(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('runDailyLeadGeneration timeout after 30min')), 30 * 60 * 1000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('runDailyLeadGeneration timeout after 45min')), 45 * 60 * 1000)),
       ]);
       console.log('[LEADGEN] Daily run complete:', stats);
 

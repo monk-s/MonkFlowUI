@@ -32,7 +32,7 @@ const listLeads = catchAsync(async (req, res) => {
     sql += ` WHERE status = $2`;
     params.push(status);
   }
-  sql += ` ORDER BY created_at DESC LIMIT $1`;
+  sql += ` ORDER BY CASE status WHEN 'replied' THEN 0 WHEN 'connected' THEN 1 WHEN 'dm_sent' THEN 2 WHEN 'connect_sent' THEN 3 WHEN 'personalized' THEN 4 WHEN 'enriched' THEN 5 ELSE 6 END, created_at DESC LIMIT $1`;
   const { rows } = await query(sql, params);
   res.json({ data: rows });
 });

@@ -5615,7 +5615,7 @@ async function loadAdminData() {
       api.get('/admin/client-errors').catch(() => ({ data: [] })),
       api.get('/admin/reply-triage').catch(() => ({ data: [] })),
       api.get('/linkedin/stats').catch(() => ({ data: null })),
-      api.get('/linkedin/leads?limit=10').catch(() => ({ data: [] })),
+      api.get('/linkedin/leads?limit=25').catch(() => ({ data: [] })),
     ]);
     adminData = statsRes.data || statsRes;
     adminAccounts = accountsRes.data || accountsRes;
@@ -5973,7 +5973,7 @@ function renderLinkedInCard(stats, leads) {
         const full = (l.connect_note || l.first_dm)
           ? `<details style="margin-top:6px;"><summary style="font-size:11px;color:#0a66c2;cursor:pointer;">Full outreach preview →</summary>
               <div style="margin-top:8px;padding:10px;background:var(--bg-secondary);border-left:3px solid #0a66c2;border-radius:4px;font-size:12px;line-height:1.5;max-width:520px;">
-                <div style="font-weight:600;color:var(--text-secondary);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Connect note (${(l.connect_note || '').length}/300)</div>
+                <div style="font-weight:600;color:var(--text-secondary);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Connect note (${(l.connect_note || '').length}/200)</div>
                 <div style="white-space:pre-wrap;margin-bottom:12px;">${escapeHtml(l.connect_note || '—')}</div>
                 <div style="font-weight:600;color:var(--text-secondary);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">First DM — sent after they accept (${(l.first_dm || '').length}/500)</div>
                 <div style="white-space:pre-wrap;">${escapeHtml(l.first_dm || '—')}</div>
