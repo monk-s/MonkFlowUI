@@ -70,8 +70,16 @@ async function discoverProspects({ maxBusinesses = 30 } = {}) {
         logger.warn({ err: err.message, queryStr }, '[linkedin] serpapi search failed');
         continue;
       }
-      for (const biz of businesses.slice(0, 2)) {
+      for (const raw of businesses.slice(0, 2)) {
         if (found.length >= maxBusinesses) break;
+        // SerpAPI returns {title, link, snippet} — normalize to our schema
+        const biz = {
+          business_name: (raw.title || '').replace(/\s*[-|–—].*$/, '').trim(),
+          website_url: raw.link || null,
+          city: city,
+          state: null,
+        };
+        if (!biz.business_name) continue;
         // Look up the owner on LinkedIn via Unipile
         let people;
         // Two-pass search: (1) business name + city for precision, (2) title + city fallback for recall.
