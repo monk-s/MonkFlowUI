@@ -303,8 +303,9 @@ async function runDailyLinkedInRun({ dryRun = false } = {}) {
         const inserted = await insertProspect(item, diagnosis);
         if (inserted) stats.enriched++;
       } catch (err) {
-        logger.warn({ err: err.message }, '[linkedin] insert failed');
+        logger.warn({ err: err.message, stack: err.stack, business: item.business?.business_name }, '[linkedin] insert failed');
         stats.errors++;
+        if (!stats.firstError) stats.firstError = err.message;
       }
     }
 
