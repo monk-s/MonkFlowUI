@@ -88,6 +88,29 @@ async function getProfile(providerId) {
   return call('GET', `/users/${encodeURIComponent(providerId)}?account_id=${env.unipileAccountId}`);
 }
 
+/**
+ * List current LinkedIn 1st-degree connections for our Unipile account.
+ * Used to poll for invite acceptance when the webhook path is unavailable
+ * or misconfigured — a lead's provider_id appearing here means they accepted.
+ * Handles Unipile's cursor pagination; caps at `maxPages` to avoid runaway
+ * fetches on large networks.
+ */
+async function listRelations({ maxPages = 10, pageSize = 100 } = {}) {
+  if (!env.unipileAccountId) throw new Error('UNIPILE_ACCOUNT_ID not configured');
+  const out = [];
+  let cursor = null;
+  for (let i = 0; i < maxPages; i++) {
+    const qs = new URLSearchParams({ account_id: env.unipileAccountId, limit: String(pageSize) });
+    if (cursor) qs.set('cursor', cursor);
+    const page = await call('GET', `/users/relations?${qs.toString()}`);
+    const items = (page && (page.items || page.data || [])) || [];
+    out.push(...items);
+    cursor = page && (page.cursor || page.next_cursor);
+    if (!cursor || items.length === 0) break;
+  }
+  return out;
+}
+
 // ── Mutating ──────────────────────────────────────────────
 
 async function sendConnectionRequest(providerId, note) {
@@ -137,6 +160,7 @@ module.exports = {
   listAccounts,
   searchPeople,
   getProfile,
+  listRelations,
   sendConnectionRequest,
   sendMessage,
   verifyWebhookSignature,

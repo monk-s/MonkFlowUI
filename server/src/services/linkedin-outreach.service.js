@@ -435,6 +435,16 @@ async function personalize(lead) {
 }
 
 // ── 4. Send connect requests ──────────────────────────────
+// Parse Unipile error "type" field from the wrapped error body/message.
+// Unipile returns shapes like { status:422, type:'errors/cannot_resend_yet', title:'...' }.
+// The error thrown by our call() wrapper stringifies the body so we can regex it out.
+function unipileErrorType(err) {
+  const t = err && err.body && err.body.type;
+  if (t) return t;
+  const m = (err && err.message || '').match(/"type":"([^"]+)"/);
+  return m ? m[1] : null;
+}
+
 async function sendConnects() {
   const limits = await getTodayLimits();
   const warming = await getWarmingLimits();
@@ -460,13 +470,98 @@ async function sendConnects() {
       await bumpLimit('connects_sent');
       sent++;
     } catch (err) {
-      logger.warn({ err: err.message, status: err.status, body: err.body, leadId: lead.id }, '[linkedin] connect request failed');
-      errors.push({ leadId: lead.id, error: err.message.slice(0, 200), status: err.status });
-      await query(`UPDATE linkedin_leads SET error=$2, updated_at=NOW() WHERE id=$1`, [lead.id, err.message.slice(0, 500)]);
+      const errType = unipileErrorType(err);
+      logger.warn({ err: err.message, status: err.status, errType, leadId: lead.id }, '[linkedin] connect request failed');
+      errors.push({ leadId: lead.id, error: err.message.slice(0, 200), status: err.status, type: errType });
+
+      // Recover specific error types so we don't retry the same lead tomorrow:
+      //   - cannot_resend_yet: LinkedIn already has a pending invite. DB state
+      //     drifted (probably a dropped UPDATE on a prior run). Mark as
+      //     connect_sent so the reconciler picks up acceptance normally.
+      //   - too_many_characters: connect note exceeds LinkedIn's 300-char cap.
+      //     Flip back to 'enriched' so personalize() regenerates with the
+      //     current 200-char ceiling + tightening retry.
+      //   - already_invited / already_connected: treat as connect_sent.
+      if (errType === 'errors/cannot_resend_yet' || errType === 'errors/already_invited') {
+        await query(
+          `UPDATE linkedin_leads SET status='connect_sent',
+             connect_sent_at = COALESCE(connect_sent_at, NOW()),
+             error=$2, updated_at=NOW()
+           WHERE id=$1`,
+          [lead.id, err.message.slice(0, 500)]
+        );
+      } else if (errType === 'errors/already_connected') {
+        await query(
+          `UPDATE linkedin_leads SET status='connected',
+             connect_sent_at = COALESCE(connect_sent_at, NOW()),
+             connected_at = COALESCE(connected_at, NOW()),
+             error=$2, updated_at=NOW()
+           WHERE id=$1`,
+          [lead.id, err.message.slice(0, 500)]
+        );
+      } else if (errType === 'errors/too_many_characters' || errType === 'errors/content_too_large') {
+        await query(
+          `UPDATE linkedin_leads SET status='enriched', connect_note=NULL, first_dm=NULL,
+             error=$2, updated_at=NOW()
+           WHERE id=$1`,
+          [lead.id, err.message.slice(0, 500)]
+        );
+      } else {
+        await query(`UPDATE linkedin_leads SET error=$2, updated_at=NOW() WHERE id=$1`, [lead.id, err.message.slice(0, 500)]);
+      }
+
       if (err.status === 429) break; // hard stop on rate limit
     }
   }
   return { sent, candidates: rows.length, remaining, warmingCap: warming.connects, todaySent: limits.connects_sent, errors };
+}
+
+// ── 4b. Reconcile pending invites ─────────────────────────
+// Fallback for when the Unipile webhook doesn't fire (misconfigured URL,
+// wrong secret, dropped delivery). Fetches current 1st-degree connections
+// and flips any connect_sent lead whose provider_id is now in our network
+// to status='connected' so sendDMs() can message them.
+async function reconcilePendingInvites() {
+  const { rows: pending } = await query(
+    `SELECT id, linkedin_provider_id, contact_name, business_name, connect_sent_at
+     FROM linkedin_leads
+     WHERE status = 'connect_sent' AND linkedin_provider_id IS NOT NULL`
+  );
+  if (pending.length === 0) return { checked: 0, reconciled: 0 };
+
+  let relations;
+  try {
+    relations = await unipile.listRelations();
+  } catch (err) {
+    logger.warn({ err: err.message, status: err.status }, '[linkedin] listRelations failed — skipping reconcile');
+    return { checked: pending.length, reconciled: 0, error: err.message };
+  }
+  const relationIds = new Set(
+    relations
+      .map(r => r.provider_id || r.public_identifier || r.id || r.member_id)
+      .filter(Boolean)
+      .map(String)
+  );
+
+  let reconciled = 0;
+  for (const lead of pending) {
+    if (relationIds.has(String(lead.linkedin_provider_id))) {
+      await query(
+        `UPDATE linkedin_leads SET status='connected', connected_at=COALESCE(connected_at, NOW()), updated_at=NOW() WHERE id=$1`,
+        [lead.id]
+      );
+      await query(`UPDATE linkedin_daily_limits SET accepts_received = accepts_received + 1 WHERE date = CURRENT_DATE`);
+      reconciled++;
+      logger.info({ leadId: lead.id, name: lead.contact_name }, '[linkedin] reconciled accepted invite');
+      pushover.sendPush({
+        title: '🤝 LinkedIn accept (reconciled)',
+        message: `${lead.contact_name || lead.business_name} accepted your connection`,
+        url: `${env.frontendUrl}/admin`,
+        priority: 0,
+      }).catch(() => {});
+    }
+  }
+  return { checked: pending.length, relations: relations.length, reconciled };
 }
 
 // ── 5. Send first DMs to accepted connections ────────────
@@ -571,6 +666,14 @@ async function runDailyLinkedInRun({ dryRun = false } = {}) {
       // 4. Send connects
       const c = await sendConnects();
       stats.connectsSent = c.sent;
+      // 4b. Reconcile pending invites → connected (polling fallback for webhook)
+      try {
+        const rec = await reconcilePendingInvites();
+        stats.reconciled = rec.reconciled || 0;
+        if (rec.reconciled > 0) logger.info(rec, '[linkedin] reconciled invites');
+      } catch (err) {
+        logger.warn({ err: err.message }, '[linkedin] reconcile threw');
+      }
       // 5. Send DMs to accepted
       const d = await sendDMs();
       stats.dmsSent = d.sent;
@@ -609,6 +712,7 @@ module.exports = {
   personalize,
   sendConnects,
   sendDMs,
+  reconcilePendingInvites,
   getTodayLimits,
   getWarmingLimits,
   bumpLimit,
