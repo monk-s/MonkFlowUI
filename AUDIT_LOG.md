@@ -153,3 +153,33 @@
 - Improvements: 1 (sender pool expansion)
 - Commits: 2 (0e3cbc7, 12c98dc)
 - Tests added: 0
+
+### Addendum — LinkedIn Outreach Deep Audit
+
+User reported: "many errors when it runs and when connections are accepted, follow-up messages aren't sent." Confirmed both in prod DB.
+
+Prod state before fix:
+- 9 leads in `connect_sent` (some 5 days old), **0 ever transitioned to `connected`**
+- Today (2026-04-14 14:03 UTC): 5x `422 errors/cannot_resend_yet` from Unipile, `connects_sent=0`
+- Historical `400 errors/too_many_characters` on 3 leads from pre-200-char-cap
+
+Root causes:
+- [CRITICAL] sendConnects error handler only stashed `err.message` into the `error` column — status stayed `personalized` → same leads re-selected every day → same errors. Quota burned for nothing.
+- [CRITICAL] Status `connect_sent → connected` transition only happened via Unipile webhook. No polling fallback. If webhook is misconfigured, signature drifts, or delivery drops, acceptances silently vanish and `sendDMs()` always sees an empty queue.
+
+Fixes in commit 857ad28:
+- `unipile.client.js`: added `listRelations({maxPages,pageSize})` — paginates `GET /users/relations`.
+- `linkedin-outreach.service.js`:
+  - `unipileErrorType(err)` parses Unipile's `type` field from the wrapped error.
+  - `sendConnects` now flips status based on error type: `cannot_resend_yet`/`already_invited` → `connect_sent`, `already_connected` → `connected`, `too_many_characters`/`content_too_large` → `enriched` (regenerate).
+  - New `reconcilePendingInvites()` — pulls relations set, flips any `connect_sent` lead whose provider_id is now in network to `connected`, bumps `accepts_received`, fires Pushover "(reconciled)" push.
+  - Orchestrator calls reconcile between `sendConnects` and `sendDMs` so follow-ups fire on the next cron tick even if the webhook never delivered.
+
+### Next Session Priority (updated)
+1. Monitor tomorrow 9am CT LinkedIn cron — verify:
+   - `reconciled` count in stats (should drain the 9 stuck `connect_sent` leads)
+   - 0 repeat `cannot_resend_yet` errors (flipped to `connect_sent` on first encounter)
+   - DMs fire on any reconciled leads (warm-1 cap is 5 DMs/day)
+2. [deferred] Verify Unipile webhook config in Unipile dashboard — signature secret match, URL pointing to /api/v1/linkedin/webhook, event types include `connection_accepted` and `message_received`. Polling is a safety net, not a replacement.
+3. [deferred] Widen `getFirstName` dictionary (names like "chuck", "prosper", "carson" currently fall through to "there")
+4. [deferred] `reply_sentiment IS NOT NULL` guard in outreach analytics
