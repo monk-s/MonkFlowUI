@@ -133,14 +133,20 @@ async function getHealthySenders() {
 const SENDING_DOMAIN_BASE = 'https://monkflow.io';
 const UNSUBSCRIBE_BASE = SENDING_DOMAIN_BASE;
 
-// 3 personal sender identities on the dedicated outreach subdomain.
-// Role-based addresses (outreach@, hello@, team@, etc.) removed — they're
-// a spam signal and the system's own BAD_PATTERNS would reject them on receive.
+// 6 personal sender identities on the dedicated outreach subdomain.
+// Domain-level DKIM/SPF on mail.getmonkflow.com covers all local-parts — no
+// per-address verification needed in Resend. All names follow the founder's
+// real name pattern (Nathan/Nate Linder) so they read as genuine humans.
+// Role-based addresses (outreach@, hello@, team@, etc.) intentionally excluded —
+// they're a spam signal and the system's own BAD_PATTERNS would reject them on receive.
 const SENDER_DOMAIN = process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com';
 const SENDERS = [
   { email: `nathan@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
   { email: `nate@${SENDER_DOMAIN}`, name: 'Nate Linder' },
   { email: `nathan.linder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
+  { email: `n.linder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
+  { email: `nathanl@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
+  { email: `nlinder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
 ];
 
 const US_CITIES = [
