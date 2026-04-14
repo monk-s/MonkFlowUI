@@ -96,13 +96,19 @@ async function getHealthySenders() {
        HAVING SUM(sent_count) > 0`
     );
     // Build a set of unhealthy senders (bounce rate > 5%)
+    // Require a minimum sample before judging — a new sender with 2 bounces
+    // out of 10 sends (20%) would otherwise be permanently excluded on signal
+    // that's statistical noise. 20-send floor keeps the check honest.
+    const MIN_SENDS_FOR_HEALTH_CHECK = 20;
     const unhealthy = new Set();
     for (const row of rows) {
-      const bounceRate = (row.total_bounces || 0) / row.total_sent;
-      const complaintRate = (row.total_complaints || 0) / row.total_sent;
+      const totalSent = Number(row.total_sent) || 0;
+      if (totalSent < MIN_SENDS_FOR_HEALTH_CHECK) continue;
+      const bounceRate = (row.total_bounces || 0) / totalSent;
+      const complaintRate = (row.total_complaints || 0) / totalSent;
       if (bounceRate > 0.05 || complaintRate > 0.01) {
         unhealthy.add(row.sender_email);
-        console.warn(`[LEADGEN] Sender ${row.sender_email} unhealthy — bounce: ${(bounceRate * 100).toFixed(1)}%, complaint: ${(complaintRate * 100).toFixed(1)}%`);
+        console.warn(`[LEADGEN] Sender ${row.sender_email} unhealthy — bounce: ${(bounceRate * 100).toFixed(1)}%, complaint: ${(complaintRate * 100).toFixed(1)}% (${totalSent} sends)`);
       }
     }
     // Return only healthy senders from the SENDERS array
@@ -820,10 +826,13 @@ async function runDailyLeadGeneration() {
   }
 
   // 0b. Recover leads stuck in 'diagnosed' status (personalization never
-  // completed on a previous run — e.g. Claude API hang). Re-personalize
-  // and send inline, capped so they can't eat the whole daily quota.
+  // completed on a previous run — e.g. Claude API hang, or daily slice
+  // capacity got spent on nameless leads that got filtered out). Recovery
+  // pulls from the full daily quota minus whatever resume already sent —
+  // the backlog is paid-for work (search + diagnose already happened) and
+  // should be drained before spending new search credits.
   try {
-    const RECOVERY_CAP = Math.max(0, Math.floor(resumeWarming.daily / 2));
+    const RECOVERY_CAP = Math.max(0, resumeWarming.daily - stats.emailed);
     if (RECOVERY_CAP > 0) {
       const { rows: stuckLeads } = await dbQuery(
         `SELECT * FROM leads
@@ -891,6 +900,41 @@ async function runDailyLeadGeneration() {
   } catch (recErr) {
     console.error('[LEADGEN] Diagnosed recovery error:', recErr.message);
     await logExec('error', `Diagnosed recovery failed: ${recErr.message}`, { error: recErr.message });
+  }
+
+  // Skip fresh searches if recovery + resume already filled the daily quota.
+  // No sense burning SearchAPI credits + Claude tokens to find leads we can't
+  // send anyway, and the backlog (917+ stuck 'diagnosed' leads) has plenty of
+  // inventory already.
+  if (stats.emailed >= resumeWarming.daily) {
+    console.log(`[LEADGEN] Daily quota (${resumeWarming.daily}) filled from resume+recovery — skipping fresh searches`);
+    await logExec('info', `Quota filled by resume+recovery, skipping search phase`, { emailed: stats.emailed, daily: resumeWarming.daily });
+    // Jump straight to the summary — no new discovery, no new send phase
+    try {
+      await sendOwnerSummary(batchDate, stats, []);
+    } catch (err) {
+      console.error('[LEADGEN] Failed to send owner summary:', err.message);
+    }
+    pushover.sendDailySummary({
+      scheduler: 'LeadGen (Email)',
+      lines: [
+        `Searched: 0 (quota filled from backlog)`,
+        `Emailed: ${stats.emailed}`,
+        stats.errors ? `⚠️ Errors: ${stats.errors}` : null,
+      ],
+      url: `${env.frontendUrl}/admin`,
+    }).catch(() => {});
+    console.log(`[LEADGEN] === Complete (backlog-only): ${JSON.stringify(stats)} ===`);
+    await logExec('info', `Pipeline complete (backlog-only)`, stats);
+    try {
+      if (executionId) {
+        await dbQuery(
+          `UPDATE workflow_executions SET status = $1, result = $2, completed_at = $3, duration_ms = $4 WHERE id = $5`,
+          ['completed', JSON.stringify(stats), new Date(), Date.now() - pipelineStartTime, executionId]
+        );
+      }
+    } catch (_) {}
+    return stats;
   }
 
   // 1. Pick firm types and cities — budget ~140 searches/day to stay under remaining monthly limit
@@ -1067,17 +1111,16 @@ async function runDailyLeadGeneration() {
   const warming = getWarmingLimits();
   console.log(`[LEADGEN] Domain warming phase: ${warming.phase} — daily limit: ${warming.daily}, per-sender: ${warming.perSender}`);
   qualifiedLeads.sort((a, b) => scoreLead(b.diagnosis_json) - scoreLead(a.diagnosis_json));
-  const toEmail = qualifiedLeads.slice(0, warming.daily);
 
-  // 5. Generate personalized outreach via Claude API (4-way C/D/E/F rotation)
-
-  // Filter out leads where we can't find a real first name. Sending "Hey there"
-  // tanks reply rate — previous data showed 25% of sends going to "Hey there"
-  // with 0 replies. Better to skip than blast generic greetings.
-  const beforeFilter = toEmail.length;
+  // Filter out leads where we can't find a real first name BEFORE slicing to
+  // the daily cap. Sending "Hey there" tanks reply rate — previous data showed
+  // 25% of sends going to "Hey there" with 0 replies. Filtering before the
+  // slice ensures we always fill the daily quota with sendable leads instead
+  // of wasting capacity on nameless candidates that block named ones ranked
+  // below them.
   const skippedNoName = [];
   const withName = [];
-  for (const lead of toEmail) {
+  for (const lead of qualifiedLeads) {
     const fn = getFirstName(lead.contact_person, lead.email);
     if (!fn || fn === 'there') {
       skippedNoName.push(lead);
@@ -1086,8 +1129,8 @@ async function runDailyLeadGeneration() {
     }
   }
   if (skippedNoName.length > 0) {
-    console.log(`[LEADGEN] Skipping ${skippedNoName.length}/${beforeFilter} leads with no identifiable first name (would send "Hey there")`);
-    await logExec('info', `Skipped ${skippedNoName.length} nameless leads`, { count: skippedNoName.length, total: beforeFilter });
+    console.log(`[LEADGEN] Skipping ${skippedNoName.length}/${qualifiedLeads.length} leads with no identifiable first name (would send "Hey there")`);
+    await logExec('info', `Skipped ${skippedNoName.length} nameless leads`, { count: skippedNoName.length, total: qualifiedLeads.length });
     // Mark them so we don't re-process tomorrow
     try {
       const ids = skippedNoName.map(l => l.id);
@@ -1096,9 +1139,10 @@ async function runDailyLeadGeneration() {
       }
     } catch (_) {}
   }
-  // Use the name-filtered list from here on
-  toEmail.length = 0;
-  toEmail.push(...withName);
+  // Slice the NAMED leads to the daily cap (not the raw qualified list)
+  const toEmail = withName.slice(0, warming.daily);
+
+  // 5. Generate personalized outreach via Claude API (4-way C/D/E/F rotation)
 
   await logExec('info', `Email generation starting for ${toEmail.length} leads`, { leadCount: toEmail.length });
   // A/B/C/D test: distribute evenly across 4 new frameworks (C, D, E, F).
