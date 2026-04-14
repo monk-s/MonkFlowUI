@@ -840,6 +840,13 @@ async function runDailyLeadGeneration() {
   try {
     const RECOVERY_CAP = Math.max(0, resumeWarming.daily - stats.emailed);
     if (RECOVERY_CAP > 0) {
+      // Load a large candidate pool — nameless leads dominate the top of the
+      // lead_score ordering (they have strong diagnosis signals but no person
+      // to address). If we LIMIT to RECOVERY_CAP, the loop spends its budget
+      // marking nameless leads skipped_no_name and never reaches named ones
+      // deeper in the backlog. Pool of 500 is large enough that even in the
+      // worst case we find RECOVERY_CAP named leads to actually send.
+      const CANDIDATE_POOL = 500;
       const { rows: stuckLeads } = await dbQuery(
         `SELECT * FROM leads
          WHERE status = 'diagnosed'
@@ -847,17 +854,20 @@ async function runDailyLeadGeneration() {
            AND (outreach_subject IS NULL OR outreach_body IS NULL)
          ORDER BY COALESCE(lead_score, 0) DESC, created_at
          LIMIT $1`,
-        [RECOVERY_CAP]
+        [CANDIDATE_POOL]
       );
       if (stuckLeads.length > 0) {
-        console.log(`[LEADGEN] Recovering ${stuckLeads.length} leads stuck in 'diagnosed' status`);
-        await logExec('info', `Recovering ${stuckLeads.length} stuck 'diagnosed' leads`, { count: stuckLeads.length });
+        console.log(`[LEADGEN] Recovery pool: ${stuckLeads.length} candidates, aiming for up to ${RECOVERY_CAP} sends`);
+        await logExec('info', `Recovering stuck 'diagnosed' leads`, { pool: stuckLeads.length, target: RECOVERY_CAP });
         const recSenders = await getHealthySenders();
         const recCounts = new Map(recSenders.map(s => [s.email, 0]));
         let recIdx = 0;
+        let recoveredSends = 0;
         const REC_VARIANTS = ['C', 'D', 'E', 'F'];
         let recVariantCursor = 0;
         for (const lead of stuckLeads) {
+          // Stop once we've drained up to today's remaining capacity.
+          if (recoveredSends >= RECOVERY_CAP) break;
           // Skip nameless leads — don't send "Hey there" blasts
           const fn = getFirstName(lead.contact_person, lead.email);
           if (!fn || fn === 'there') {
@@ -893,6 +903,7 @@ async function runDailyLeadGeneration() {
           const result = await sendColdEmail(lead, sender);
           if (result.success) {
             stats.emailed++;
+            recoveredSends++;
             recCounts.set(sender.email, recCounts.get(sender.email) + 1);
             trackSend(sender.email);
           } else {
@@ -900,7 +911,7 @@ async function runDailyLeadGeneration() {
           }
           await sleep(1000);
         }
-        console.log(`[LEADGEN] Recovery complete: ${stats.emailed} total sent so far`);
+        console.log(`[LEADGEN] Recovery complete: ${recoveredSends} recovered sends, ${stats.emailed} total sent so far`);
       }
     }
   } catch (recErr) {
