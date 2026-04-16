@@ -95,12 +95,22 @@ function formatFollowupHtml(body, lead) {
  * Safe to call from cron, admin endpoint, or standalone script — writes its
  * own heartbeat row and returns a stats object.
  */
+// Extract bare email from "Name <addr@host>" or return raw addr
+function extractSenderEmail(from) {
+  if (!from) return null;
+  const m = from.match(/<([^>]+)>/);
+  return (m ? m[1] : from).trim().toLowerCase();
+}
+
 async function processDueFollowups() {
   const { query } = require('../config/database');
   const { sendEmail } = require('./email.service');
   const env = require('../config/env');
   const { generateFollowup } = require('./outreach-ai.service');
+  const { trackSend, trackBounce } = require('./leadgen.service');
 
+  // Heartbeat (latest-only) — kept for backwards compat with admin page
+  let runId = null;
   try {
     await query(
       `INSERT INTO scheduler_heartbeats (name, last_run_at, last_status, last_detail, updated_at)
@@ -108,6 +118,13 @@ async function processDueFollowups() {
        ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), last_status = 'started', last_detail = NULL, updated_at = NOW()`
     );
   } catch (_) {}
+  // Append-only run log — survives hourly overwrites
+  try {
+    const { rows } = await query(
+      `INSERT INTO scheduler_runs (scheduler_name, status, started_at) VALUES ('outreach', 'started', NOW()) RETURNING id`
+    );
+    runId = rows[0]?.id || null;
+  } catch (_) { /* table may not exist yet if migration hasn't run */ }
 
   try {
     const { rows: dueLeads } = await query(
@@ -189,8 +206,11 @@ async function processDueFollowups() {
           .replace(/\n{3,}/g, '\n\n')
           .trim();
 
+        const fromAddr = env.outreachFromEmail;
+        const senderEmail = extractSenderEmail(fromAddr);
+
         const emailResult = await sendEmail({
-          from: env.outreachFromEmail,
+          from: fromAddr,
           to: lead.contact_email,
           subject: template.subject,
           html: template.body,
@@ -199,6 +219,12 @@ async function processDueFollowups() {
         });
 
         const gmailId = emailResult?.data?.id || emailResult?.id || null;
+
+        // Track in sender_health so admin deliverability widget reflects
+        // ALL sends (initial + follow-up), matching Resend dashboard totals.
+        if (senderEmail) {
+          try { await trackSend(senderEmail); } catch (_) {}
+        }
 
         await query(
           `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, delivered_at)
@@ -223,27 +249,45 @@ async function processDueFollowups() {
         sent++;
       } catch (err) {
         console.error(`[OUTREACH] Failed to send to ${lead.contact_email}:`, err.message);
+        // Resend rejects obvious bounces synchronously (422 / bad recipient).
+        // Non-sync bounces come via /resend/webhook and are tracked there.
+        const msg = (err && err.message) || '';
+        if (/bounce|invalid|not.*exist|undeliverable|rejected/i.test(msg)) {
+          const senderEmail = extractSenderEmail(env.outreachFromEmail);
+          if (senderEmail) {
+            try { await trackBounce(senderEmail); } catch (_) {}
+          }
+        }
         errors++;
       }
     }
 
+    const stats = { sent, aiGenerated, completed, errors };
     console.log(`[OUTREACH] Done: ${sent} sent (${aiGenerated} AI-generated), ${completed} completed, ${errors} errors`);
     try {
       await query(
         `UPDATE scheduler_heartbeats SET last_status = 'success', last_detail = $1, updated_at = NOW() WHERE name = 'outreach'`,
-        [JSON.stringify({ sent, aiGenerated, completed, errors })]
+        [JSON.stringify(stats)]
       );
     } catch (_) {}
-    return { sent, aiGenerated, completed, errors };
+    // Append-only log
+    if (runId) {
+      try { await query(`UPDATE scheduler_runs SET status='success', detail=$1, finished_at=NOW() WHERE id=$2`, [JSON.stringify(stats), runId]); } catch (_) {}
+    }
+    return stats;
   } catch (err) {
     console.error('[OUTREACH] processDueFollowups FAILED:', err.message, err.stack);
+    const errDetail = JSON.stringify({ error: err.message });
     try {
-      const { query } = require('../config/database');
-      await query(
+      const { query: q2 } = require('../config/database');
+      await q2(
         `UPDATE scheduler_heartbeats SET last_status = 'failed', last_detail = $1, updated_at = NOW() WHERE name = 'outreach'`,
-        [JSON.stringify({ error: err.message })]
+        [errDetail]
       );
     } catch (_) {}
+    if (runId) {
+      try { await query(`UPDATE scheduler_runs SET status='failed', detail=$1, finished_at=NOW() WHERE id=$2`, [errDetail, runId]); } catch (_) {}
+    }
     throw err;
   }
 }

@@ -325,8 +325,12 @@ const processDueFollowups = catchAsync(async (req, res) => {
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 
+      const fromAddr = env.outreachFromEmail;
+      const fromMatch = fromAddr && fromAddr.match(/<([^>]+)>/);
+      const senderEmail = ((fromMatch ? fromMatch[1] : fromAddr) || '').trim().toLowerCase();
+
       const emailResult = await sendEmail({
-        from: env.outreachFromEmail,
+        from: fromAddr,
         to: lead.contact_email,
         subject: template.subject,
         html: template.body,
@@ -335,6 +339,15 @@ const processDueFollowups = catchAsync(async (req, res) => {
       });
 
       const gmailId = emailResult?.data?.id || emailResult?.id || null;
+
+      // Track in sender_health so admin deliverability reflects follow-up
+      // sends, not just initial leadgen. Keeps Resend ↔ admin in sync.
+      if (senderEmail) {
+        try {
+          const { trackSend } = require('../services/leadgen.service');
+          await trackSend(senderEmail);
+        } catch (_) {}
+      }
 
       // Record the email
       await query(
@@ -360,6 +373,21 @@ const processDueFollowups = catchAsync(async (req, res) => {
 
       results.sent++;
     } catch (err) {
+      // Resend rejects obvious bad recipients synchronously — capture those as bounces
+      // so the admin's sender-health rollup stays honest. Async bounces arrive via the
+      // Resend webhook (handleResendWebhook) and are tracked there.
+      const msg = (err && err.message) || '';
+      if (/bounce|invalid|not.*exist|undeliverable|rejected/i.test(msg)) {
+        try {
+          const fromAddr = env.outreachFromEmail;
+          const fromMatch = fromAddr && fromAddr.match(/<([^>]+)>/);
+          const senderEmail = ((fromMatch ? fromMatch[1] : fromAddr) || '').trim().toLowerCase();
+          if (senderEmail) {
+            const { trackBounce } = require('../services/leadgen.service');
+            await trackBounce(senderEmail);
+          }
+        } catch (_) {}
+      }
       results.errors.push({ lead_id: lead.id, email: lead.contact_email, error: err.message });
     }
   }
@@ -560,20 +588,38 @@ const getAnalytics = catchAsync(async (req, res) => {
   else if (daysSinceLaunch < 28) warmingPhase = { phase: 'warm-4', daily: 75, perSender: 25, day: daysSinceLaunch };
   else warmingPhase = { phase: 'full', daily: 90, perSender: 30, day: daysSinceLaunch };
 
-  // Funnel stats — focus on actionable metrics (delivery, replies), not vanity (opens)
-  const { rows: [funnel] } = await query(
-    `SELECT
-       COUNT(*) AS total_leads,
-       COUNT(*) FILTER (WHERE touch_count >= 1) AS emails_sent,
-       COUNT(*) FILTER (WHERE opened_at IS NOT NULL) AS opens_recorded,
-       COUNT(*) FILTER (WHERE replied_at IS NOT NULL OR status = 'replied') AS replies_received,
-       COUNT(*) FILTER (WHERE status = 'replied') AS positive_replies,
-       COUNT(*) FILTER (WHERE status = 'unsubscribed') AS unsubscribed,
-       COUNT(*) FILTER (WHERE status = 'closed') AS sequence_completed
-     FROM outreach_leads
-     WHERE created_at >= $1`,
+  // Funnel stats — emails_sent counts actual sends in window (matches Resend dashboard).
+  // Previous version counted outreach_leads filtered by created_at, which excluded
+  // older leads touched during the window — making admin totals lag Resend by 80%+.
+  const { rows: [emailCount] } = await query(
+    `SELECT COUNT(*)::int AS emails_sent,
+            COUNT(DISTINCT lead_id)::int AS leads_touched
+     FROM outreach_emails
+     WHERE sent_at >= $1`,
     [since]
   );
+  const { rows: [leadStats] } = await query(
+    `SELECT
+       COUNT(*) AS total_leads,
+       COUNT(*) FILTER (WHERE opened_at IS NOT NULL AND opened_at >= $1) AS opens_recorded,
+       COUNT(*) FILTER (WHERE (replied_at IS NOT NULL AND replied_at >= $1) OR (status = 'replied' AND updated_at >= $1)) AS replies_received,
+       COUNT(*) FILTER (WHERE status = 'replied' AND updated_at >= $1) AS positive_replies,
+       COUNT(*) FILTER (WHERE status = 'unsubscribed' AND updated_at >= $1) AS unsubscribed,
+       COUNT(*) FILTER (WHERE status = 'closed' AND updated_at >= $1) AS sequence_completed
+     FROM outreach_leads
+     WHERE created_at >= $1 OR last_sent_at >= $1 OR updated_at >= $1`,
+    [since]
+  );
+  const funnel = {
+    total_leads: leadStats.total_leads,
+    emails_sent: emailCount.emails_sent,
+    leads_touched: emailCount.leads_touched,
+    opens_recorded: leadStats.opens_recorded,
+    replies_received: leadStats.replies_received,
+    positive_replies: leadStats.positive_replies,
+    unsubscribed: leadStats.unsubscribed,
+    sequence_completed: leadStats.sequence_completed,
+  };
 
   // Overall deliverability health (aggregate bounce/complaint across all senders, all time in window)
   const { rows: [deliverability] } = await query(

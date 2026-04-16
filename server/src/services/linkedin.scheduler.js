@@ -16,6 +16,7 @@ function start() {
     const { query } = require('../config/database');
     // Heartbeat: mark that the cron actually fired, so monitoring can detect
     // silent failures where the tick never runs (vs. runs-and-errors).
+    let runId = null;
     try {
       await query(
         `INSERT INTO scheduler_heartbeats (name, last_run_at, last_status, last_detail, updated_at)
@@ -23,23 +24,28 @@ function start() {
          ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), last_status = 'started', last_detail = NULL, updated_at = NOW()`
       );
     } catch (_) {}
+    try { const { rows } = await query(`INSERT INTO scheduler_runs (scheduler_name, status, started_at) VALUES ('linkedin', 'started', NOW()) RETURNING id`); runId = rows[0]?.id; } catch (_) {}
     try {
       const result = await linkedinService.runDailyLinkedInRun();
-      console.log('[LINKEDIN] Daily run complete:', JSON.stringify(result.stats));
+      const stats = result.stats || {};
+      console.log('[LINKEDIN] Daily run complete:', JSON.stringify(stats));
       try {
         await query(
           `UPDATE scheduler_heartbeats SET last_status = 'success', last_detail = $1, updated_at = NOW() WHERE name = 'linkedin'`,
-          [JSON.stringify(result.stats || {})]
+          [JSON.stringify(stats)]
         );
       } catch (_) {}
+      if (runId) { try { await query(`UPDATE scheduler_runs SET status='success', detail=$1, finished_at=NOW() WHERE id=$2`, [JSON.stringify(stats), runId]); } catch (_) {} }
     } catch (err) {
       console.error('[LINKEDIN] Daily run failed:', err.message, err.stack);
+      const errDetail = JSON.stringify({ error: err.message });
       try {
         await query(
           `UPDATE scheduler_heartbeats SET last_status = 'failed', last_detail = $1, updated_at = NOW() WHERE name = 'linkedin'`,
-          [JSON.stringify({ error: err.message })]
+          [errDetail]
         );
       } catch (_) {}
+      if (runId) { try { await query(`UPDATE scheduler_runs SET status='failed', detail=$1, finished_at=NOW() WHERE id=$2`, [errDetail, runId]); } catch (_) {} }
     }
   }, { timezone: 'America/Chicago' });
   console.log('[LINKEDIN] Cron scheduled — weekdays 9am CT');
