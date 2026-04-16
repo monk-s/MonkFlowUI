@@ -57,15 +57,15 @@ function getFollowupTemplate(touchNumber, lead) {
   switch (touchNumber) {
     case 2: return {
       subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Quick example of what I mean — we built a client onboarding system for a financial services firm that cut their new-client setup from 45 minutes to under 5. Contracts, CRM sync, everything automated.</p><p>Curious if${rawCompany ? ` ${rawCompany}` : ' your team'} deals with anything similar on the operations side? Happy to walk you through it — <a href="${bookingUrl}">grab 15 min here</a>.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Came across a stat I thought was relevant — businesses${company} that automate their intake and scheduling processes typically save 10-15 hours per week in front-desk time. Most of that is just eliminating phone tag and manual data entry.</p><p>No agenda — just thought this might be useful as you think about operations.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
     };
     case 3: return {
       subject: `${rawCompany || firstName} + automation`,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>No worries if the timing isn't right — figured I'd leave you with something useful either way.</p><p>Based on what I saw on${rawCompany ? ` ${rawCompany}'s` : ' your'} site, there are a couple of quick automation wins that could free up real hours each week. If you're curious, happy to share over a quick call — <a href="${bookingUrl}">here's my calendar</a>.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>We just wrapped up an automation build for a financial services firm — cut their client onboarding from 45 minutes to under 5. Contracts, CRM sync, the whole workflow running on autopilot.</p><p>If${rawCompany ? ` ${rawCompany}` : ' your team'} ever wants to explore something similar, happy to walk through what we built — <a href="${bookingUrl}">here's my calendar</a>.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
     };
     case 4: return {
       subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Last note from me — going to assume the timing isn't right, and that's totally fine.</p><p>If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the priority list, <a href="${bookingUrl}">my calendar's here</a>. Wishing you a great rest of the quarter.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Totally get if this isn't a priority right now — no worries at all. If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the list, I'm here.</p><p>Wishing you a great rest of the quarter.</p><p>Nathan</p><p style="font-size:13px;color:#666;">P.S. Calendar's always open: <a href="${bookingUrl}">${bookingUrl}</a></p></div>${unsubFooter}${trackingPixel}`,
     };
     default: return null;
   }
@@ -140,7 +140,17 @@ async function processDueFollowups() {
 
     let sent = 0, completed = 0, errors = 0, aiGenerated = 0;
 
+    const { isRoleBasedEmail } = require('../utils/nameParser');
+
     for (const lead of dueLeads) {
+      // Close role-based emails — nobody monitors info@, contact@, etc.
+      if (isRoleBasedEmail(lead.contact_email)) {
+        await query(`UPDATE outreach_leads SET status='closed', next_followup_at=NULL, updated_at=NOW() WHERE id=$1`, [lead.id]);
+        console.log(`[OUTREACH] Closed role-based email lead: ${lead.contact_email}`);
+        completed++;
+        continue;
+      }
+
       if (!lead.original_subject && lead.first_subject) {
         lead.original_subject = lead.first_subject;
       }

@@ -329,6 +329,16 @@ function looksLikePersonName(str) {
   // Reject locations (city names that got through)
   const locationWords = /\b(city|county|north|south|east|west|new york|los angeles|san francisco|chicago|houston|phoenix|salt lake|las vegas|charleston)\b/i;
   if (locationWords.test(str)) return false;
+  // Reject strings with exclamation/question marks (page titles, CTAs)
+  if (/[!?]/.test(str)) return false;
+  // Reject ALL-CAPS words (e.g. "TEAM", "CLICK HERE")
+  if (words.some(w => w.length > 2 && w === w.toUpperCase())) return false;
+  // Reject CTA/web phrases that slip through as "names"
+  const ctaPhrases = /\b(allow|discover|attention|required|click|learn|explore|submit|request|start|join|opportunities|free|limited|exclusive)\b/i;
+  if (ctaPhrases.test(str)) return false;
+  // Reject common nouns used as first word
+  const commonNouns = /^(team|staff|admin|office|home|about|contact|service|support|help|welcome|schedule)$/i;
+  if (commonNouns.test(words[0])) return false;
   return true;
 }
 
@@ -492,11 +502,11 @@ async function generateOutreachEmail(lead, diagnosis, onRetry, variant) {
 
   const prompt = `You are writing a cold email for Nathan, who runs MonkFlow — a dev agency that builds custom automation, client portals, and workflow tools for small businesses.
 
-This email needs to stand out. The recipient gets cold emails daily. Yours must feel different from the "I noticed your website..." template everyone else uses.
+This email needs to stand out. The recipient gets cold emails daily. Yours must feel different from every "I noticed your website..." template.
 
 BUSINESS INFO:
-- Name: ${cleanCompanyName(lead.business_name)}
-- Contact First Name: ${getFirstName(lead.contact_person, lead.email)}
+- Company: ${cleanCompanyName(lead.business_name)}
+- Contact: ${getFirstName(lead.contact_person, lead.email)}
 - Type: ${lead.business_type}
 - City: ${lead.city}, ${lead.state}
 - Website: ${lead.website_url || 'None'}
@@ -510,59 +520,65 @@ WEBSITE DIAGNOSIS:
 - Design: ${diagnosis.design_age_estimate}
 - Issues: ${diagnosis.issues.join(', ') || 'None major'}
 
-STRUCTURE — use the framework specified below (C, D, E, or F). Each has a distinct voice, opener, and CTA. Follow it exactly.
+STRUCTURE — use the framework specified below (1, 2, or 3). Each has a distinct approach. Follow it exactly.
 
-FRAMEWORK C — "Loom Bait" (low-friction CTA):
-- Open with a one-line observation tied to a specific gap from the diagnosis (e.g., "Saw CrossKeys' booking still routes through a contact form — that usually costs 2-3 leads a week").
-- One sentence of proof: a blinded but specific case ("A 4-provider dental office in Tulsa now handles their entire intake before the patient walks in — built in 9 days").
-- CTA must be a single close-ended interest question (yes/no, no meeting ask, no "thoughts?"). Use this pattern, filling {company}: "Open to a 2-min Loom of exactly how I'd fix this for {company} — yes or no?"
-- DO NOT include the booking URL in this variant. One question, one ask, nothing else.
+FRAMEWORK 1 — "Specific Observation + Question" (used for ~40% of sends):
+- Open with ONE hyper-specific observation about their BUSINESS OPERATIONS (not their website). Use the diagnosis to INFER the operational pain, don't describe the website symptom.
+  - BAD: "Saw your booking routes through a contact form"
+  - GOOD: "If ${cleanCompanyName(lead.business_name)} is still handling new patient intake by phone, your front desk is probably spending 8-10 hours a week on it"
+- ONE sentence of social proof with a specific result: include industry, city, size, and metric.
+- CTA: An open-ended question that invites a real conversational response. NOT yes/no, NOT "reply 'send it'".
+  - GOOD: "Is intake something your team has talked about fixing, or is it pretty dialed in?"
+  - BAD: "Yes or no?", "Reply 'send it'", "Thoughts?"
+- End with P.S. containing booking link: "P.S. If easier to just talk: ${env.bookingUrl || 'https://monkflow.io/#schedule'}"
 
-FRAMEWORK D — "Teardown Offer" (direct + value-first):
-- Open by naming exactly what you'd build, in 2-3 bullets, based on the diagnosis. Example: "For {company} I'd build: (1) online booking that writes back to your CRM, (2) digital intake forms that auto-populate charts, (3) a client portal for document upload."
-- One sentence of social proof with a specific number and a blinded client ("Did this for a 3-provider chiropractic office in Columbus — 11 hrs/week back, 3-week build").
-- CTA must be a single close-ended interest ask. Use this pattern: "Should I send the full 5-min teardown? Just reply 'send it'." No meeting ask, no second question.
-- DO NOT include the booking URL. Reply-only CTA.
+FRAMEWORK 2 — "Free Teardown" (used for ~40% of sends):
+- Open with "I looked at ${cleanCompanyName(lead.business_name)}'s site and mapped out 3 things I'd automate first:"
+- List 2-3 bullet points specific to THEIR diagnosis gaps (not generic). Be concrete about what you'd build.
+- One-line proof: a specific case study result with industry, city, and metric.
+- CTA: "Want me to send the full breakdown? Takes 2 min to read." (simple reply CTA, conversational — NOT "reply 'send it'")
+- End with P.S. containing booking link: "P.S. Or if you'd rather just talk through it: ${env.bookingUrl || 'https://monkflow.io/#schedule'}"
 
-FRAMEWORK E — "Sharp Question" (disqualify, don't sell):
-- Open with a disqualifying question that makes them self-select: "Are you the right person to talk to about {company}'s intake/scheduling stack?"
-- Then ONE sentence of concrete proof with a named blinded client and a specific number ("We just took a Tulsa dental office from 18 hrs/week on scheduling to under 2 — 3-week build").
-- CTA: a single close-ended interest question followed by the calendar link on its own line. Pattern: "Is fixing this a priority for {company} in the next 30 days? If yes: ${env.bookingUrl}". One question, one link.
-- This is the only variant that uses the booking link.
+FRAMEWORK 3 — "Peer Reference" (used for ~20% of sends):
+- Open by referencing what a similar business in their area or industry is doing: "A [industry] practice in [nearby city] just automated their entire [process] — saves them [X hours/week]."
+- Connect to THEIR situation using diagnosis gaps: "Your site shows you're still handling [gap] manually — same spot they were in."
+- CTA: Open-ended conversational question. "Curious if this is on your radar at all? Happy to share what they did."
+- End with P.S. containing booking link: "P.S. Calendar's here if easier: ${env.bookingUrl || 'https://monkflow.io/#schedule'}"
 
-FRAMEWORK F — "Cost of Inaction" (numeric stake):
-- Open with a cost-of-current-state line grounded in their diagnosis: "Rough math: if your front desk spends ~10 hrs/week on booking and intake at $22/hr, that's ~$11K/year going to paperwork before you count no-shows."
-- One sentence of what you'd replace it with, and a blinded client result.
-- CTA must be a single close-ended interest question. Pattern: "Want the 2-min breakdown of how I'd cut that number in half? Reply 'yes' and it's in your inbox today." One ask, no meeting request.
-- DO NOT include the booking URL. Reply-only CTA.
-
-CASE STUDIES (use one that matches their industry; blind the client name but keep the city/size/number specific):
-1. Wealth management firm (4-advisor, Dallas): automated client onboarding + CRM. 45 min → under 5.
-2. Dental practice (4-provider, Tulsa): online scheduling + intake forms. 18 hrs/week → 2 hrs/week. Build: 3 weeks.
-3. Chiropractic office (3-provider, Columbus): digital intake + scheduling. 11 hrs/week saved.
-4. E-commerce brand (Shopify, Austin): order-to-fulfillment automation. 15 hrs/week eliminated.
+CASE STUDIES (use the one that matches their industry; include specifics):
+1. Team Financial Strategies (4-advisor wealth management firm, Dallas): automated client onboarding + CRM sync. Cut new-client setup from 45 min to under 5. Built in 2 weeks.
+2. Dental practice (4-provider, Tulsa, 6 front-desk staff): online scheduling + intake forms + patient portal. Went from 18 hrs/week on scheduling to under 2. Built in 3 weeks.
+3. Chiropractic office (3-provider, Columbus): digital intake + automated scheduling. Saved 11 hrs/week of front-desk time. Built in 9 business days.
+4. E-commerce brand (Shopify store, Austin): order-to-fulfillment automation. Eliminated 15 hrs/week of manual processing, shipping errors near zero.
 
 HARD RULES (apply to ALL frameworks):
-- Under 90 words total. The email must be skimmable in under 10 seconds.
-- Start with "Hey ${getFirstName(lead.contact_person, lead.email)}," — use this exact name. Never "Hi".
-- The first sentence after the greeting must reference something CONCRETE about them: their company name, a specific gap from the diagnosis, or an observable fact. Never start with a generic industry stat.
-- NEVER use these phrases: "Curious —", "Worth exploring", "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to", "looking forward".
-- The case study line must include a specific number AND a specific blinded client descriptor (size + city or industry). Never "a healthcare practice" — always "a 4-provider dental office in Tulsa" or similar.
-- Subject line: 2-5 words, lowercase, no punctuation, no emoji. Must reference something specific to them (company name, a word from their niche, or the gap). Good: "{company} + intake", "your booking page", "tulsa dental automation". Bad: "scheduling headaches", "quick thought".
+- 100-130 words total. The email must be skimmable in under 15 seconds.
+- Start with "Hey ${getFirstName(lead.contact_person, lead.email)}," — use this exact name. If the name is "there", use "Hey ${cleanCompanyName(lead.business_name)} team," instead. Never "Hi".
+- The first sentence after the greeting must reference something CONCRETE about them: their company name, a specific operational gap inferred from the diagnosis, or an observable fact. Never start with a generic industry stat.
+- Every email MUST include the booking URL as a P.S. line at the end. Never bury it in the body or exclude it.
+- The CTA must be an open-ended question, NOT a yes/no or command. Ask something they can answer conversationally.
+- NEVER use these phrases: "Curious —", "Worth exploring", "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to chat", "thoughts?", "interested?"
+- The case study mention must include a specific number AND a specific client descriptor (industry + city or size). Never "a healthcare practice" — always "a 4-provider dental office in Tulsa" or similar.
 - Sign off as just "Nathan" — no last name, no company, no title.
+
+Subject line rules:
+- 2-6 words, sentence case (capitalize first word only, rest lowercase unless proper noun), no emoji.
+- Must create curiosity or feel like it came from a colleague.
+- Include a "?" in roughly half of subjects (questions have higher open rates).
+- GOOD patterns: "Question about ${cleanCompanyName(lead.business_name)}", "${getFirstName(lead.contact_person, lead.email)} — quick thought", "Intake at ${cleanCompanyName(lead.business_name)}?", "Saw something on your site"
+- BAD patterns: "${cleanCompanyName(lead.business_name)} + intake" (looks automated), all-lowercase everything (looks mass-sent), generic keywords ("scheduling headaches")
 
 Return JSON: {"subject": "...", "body": "..."}`;
 
   // Variant → framework mapping. Each variant hard-locks the AI to one framework.
   const frameworkMap = {
-    C: 'C ("Loom Bait")',
-    D: 'D ("Teardown Offer")',
-    E: 'E ("Sharp Question")',
-    F: 'F ("Cost of Inaction")',
+    '1': '1 ("Specific Observation + Question")',
+    '2': '2 ("Free Teardown")',
+    '3': '3 ("Peer Reference")',
   };
   let variantInstruction = '';
   if (frameworkMap[variant]) {
-    variantInstruction = `\n\nIMPORTANT: You MUST use FRAMEWORK ${frameworkMap[variant]} for this email. Do NOT use any other framework. Follow its CTA rules exactly — especially whether or not to include the booking URL.`;
+    variantInstruction = `\n\nIMPORTANT: You MUST use FRAMEWORK ${frameworkMap[variant]} for this email. Do NOT use any other framework. Follow its structure and CTA rules exactly.`;
   }
 
   const MAX_RETRIES = 5;
@@ -573,6 +589,7 @@ Return JSON: {"subject": "...", "body": "..."}`;
         client.messages.create({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 500,
+          temperature: 0.8,
           messages: [{ role: 'user', content: prompt + variantInstruction }],
         }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('Claude API timeout after 60s')), 60000)),
@@ -639,6 +656,13 @@ function scoreLead(diagnosis) {
 // ── Send Cold Email ─────────────────────────────────
 
 async function sendColdEmail(lead, sender) {
+  // Block role-based addresses — nobody monitors info@, contact@, etc.
+  const { isRoleBasedEmail } = require('../utils/nameParser');
+  if (isRoleBasedEmail(lead.email)) {
+    console.log(`[LEADGEN] Skipping role-based email: ${lead.email}`);
+    return { success: false, error: 'role-based email' };
+  }
+
   const unsubUrl = `${UNSUBSCRIBE_BASE}/api/v1/leadgen/unsubscribe/${lead.unsubscribe_token}`;
 
   // Plain-text-style HTML — no branding, no tables, no gradient logos.
@@ -698,9 +722,17 @@ async function sendColdEmail(lead, sender) {
            unsubscribe_token, industry, diagnosis_scores, original_email_body, lead_score,
            email_variant, priority)
          VALUES ($1,$2,$3,$4,$5, 'active',$6,NOW(),$7, $8,$9,$10, $11,$12,$13,$14,$15, $16, $17)
-         ON CONFLICT (contact_email) DO NOTHING`,
+         ON CONFLICT (contact_email) DO UPDATE SET
+           ai_email_subject = COALESCE(EXCLUDED.ai_email_subject, outreach_leads.ai_email_subject),
+           original_subject = COALESCE(EXCLUDED.original_subject, outreach_leads.original_subject),
+           original_email_body = COALESCE(EXCLUDED.original_email_body, outreach_leads.original_email_body),
+           original_message_id = COALESCE(EXCLUDED.original_message_id, outreach_leads.original_message_id),
+           source_lead_id = COALESCE(EXCLUDED.source_lead_id, outreach_leads.source_lead_id),
+           touch_count = outreach_leads.touch_count + 1,
+           last_sent_at = NOW(),
+           updated_at = NOW()`,
         [
-          lead.contact_person || lead.business_name, // contact_name (prefer real person name)
+          lead.contact_person || cleanCompanyName(lead.business_name) || lead.business_name, // contact_name (prefer real person name, fall back to cleaned company name)
           lead.email,                             // contact_email
           lead.business_name,                     // company (always the business name)
           lead.website_url,                       // website_url
@@ -715,7 +747,7 @@ async function sendColdEmail(lead, sender) {
           lead.diagnosis_json ? JSON.stringify(lead.diagnosis_json) : null, // diagnosis_scores
           lead.outreach_body || null,             // original_email_body
           leadScore,                              // lead_score
-          lead.email_variant || 'C',              // email_variant (C/D/E/F rotation; fallback C)
+          lead.email_variant || '1',              // email_variant (1/2/3 rotation; fallback 1)
           leadScore >= 75,                        // priority (auto-flag high-scoring leads)
         ]
       );
@@ -725,16 +757,20 @@ async function sendColdEmail(lead, sender) {
     }
 
     // ── Mirror into outreach_emails so analytics dashboards see this send ──
-    try {
-      await dbQuery(
-        `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, sent_at, delivered_at)
-         SELECT id, 0, $2, $3, $4, $5, NOW(), NOW()
-         FROM outreach_leads WHERE contact_email = $1
-         LIMIT 1`,
-        [lead.email, lead.outreach_subject, lead.outreach_body || '', emailId, lead.email_variant || 'B']
-      );
-    } catch (mirrorErr) {
-      console.warn(`[LEADGEN] outreach_emails mirror failed for ${lead.email}:`, mirrorErr.message);
+    if (!lead.outreach_subject) {
+      console.warn(`[LEADGEN] Skipping outreach_emails mirror for ${lead.email}: no subject`);
+    } else {
+      try {
+        await dbQuery(
+          `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, sent_at, delivered_at)
+           SELECT id, 0, $2, $3, $4, $5, NOW(), NOW()
+           FROM outreach_leads WHERE contact_email = $1
+           LIMIT 1`,
+          [lead.email, lead.outreach_subject, lead.outreach_body || '', emailId, lead.email_variant || '1']
+        );
+      } catch (mirrorErr) {
+        console.warn(`[LEADGEN] outreach_emails mirror failed for ${lead.email}:`, mirrorErr.message);
+      }
     }
 
     return { success: true, emailId };
@@ -863,7 +899,7 @@ async function runDailyLeadGeneration() {
         const recCounts = new Map(recSenders.map(s => [s.email, 0]));
         let recIdx = 0;
         let recoveredSends = 0;
-        const REC_VARIANTS = ['C', 'D', 'E', 'F'];
+        const REC_VARIANTS = ['1', '2', '3'];
         let recVariantCursor = 0;
         for (const lead of stuckLeads) {
           // Stop once we've drained up to today's remaining capacity.
@@ -1165,7 +1201,7 @@ async function runDailyLeadGeneration() {
   // A/B/C/D test: distribute evenly across 4 new frameworks (C, D, E, F).
   // Previous variants A and B are retired — existing data preserved for
   // historical comparison. Round-robin ensures exact 25% split per run.
-  const TEST_VARIANTS = ['C', 'D', 'E', 'F'];
+  const TEST_VARIANTS = ['1', '2', '3'];
   let variantCursor = 0;
   for (const lead of toEmail) {
     try {

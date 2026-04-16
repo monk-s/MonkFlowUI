@@ -353,17 +353,15 @@ async function sendAiEmail(leadId) {
 
 const FOLLOWUP_SYSTEM_PROMPT = `You are writing a follow-up email for Nathan, who runs MonkFlow — a dev agency that builds custom automation tools, client portals, and workflow software for SMBs.
 
-This is a FOLLOW-UP email in an existing thread. The prospect received a first email and hasn't replied yet.
+This is a FOLLOW-UP email in an existing thread. The prospect received a first email and hasn't replied yet. Each touch has a specific strategy — follow the touch-specific instructions exactly.
 
 CASE STUDIES (pick the one closest to this prospect's industry):
 ${CASE_STUDIES.map((cs, i) => `${i + 1}. ${cs.name} (${cs.industry}): ${cs.what}. Result: ${cs.result}. Detail: ${cs.detail}.`).join('\n')}
 
 HARD RULES:
-- Under 60 words. 2-3 short paragraphs max.
-- NEVER start with "I" — start with value or a question.
-- NEVER use "following up", "circling back", "checking in", "bumping this", "just wanted to".
+- NEVER start with "I" — start with value, a stat, or a question.
+- NEVER use "following up", "circling back", "checking in", "bumping this", "just wanted to", "touching base".
 - Be conversational, not salesy. Sound like a real person continuing a conversation.
-- Include the booking link naturally in the CTA when provided. Example: "Here's my calendar if easier: {bookingUrl}" — keep it casual.
 - No sign-off block — just "Nathan".
 - Output valid JSON only: {"subject": "...", "body": "..."}
 - Body is plain text with \\n for line breaks.`;
@@ -397,15 +395,29 @@ async function generateFollowup(lead, touchNumber) {
   let touchInstruction;
   switch (touchNumber) {
     case 2:
-      touchInstruction = `TOUCH 2 — Value proof. Share a specific, concrete result from the most relevant case study. Make it feel like you're sharing something useful, not selling. End with a soft question.
+      touchInstruction = `TOUCH 2 — "Value Drop" (NO booking link, NO meeting ask):
+- Share something genuinely useful: a relevant industry stat, a process tip, or a specific insight about their business based on their website gaps.
+- End with: "No agenda — just thought this might be useful."
+- Do NOT include a booking link or ask for a meeting. This email is purely about building trust and showing you're a real person who adds value.
+- Under 60 words. 2-3 short paragraphs max.
 Subject: Use "Re: ${origSubject}" for email threading.`;
       break;
     case 3:
-      touchInstruction = `TOUCH 3 — Free value offer. Offer a specific, useful insight about THEIR business based on their website gaps. Position it as genuinely helpful with no strings attached.
-Subject: Create a NEW short subject line (2-4 words) — something like "${company || firstName} + automation" or a reference to their specific gap.`;
+      touchInstruction = `TOUCH 3 — "Social Proof + Soft Ask" (include booking link):
+- Lead with a specific, concrete result from the most relevant case study. Include industry, location, and specific metrics.
+- Connect it to their situation based on their website gaps.
+- Soft CTA: "If ${company || 'your team'} ever wants to explore this, happy to walk through it"
+- Include the booking link casually as a P.S. line: "P.S. Calendar's here: ${env.bookingUrl}"
+- Under 70 words. 2-3 short paragraphs.
+Subject: Create a NEW short subject line (2-4 words, sentence case) — something like "${company || firstName} + automation" or a reference to their specific gap.`;
       break;
     case 4:
-      touchInstruction = `TOUCH 4 — Graceful breakup. Acknowledge the timing may not be right. Leave the door open. Be genuinely warm and wish them well.
+      touchInstruction = `TOUCH 4 — "Genuine Breakup" (under 40 words, booking link in P.S. only):
+- Acknowledge the timing may not be right. Be genuinely warm, not guilt-trippy.
+- Keep it SHORT — under 40 words in the main body.
+- Example tone: "Totally get if this isn't a priority right now. If it ever comes up, I'm here."
+- Include booking link ONLY as a P.S.: "P.S. Calendar's always open: ${env.bookingUrl}"
+- Wish them well genuinely.
 Subject: Use "Re: ${origSubject}" for email threading.`;
       break;
     default:
@@ -421,11 +433,9 @@ Booking URL: ${env.bookingUrl}
 ${diagnosisContext}
 
 Original email subject: "${origSubject}"
-${lead.original_email_body ? `Original email body summary: The first email mentioned their specific automation opportunities based on their website analysis.` : ''}
+${lead.original_email_body ? `Original email: The first email discussed their specific automation opportunities based on their website analysis.` : ''}
 
-${touchInstruction}
-
-Include the booking URL naturally in the CTA.`;
+${touchInstruction}`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-20250514',

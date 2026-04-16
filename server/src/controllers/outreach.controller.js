@@ -528,9 +528,14 @@ const trackOpen = catchAsync(async (req, res) => {
         [emailId]
       ).catch(() => {});
 
+      // Match by gmail_message_id/id directly, OR fall back to the lead's
+      // unsubscribe_token (follow-up pixels only carry the token, not the
+      // per-email ID, so without this branch follow-ups show 0 opens).
       await query(
         `UPDATE outreach_emails SET opened_at = COALESCE(opened_at, NOW())
-         WHERE gmail_message_id = $1 OR id::text = $1`,
+         WHERE gmail_message_id = $1 OR id::text = $1
+            OR (lead_id = (SELECT id FROM outreach_leads WHERE unsubscribe_token::text = $1 LIMIT 1)
+                AND opened_at IS NULL)`,
         [emailId]
       ).catch(() => {});
     }

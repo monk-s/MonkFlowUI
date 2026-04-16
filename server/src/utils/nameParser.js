@@ -197,7 +197,10 @@ function getFirstName(contactName, contactEmail) {
       nameWords[0].length <= 15 &&
       // First word should look like a name (alpha only, reasonable length)
       /^[A-Za-z'-]+$/.test(nameWords[0]) &&
-      nameWords[0].length >= 2;
+      nameWords[0].length >= 2 &&
+      // Reject page titles / CTA phrases / meta descriptions
+      !(/[!?]/.test(trimmed)) &&
+      !(/\b(allow|discover|attention|required|click|opportunities|explore|submit|request|exclusive)\b/i.test(trimmed));
 
     if (isRealName) {
       return nameWords[0];
@@ -222,4 +225,10 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
-module.exports = { extractFirstNameFromEmail, cleanCompanyName, getFirstName };
+const ROLE_BASED_PREFIX = /^(info|support|contact|admin|office|sales|help|billing|legal|hr|marketing|hello|general|team|directory|reception|inquiries|enquiries|careers|jobs|media|press|service|feedback|accounts|mail|staff)@/i;
+
+function isRoleBasedEmail(email) {
+  return ROLE_BASED_PREFIX.test(email);
+}
+
+module.exports = { extractFirstNameFromEmail, cleanCompanyName, getFirstName, isRoleBasedEmail };

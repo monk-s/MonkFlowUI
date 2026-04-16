@@ -40,6 +40,7 @@ function start() {
           FROM outreach_leads ol
           WHERE ol.last_sent_at >= NOW() - INTERVAL '2 days'
             AND ol.touch_count >= 1
+            AND ol.ai_email_subject IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM outreach_emails oe WHERE oe.lead_id = ol.id AND oe.touch_number = 0)
         `);
         if (r.rowCount > 0) console.log(`[LEADGEN] Reconciled ${r.rowCount} missing outreach_emails rows`);
