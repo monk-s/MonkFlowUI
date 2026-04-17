@@ -60,7 +60,7 @@ function getFollowupTemplate(touchNumber, lead) {
       body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Came across a stat I thought was relevant — businesses${company} that automate their intake and scheduling processes typically save 10-15 hours per week in front-desk time. Most of that is just eliminating phone tag and manual data entry.</p><p>No agenda — just thought this might be useful as you think about operations.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
     };
     case 3: return {
-      subject: `${rawCompany || firstName} + automation`,
+      subject: reSubject,
       body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>We just wrapped up an automation build for a financial services firm — cut their client onboarding from 45 minutes to under 5. Contracts, CRM sync, the whole workflow running on autopilot.</p><p>If${rawCompany ? ` ${rawCompany}` : ' your team'} ever wants to explore something similar, happy to walk through what we built — <a href="${bookingUrl}">here's my calendar</a>.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
     };
     case 4: return {
@@ -239,7 +239,7 @@ async function processDueFollowups() {
         await query(
           `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, delivered_at)
            VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-          [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || 'B']
+          [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || '1']
         );
 
         const nextFollowup = getNextFollowupDate(nextTouch);

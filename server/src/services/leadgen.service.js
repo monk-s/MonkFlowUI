@@ -589,7 +589,7 @@ Return JSON: {"subject": "...", "body": "..."}`;
         client.messages.create({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 500,
-          temperature: 0.8,
+          temperature: 0.6,
           messages: [{ role: 'user', content: prompt + variantInstruction }],
         }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('Claude API timeout after 60s')), 60000)),
@@ -1188,19 +1188,19 @@ async function runDailyLeadGeneration() {
     try {
       const ids = skippedNoName.map(l => l.id);
       if (ids.length > 0) {
-        await dbQuery(`UPDATE leads SET status = 'skipped_no_name' WHERE id = ANY($1::int[])`, [ids]);
+        await dbQuery(`UPDATE leads SET status = 'skipped_no_name' WHERE id = ANY($1::uuid[])`, [ids]);
       }
     } catch (_) {}
   }
   // Slice the NAMED leads to the daily cap (not the raw qualified list)
   const toEmail = withName.slice(0, warming.daily);
 
-  // 5. Generate personalized outreach via Claude API (4-way C/D/E/F rotation)
+  // 5. Generate personalized outreach via Claude API (3-way framework rotation)
 
   await logExec('info', `Email generation starting for ${toEmail.length} leads`, { leadCount: toEmail.length });
-  // A/B/C/D test: distribute evenly across 4 new frameworks (C, D, E, F).
-  // Previous variants A and B are retired — existing data preserved for
-  // historical comparison. Round-robin ensures exact 25% split per run.
+  // Distribute evenly across 3 frameworks: 1 (Specific Observation), 2 (Free Teardown), 3 (Peer Reference).
+  // Previous variants A/B and C/D/E/F are retired — historical data preserved.
+  // Round-robin ensures ~33% split per run.
   const TEST_VARIANTS = ['1', '2', '3'];
   let variantCursor = 0;
   for (const lead of toEmail) {

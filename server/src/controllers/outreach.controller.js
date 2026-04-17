@@ -33,36 +33,18 @@ function getFollowupTemplate(touchNumber, lead) {
     : '';
 
   switch (touchNumber) {
-    case 2:
-      return {
-        subject: reSubject,
-        body: `<div style="font-family:sans-serif;max-width:600px;">
-          <p>Hey ${firstName},</p>
-          <p>Quick example of what I mean — we built a client onboarding system for a financial services firm that cut their new-client setup from 45 minutes to under 5. Contracts, CRM sync, everything automated.</p>
-          <p>Curious if${rawCompany ? ` ${rawCompany}` : ' your team'} deals with anything similar on the operations side? Happy to walk you through it — <a href="${env.bookingUrl}">grab 15 min here</a>.</p>
-          <p>Nathan</p>
-        </div>${unsubFooter}${trackingPixel}`,
-      };
-    case 3:
-      return {
-        subject: `${rawCompany || firstName} + automation`,
-        body: `<div style="font-family:sans-serif;max-width:600px;">
-          <p>Hey ${firstName},</p>
-          <p>No worries if the timing isn't right — figured I'd leave you with something useful either way.</p>
-          <p>Based on what I saw on${rawCompany ? ` ${rawCompany}'s` : ' your'} site, there are a couple of quick automation wins that could free up real hours each week. If you're curious, happy to share over a quick call — <a href="${env.bookingUrl}">here's my calendar</a>.</p>
-          <p>Nathan</p>
-        </div>${unsubFooter}${trackingPixel}`,
-      };
-    case 4:
-      return {
-        subject: reSubject,
-        body: `<div style="font-family:sans-serif;max-width:600px;">
-          <p>Hey ${firstName},</p>
-          <p>Last note from me — going to assume the timing isn't right, and that's totally fine.</p>
-          <p>If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the priority list, <a href="${env.bookingUrl}">my calendar's here</a>. Wishing you a great rest of the quarter.</p>
-          <p>Nathan</p>
-        </div>${unsubFooter}${trackingPixel}`,
-      };
+    case 2: return {
+      subject: reSubject,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Came across a stat I thought was relevant — businesses${company} that automate their intake and scheduling processes typically save 10-15 hours per week in front-desk time. Most of that is just eliminating phone tag and manual data entry.</p><p>No agenda — just thought this might be useful as you think about operations.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
+    };
+    case 3: return {
+      subject: reSubject,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>We just wrapped up an automation build for a financial services firm — cut their client onboarding from 45 minutes to under 5. Contracts, CRM sync, the whole workflow running on autopilot.</p><p>If${rawCompany ? ` ${rawCompany}` : ' your team'} ever wants to explore something similar, happy to walk through what we built — <a href="${env.bookingUrl}">here's my calendar</a>.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
+    };
+    case 4: return {
+      subject: reSubject,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Totally get if this isn't a priority right now — no worries at all. If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the list, I'm here.</p><p>Wishing you well.</p><p>Nathan</p><p style="font-size:13px;color:#666;">P.S. Calendar's always open: <a href="${env.bookingUrl}">${env.bookingUrl}</a></p></div>${unsubFooter}${trackingPixel}`,
+    };
     default:
       return null;
   }
@@ -353,7 +335,7 @@ const processDueFollowups = catchAsync(async (req, res) => {
       await query(
         `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, delivered_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-        [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || 'B']
+        [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || '1']
       );
 
       // Update lead — close sequence after touch 4
@@ -729,10 +711,13 @@ const getAbResults = catchAsync(async (req, res) => {
   const VARIANT_LABELS = {
     A: 'A — Insight Lead (retired)',
     B: 'B — Question Lead (retired)',
-    C: 'C — Loom Bait',
-    D: 'D — Teardown Offer',
-    E: 'E — Sharp Question',
-    F: 'F — Cost of Inaction',
+    C: 'C — Loom Bait (retired)',
+    D: 'D — Teardown Offer (retired)',
+    E: 'E — Sharp Question (retired)',
+    F: 'F — Cost of Inaction (retired)',
+    '1': '1 — Specific Observation + Question',
+    '2': '2 — Free Teardown',
+    '3': '3 — Peer Reference',
   };
   const { rows } = await query(`
     SELECT
@@ -745,7 +730,7 @@ const getAbResults = catchAsync(async (req, res) => {
       ROUND(COUNT(*) FILTER (WHERE ol.status = 'unsubscribed')::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS unsub_rate
     FROM outreach_leads ol
     WHERE ol.touch_count >= 1
-      AND ol.email_variant IN ('A', 'B', 'C', 'D', 'E', 'F')
+      AND ol.email_variant IN ('A', 'B', 'C', 'D', 'E', 'F', '1', '2', '3')
     GROUP BY ol.email_variant
     ORDER BY variant
   `);

@@ -335,7 +335,7 @@ async function sendAiEmail(leadId) {
   await query(
     `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, delivered_at)
      VALUES ($1, 0, $2, $3, $4, $5, NOW())`,
-    [leadId, lead.ai_email_subject, lead.ai_email_body, gmailId, lead.email_variant || 'B']
+    [leadId, lead.ai_email_subject, lead.ai_email_body, gmailId, lead.email_variant || '1']
   );
 
   // Store original message ID and subject for follow-up threading
@@ -409,7 +409,7 @@ Subject: Use "Re: ${origSubject}" for email threading.`;
 - Soft CTA: "If ${company || 'your team'} ever wants to explore this, happy to walk through it"
 - Include the booking link casually as a P.S. line: "P.S. Calendar's here: ${env.bookingUrl}"
 - Under 70 words. 2-3 short paragraphs.
-Subject: Create a NEW short subject line (2-4 words, sentence case) — something like "${company || firstName} + automation" or a reference to their specific gap.`;
+Subject: Use "Re: ${origSubject}" for email threading — keeps the conversation in one thread.`;
       break;
     case 4:
       touchInstruction = `TOUCH 4 — "Genuine Breakup" (under 40 words, booking link in P.S. only):
