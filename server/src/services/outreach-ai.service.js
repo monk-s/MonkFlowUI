@@ -13,25 +13,32 @@ const resolveMx = promisify(dns.resolveMx);
 // ── Case study references (AI picks the most relevant) ────
 const CASE_STUDIES = [
   {
-    name: 'Team Financial Strategies',
+    name: 'Team Financial Strategies (4-advisor wealth management firm, Dallas)',
     industry: 'wealth management / financial services',
-    what: 'automated client onboarding contract system with CRM integration',
-    result: 'cut new-client onboarding from 45 minutes to under 5',
-    detail: 'custom contract form that auto-populates their Redtail CRM, generates signed agreements as PDFs, and syncs client financial profiles',
+    what: 'automated client onboarding + Redtail CRM sync',
+    result: 'cut new-client setup from 45 minutes to under 5',
+    detail: 'custom contract form that auto-populates Redtail CRM, generates signed agreements as PDFs, and syncs client financial profiles. Built in 2 weeks.',
   },
   {
-    name: 'a local healthcare practice',
-    industry: 'healthcare / dental / medical',
-    what: 'online scheduling + automated intake forms with patient portal',
-    result: 'freed up 12 hours/week of front-desk time and reduced no-shows by 35%',
-    detail: 'self-service booking, digital intake forms that pre-fill into their EHR, automated appointment reminders via SMS and email',
+    name: 'a 4-provider dental practice in Tulsa (6 front-desk staff)',
+    industry: 'dental / healthcare / medical',
+    what: 'online scheduling + digital intake forms + patient portal',
+    result: 'went from 18 hrs/week on scheduling to under 2',
+    detail: 'self-service booking, digital intake forms that pre-fill into their EHR, automated SMS/email reminders. Built in 3 weeks.',
   },
   {
-    name: 'a growing e-commerce brand',
+    name: 'a 3-provider chiropractic office in Columbus',
+    industry: 'chiropractic / healthcare / medical',
+    what: 'digital intake + automated scheduling',
+    result: 'saved 11 hrs/week of front-desk time',
+    detail: 'fully digital new-patient intake flow, automated appointment scheduling, and reminder sequences. Built in 9 business days.',
+  },
+  {
+    name: 'a Shopify e-commerce brand in Austin',
     industry: 'retail / e-commerce / general business',
-    what: 'order-to-fulfillment automation connecting their store, inventory, and shipping',
-    result: 'eliminated 15 hours/week of manual order processing and cut shipping errors to near zero',
-    detail: 'automated pipeline from order placement to label printing, real-time inventory sync, and exception alerts',
+    what: 'order-to-fulfillment automation connecting store, inventory, and shipping',
+    result: 'eliminated 15 hrs/week of manual order processing, shipping errors near zero',
+    detail: 'automated pipeline from order placement to label printing, real-time inventory sync, and exception alerts.',
   },
 ];
 
@@ -123,35 +130,55 @@ async function analyzeWebsite(domain) {
 
 // ── AI email generator ─────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are writing a cold email for Nathan, who runs MonkFlow — a dev agency that builds custom automation tools, client portals, and workflow software for SMBs.
+const SYSTEM_PROMPT = `You are writing a cold email for Nathan, who runs MonkFlow — a dev agency that builds custom automation, client portals, and workflow tools for small businesses.
 
-GOAL: Write an email that stands out in a crowded inbox. This person gets dozens of cold emails a week. Yours needs to feel different.
+GOAL: Write an email that stands out in a crowded inbox. This person gets dozens of cold emails a week. Yours needs to feel different from every "I noticed your website..." template.
 
-STRUCTURE — randomly pick ONE of these two frameworks per email (do NOT always use the same one):
+STRUCTURE — use the framework specified in the user prompt (1, 2, or 3). Each has a distinct approach. Follow it exactly.
 
-FRAMEWORK A — "Insight Lead":
-- Open with a specific, useful insight or stat relevant to their industry/situation (e.g., "Practices your size that add online self-scheduling typically see 30-40% fewer no-shows"). Use the website analysis to make it relevant.
-- Then briefly connect it to what you can do — one sentence, tied to a case study result.
-- Close with a low-friction question CTA.
+FRAMEWORK 1 — "Specific Observation + Question":
+- Open with ONE hyper-specific observation about their BUSINESS OPERATIONS (not their website). Use the website analysis to INFER the operational pain, don't describe the website symptom.
+  - BAD: "Saw your booking routes through a contact form"
+  - GOOD: "If your team is still handling new-client intake by phone, your front desk is probably spending 8-10 hours a week on it"
+- ONE sentence of social proof with a specific result: include industry, city, size, and metric.
+- CTA: An open-ended question that invites a real conversational response. NOT yes/no, NOT "reply 'send it'".
+  - GOOD: "Is intake something your team has talked about fixing, or is it pretty dialed in?"
+  - BAD: "Yes or no?", "Reply 'send it'", "Thoughts?"
+- End with P.S. containing booking link: "P.S. If easier to just talk: {bookingUrl}"
 
-FRAMEWORK B — "Question Lead":
-- Open with a specific question about their operations that they can't read without mentally answering (e.g., "Curious — how much of your team's week goes to manually processing [X]?"). Base the question on pain points from their website analysis.
-- Then share a concrete result — one sentence from a case study.
-- Close with a low-friction question CTA.
+FRAMEWORK 2 — "Free Teardown":
+- Open with "I looked at {company}'s site and mapped out 3 things I'd automate first:"
+- List 2-3 bullet points specific to THEIR analysis gaps (not generic). Be concrete about what you'd build.
+- One-line proof: a specific case study result with industry, city, and metric.
+- CTA: "Want me to send the full breakdown? Takes 2 min to read." (simple reply CTA, conversational — NOT "reply 'send it'")
+- End with P.S. containing booking link: "P.S. Or if you'd rather just talk through it: {bookingUrl}"
 
-CASE STUDIES (pick the one closest to this prospect's industry):
-${CASE_STUDIES.map((cs, i) => `${i + 1}. ${cs.name} (${cs.industry}): ${cs.what}. Result: ${cs.result}.`).join('\n')}
-If none match well, use the result numbers without naming the client.
+FRAMEWORK 3 — "Peer Reference":
+- Open by referencing what a similar business in their area or industry is doing: "A [industry] practice in [nearby city] just automated their entire [process] — saves them [X hours/week]."
+- Connect to THEIR situation using analysis gaps: "Your site shows you're still handling [gap] manually — same spot they were in."
+- CTA: Open-ended conversational question. "Curious if this is on your radar at all? Happy to share what they did."
+- End with P.S. containing booking link: "P.S. Calendar's here if easier: {bookingUrl}"
 
-HARD RULES:
-- Under 100 words. 3-4 short paragraphs max. Every word must earn its place.
-- NEVER start the email with "I" — the first word should be about them, a question, or an insight.
-- NEVER use "I was checking out your site", "I came across your website", "I noticed", or any variation. These are the most common cold email openers in existence — they signal mass outreach instantly.
-- NEVER use the phrases "reaching out", "touching base", "hope this finds you well", or "I'd love to".
-- Subject line: 2-5 words, lowercase, no punctuation. Must feel like a text from a colleague, not a marketing email. Examples of good patterns: "{company} + automation", "your booking page", "saving 10 hrs/week", "{firstName}, quick question". NEVER use the word "thought" or "idea" in the subject.
-- CTA: one soft question, and include a booking link naturally. Example: "Worth a quick chat? Here's my calendar: {bookingUrl}" — but make it feel casual, not salesy. NEVER mention a specific time commitment like "15-minute call" or "30-minute demo".
-- Sign off as just "Nathan" — no last name, no company name, no URL, no title.
-- The case study mention should be ONE sentence woven into the email, never a separate paragraph.
+CASE STUDIES (use the one that matches their industry; include specifics):
+${CASE_STUDIES.map((cs, i) => `${i + 1}. ${cs.name}: ${cs.what}. Result: ${cs.result}.`).join('\n')}
+If none match well, use the result numbers without naming the client — but always include a concrete client descriptor (industry + city or size).
+
+HARD RULES (apply to ALL frameworks):
+- 100-130 words total. The email must be skimmable in under 15 seconds.
+- Start with "Hey {firstName}," — use the first name provided. If the name is "there", use "Hey {company} team," instead. Never "Hi".
+- The first sentence after the greeting must reference something CONCRETE about them: their company name, a specific operational gap inferred from the analysis, or an observable fact. Never start with a generic industry stat.
+- Every email MUST include the booking URL as a P.S. line at the end. Never bury it in the body or exclude it.
+- The CTA must be an open-ended question, NOT a yes/no or command. Ask something they can answer conversationally.
+- NEVER use these phrases: "Curious —", "Worth exploring", "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to chat", "thoughts?", "interested?"
+- The case study mention must include a specific number AND a specific client descriptor (industry + city or size). Never "a healthcare practice" — always "a 4-provider dental office in Tulsa" or similar.
+- Sign off as just "Nathan" — no last name, no company, no title.
+
+Subject line rules:
+- 2-6 words, sentence case (capitalize first word only, rest lowercase unless proper noun), no emoji.
+- Must create curiosity or feel like it came from a colleague.
+- Include a "?" in roughly half of subjects (questions have higher open rates).
+- GOOD patterns: "Question about {company}", "{firstName} — quick thought", "Intake at {company}?", "Saw something on your site"
+- BAD patterns: "{company} + intake" (looks automated), all-lowercase everything (looks mass-sent), generic keywords ("scheduling headaches")
 
 OUTPUT FORMAT: Return valid JSON only, no markdown:
 {"subject": "...", "body": "..."}
@@ -178,17 +205,20 @@ Booking URL: ${env.bookingUrl}
 
 Address them as "${firstName}". Use the booking URL naturally in the CTA.`;
 
-  // A/B variant override: instruct the AI to use a specific framework
-  if (variant === 'A') {
-    userPrompt += '\n\nIMPORTANT: You MUST use FRAMEWORK A ("Insight Lead") for this email. Do NOT use Framework B.';
-  } else if (variant === 'B') {
-    userPrompt += '\n\nIMPORTANT: You MUST use FRAMEWORK B ("Question Lead") for this email. Do NOT use Framework A.';
+  // Variant override: instruct the AI to use a specific framework (1, 2, or 3)
+  const frameworkMap = {
+    '1': '1 ("Specific Observation + Question")',
+    '2': '2 ("Free Teardown")',
+    '3': '3 ("Peer Reference")',
+  };
+  if (frameworkMap[variant]) {
+    userPrompt += `\n\nIMPORTANT: You MUST use FRAMEWORK ${frameworkMap[variant]} for this email. Do NOT use any other framework. Follow its structure and CTA rules exactly.`;
   }
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 1024,
-    temperature: 0.7,
+    temperature: 0.6,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],
   });
@@ -220,7 +250,7 @@ Address them as "${firstName}". Use the booking URL naturally in the CTA.`;
 
 // ── Main orchestrators ─────────────────────────────────────
 
-async function generateForLead(leadId) {
+async function generateForLead(leadId, variant) {
   const { rows } = await query('SELECT * FROM outreach_leads WHERE id = $1', [leadId]);
   if (!rows[0]) throw new Error('Lead not found');
   const lead = rows[0];
@@ -235,8 +265,8 @@ async function generateForLead(leadId) {
     analysis = result.analysis;
   }
 
-  // Generate email
-  const email = await generateEmailForLead(lead, analysis);
+  // Generate email — use provided variant, or the lead's existing variant, or let AI pick
+  const email = await generateEmailForLead(lead, analysis, variant || lead.email_variant);
 
   // Convert body line breaks to HTML
   const htmlBody = `<div style="font-family:sans-serif;max-width:600px;">${email.body.split('\n').map(line =>
@@ -264,10 +294,14 @@ async function generateForAllPriority() {
 
   let generated = 0;
   let errors = 0;
+  const VARIANTS = ['1', '2', '3'];
+  let variantCursor = 0;
 
   for (const lead of leads) {
     try {
-      await generateForLead(lead.id);
+      const variant = VARIANTS[variantCursor % VARIANTS.length];
+      variantCursor++;
+      await generateForLead(lead.id, variant);
       generated++;
       // Rate limit: 2 second delay between API calls
       if (leads.indexOf(lead) < leads.length - 1) {
@@ -440,7 +474,7 @@ ${touchInstruction}`;
   const response = await client.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 512,
-    temperature: 0.7,
+    temperature: 0.6,
     system: FOLLOWUP_SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],
   });

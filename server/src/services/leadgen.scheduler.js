@@ -23,7 +23,7 @@ function start() {
       );
     } catch (_) {}
     try {
-      // Global 30-min watchdog — if anything hangs silently, this forces failure
+      // Global 45-min watchdog — if anything hangs silently, this forces failure
       // so the heartbeat flips to 'failed' instead of stuck on 'started' forever.
       const stats = await Promise.race([
         runDailyLeadGeneration(),

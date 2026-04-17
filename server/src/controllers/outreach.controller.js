@@ -65,10 +65,10 @@ function addBusinessDays(from, days) {
 function getNextFollowupDate(touchCount, lastSentAt) {
   const from = lastSentAt ? new Date(lastSentAt) : new Date();
   switch (touchCount) {
-    case 0: return addBusinessDays(from, 3);  // After initial: 3 business days
+    case 0: return addBusinessDays(from, 3);  // After initial: 3 business days → touch 2
     case 1: return addBusinessDays(from, 3);  // After touch 1 (initial): 3 biz days → touch 2
-    case 2: return addBusinessDays(from, 4);  // After touch 2: +4 biz days (~Day 7)
-    case 3: return addBusinessDays(from, 5);  // After touch 3: +5 biz days (~Day 14)
+    case 2: return addBusinessDays(from, 5);  // After touch 2: +5 biz days (~Day 8) → touch 3
+    case 3: return addBusinessDays(from, 7);  // After touch 3: +7 biz days (~Day 17) → touch 4
     default: return null; // Sequence complete after touch 4
   }
 }
@@ -540,13 +540,20 @@ const trackClick = catchAsync(async (req, res) => {
     ).catch(() => {});
   }
 
-  // Validate URL to prevent open redirect attacks
+  // Validate URL to prevent open redirect attacks — allowlist trusted domains only
+  const ALLOWED_REDIRECT_DOMAINS = new Set([
+    'getmonkflow.com', 'monkflow.io', 'cal.com', 'calendly.com',
+  ]);
   if (targetUrl) {
     try {
       const parsed = new URL(targetUrl);
-      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      const host = parsed.hostname.toLowerCase();
+      const isTrusted = (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+        (ALLOWED_REDIRECT_DOMAINS.has(host) || host.endsWith('.getmonkflow.com') || host.endsWith('.monkflow.io'));
+      if (isTrusted) {
         res.redirect(302, targetUrl);
       } else {
+        console.warn(`[OUTREACH] Blocked open redirect to untrusted domain: ${host}`);
         res.redirect(302, 'https://getmonkflow.com');
       }
     } catch {
@@ -801,7 +808,56 @@ const handleInboundReply = catchAsync(async (req, res) => {
 
 // ── Resend Webhook ────────────────────────────────────────
 
+// Resend signs webhooks via Svix. Verify HMAC-SHA256 of
+// `${svix-id}.${svix-timestamp}.${rawBody}` using the base64-decoded secret
+// (strip the `whsec_` prefix). Timestamp is rejected if skew > 5 min to
+// prevent replay. Without this, anyone can POST fake bounce/complaint
+// events and close real leads.
+function verifyResendSignature(req) {
+  const secret = env.resendWebhookSecret;
+  if (!secret) return false;
+
+  const svixId = req.headers['svix-id'];
+  const svixTimestamp = req.headers['svix-timestamp'];
+  const svixSignature = req.headers['svix-signature'];
+  if (!svixId || !svixTimestamp || !svixSignature) return false;
+
+  const ts = parseInt(svixTimestamp, 10);
+  if (Number.isNaN(ts)) return false;
+  const skew = Math.abs(Math.floor(Date.now() / 1000) - ts);
+  if (skew > 300) return false;
+
+  const rawBody = req.rawBody
+    ? (Buffer.isBuffer(req.rawBody) ? req.rawBody.toString('utf8') : String(req.rawBody))
+    : JSON.stringify(req.body || {});
+  const signedContent = `${svixId}.${svixTimestamp}.${rawBody}`;
+
+  const crypto = require('crypto');
+  const key = Buffer.from(secret.replace(/^whsec_/, ''), 'base64');
+  const expected = crypto.createHmac('sha256', key).update(signedContent).digest('base64');
+  const expectedBuf = Buffer.from(expected, 'base64');
+
+  for (const pair of svixSignature.split(' ')) {
+    const [, sig] = pair.split(',');
+    if (!sig) continue;
+    try {
+      const sigBuf = Buffer.from(sig, 'base64');
+      if (sigBuf.length === expectedBuf.length && crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
 const handleResendWebhook = catchAsync(async (req, res) => {
+  if (!verifyResendSignature(req)) {
+    console.warn('[OUTREACH] Resend webhook signature verification failed');
+    return res.status(401).json({ error: 'Invalid webhook signature' });
+  }
+
   const { type, data } = req.body;
   const { trackBounce, trackComplaint } = require('../services/leadgen.service');
 

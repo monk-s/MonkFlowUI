@@ -29,8 +29,8 @@ function addBusinessDays(from, days) {
 function getNextFollowupDate(touchCount) {
   const from = new Date();
   switch (touchCount) {
-    case 2: return addBusinessDays(from, 4);
-    case 3: return addBusinessDays(from, 5);
+    case 2: return addBusinessDays(from, 5);  // After Touch 2: +5 biz days (~Day 8)
+    case 3: return addBusinessDays(from, 7);  // After Touch 3: +7 biz days (~Day 17)
     default: return null;
   }
 }
@@ -65,7 +65,7 @@ function getFollowupTemplate(touchNumber, lead) {
     };
     case 4: return {
       subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Totally get if this isn't a priority right now — no worries at all. If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the list, I'm here.</p><p>Wishing you a great rest of the quarter.</p><p>Nathan</p><p style="font-size:13px;color:#666;">P.S. Calendar's always open: <a href="${bookingUrl}">${bookingUrl}</a></p></div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Totally get if this isn't a priority right now — no worries at all. If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the list, I'm here.</p><p>Wishing you well.</p><p>Nathan</p><p style="font-size:13px;color:#666;">P.S. Calendar's always open: <a href="${bookingUrl}">${bookingUrl}</a></p></div>${unsubFooter}${trackingPixel}`,
     };
     default: return null;
   }

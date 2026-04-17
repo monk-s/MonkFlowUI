@@ -29,6 +29,7 @@ const env = {
   qboWebhookVerifierToken: process.env.QBO_WEBHOOK_VERIFIER_TOKEN || '',
   stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+  resendWebhookSecret: process.env.RESEND_WEBHOOK_SECRET || '',
   apiUrl: process.env.API_URL || 'http://localhost:8080',
   inboundWebhookSecret: process.env.INBOUND_WEBHOOK_SECRET || '',
   bookingUrl: process.env.BOOKING_URL || 'https://monkflow.io/#schedule',
