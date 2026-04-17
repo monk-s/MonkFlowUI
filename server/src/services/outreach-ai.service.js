@@ -194,7 +194,7 @@ async function generateEmailForLead(lead, websiteAnalysis, variant) {
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
   const firstName = getFirstName(lead.contact_name, lead.contact_email);
-  const company = cleanCompanyName(lead.company || 'Unknown');
+  const company = cleanCompanyName(lead.company || 'Unknown', lead.contact_email);
   let userPrompt = `Write a personalized cold email for this prospect:
 
 Name: ${firstName}
@@ -409,7 +409,7 @@ async function generateFollowup(lead, touchNumber) {
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
   const firstName = getFirstName(lead.contact_name, lead.contact_email);
-  const company = cleanCompanyName(lead.company || '');
+  const company = cleanCompanyName(lead.company || '', lead.contact_email);
   const industry = lead.industry || 'small business';
   const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';
 

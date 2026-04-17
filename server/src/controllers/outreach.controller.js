@@ -15,7 +15,7 @@ const { getFirstName, cleanCompanyName } = require('../utils/nameParser');
 
 function getFollowupTemplate(touchNumber, lead) {
   const firstName = getFirstName(lead.contact_name, lead.contact_email);
-  const rawCompany = lead.company ? cleanCompanyName(lead.company) : '';
+  const rawCompany = lead.company ? cleanCompanyName(lead.company, lead.contact_email) : '';
   const company = rawCompany ? ` at ${rawCompany}` : '';
   // Use original subject from touch 1 for proper threading
   const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';

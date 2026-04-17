@@ -505,7 +505,7 @@ async function generateOutreachEmail(lead, diagnosis, onRetry, variant) {
 This email needs to stand out. The recipient gets cold emails daily. Yours must feel different from every "I noticed your website..." template.
 
 BUSINESS INFO:
-- Company: ${cleanCompanyName(lead.business_name)}
+- Company: ${cleanCompanyName(lead.business_name, lead.email)}
 - Contact: ${getFirstName(lead.contact_person, lead.email)}
 - Type: ${lead.business_type}
 - City: ${lead.city}, ${lead.state}
@@ -525,7 +525,7 @@ STRUCTURE — use the framework specified below (1, 2, or 3). Each has a distinc
 FRAMEWORK 1 — "Specific Observation + Question" (used for ~40% of sends):
 - Open with ONE hyper-specific observation about their BUSINESS OPERATIONS (not their website). Use the diagnosis to INFER the operational pain, don't describe the website symptom.
   - BAD: "Saw your booking routes through a contact form"
-  - GOOD: "If ${cleanCompanyName(lead.business_name)} is still handling new patient intake by phone, your front desk is probably spending 8-10 hours a week on it"
+  - GOOD: "If ${cleanCompanyName(lead.business_name, lead.email)} is still handling new patient intake by phone, your front desk is probably spending 8-10 hours a week on it"
 - ONE sentence of social proof with a specific result: include industry, city, size, and metric.
 - CTA: An open-ended question that invites a real conversational response. NOT yes/no, NOT "reply 'send it'".
   - GOOD: "Is intake something your team has talked about fixing, or is it pretty dialed in?"
@@ -533,7 +533,7 @@ FRAMEWORK 1 — "Specific Observation + Question" (used for ~40% of sends):
 - End with P.S. containing booking link: "P.S. If easier to just talk: ${env.bookingUrl || 'https://monkflow.io/#schedule'}"
 
 FRAMEWORK 2 — "Free Teardown" (used for ~40% of sends):
-- Open with "I looked at ${cleanCompanyName(lead.business_name)}'s site and mapped out 3 things I'd automate first:"
+- Open with "I looked at ${cleanCompanyName(lead.business_name, lead.email)}'s site and mapped out 3 things I'd automate first:"
 - List 2-3 bullet points specific to THEIR diagnosis gaps (not generic). Be concrete about what you'd build.
 - One-line proof: a specific case study result with industry, city, and metric.
 - CTA: "Want me to send the full breakdown? Takes 2 min to read." (simple reply CTA, conversational — NOT "reply 'send it'")
@@ -553,7 +553,7 @@ CASE STUDIES (use the one that matches their industry; include specifics):
 
 HARD RULES (apply to ALL frameworks):
 - 100-130 words total. The email must be skimmable in under 15 seconds.
-- Start with "Hey ${getFirstName(lead.contact_person, lead.email)}," — use this exact name. If the name is "there", use "Hey ${cleanCompanyName(lead.business_name)} team," instead. Never "Hi".
+- Start with "Hey ${getFirstName(lead.contact_person, lead.email)}," — use this exact name. If the name is "there", use "Hey ${cleanCompanyName(lead.business_name, lead.email)} team," instead. Never "Hi".
 - The first sentence after the greeting must reference something CONCRETE about them: their company name, a specific operational gap inferred from the diagnosis, or an observable fact. Never start with a generic industry stat.
 - Every email MUST include the booking URL as a P.S. line at the end. Never bury it in the body or exclude it.
 - The CTA must be an open-ended question, NOT a yes/no or command. Ask something they can answer conversationally.
@@ -565,8 +565,8 @@ Subject line rules:
 - 2-6 words, sentence case (capitalize first word only, rest lowercase unless proper noun), no emoji.
 - Must create curiosity or feel like it came from a colleague.
 - Include a "?" in roughly half of subjects (questions have higher open rates).
-- GOOD patterns: "Question about ${cleanCompanyName(lead.business_name)}", "${getFirstName(lead.contact_person, lead.email)} — quick thought", "Intake at ${cleanCompanyName(lead.business_name)}?", "Saw something on your site"
-- BAD patterns: "${cleanCompanyName(lead.business_name)} + intake" (looks automated), all-lowercase everything (looks mass-sent), generic keywords ("scheduling headaches")
+- GOOD patterns: "Question about ${cleanCompanyName(lead.business_name, lead.email)}", "${getFirstName(lead.contact_person, lead.email)} — quick thought", "Intake at ${cleanCompanyName(lead.business_name, lead.email)}?", "Saw something on your site"
+- BAD patterns: "${cleanCompanyName(lead.business_name, lead.email)} + intake" (looks automated), all-lowercase everything (looks mass-sent), generic keywords ("scheduling headaches")
 
 Return JSON: {"subject": "...", "body": "..."}`;
 
@@ -732,7 +732,7 @@ async function sendColdEmail(lead, sender) {
            last_sent_at = NOW(),
            updated_at = NOW()`,
         [
-          lead.contact_person || cleanCompanyName(lead.business_name) || lead.business_name, // contact_name (prefer real person name, fall back to cleaned company name)
+          lead.contact_person || cleanCompanyName(lead.business_name, lead.email) || lead.business_name, // contact_name (prefer real person name, fall back to cleaned company name)
           lead.email,                             // contact_email
           lead.business_name,                     // company (always the business name)
           lead.website_url,                       // website_url
@@ -1172,23 +1172,43 @@ async function runDailyLeadGeneration() {
   // of wasting capacity on nameless candidates that block named ones ranked
   // below them.
   const skippedNoName = [];
+  const skippedNoCompany = [];
   const withName = [];
+  const { looksLikePageTitle: _looksLikePageTitle } = require('../utils/nameParser');
   for (const lead of qualifiedLeads) {
     const fn = getFirstName(lead.contact_person, lead.email);
     if (!fn || fn === 'there') {
       skippedNoName.push(lead);
-    } else {
-      withName.push(lead);
+      continue;
     }
+    // Skip leads where we can't produce a non-garbage company name for the
+    // AI prompt. cleanCompanyName now falls back to the email domain, so this
+    // only fails when the domain is public (gmail/yahoo/etc.) AND the
+    // business_name is a page title like "Meet Our Team" — unsalvageable.
+    const cc = cleanCompanyName(lead.business_name, lead.email);
+    if (!cc || cc.length < 3 || _looksLikePageTitle(cc)) {
+      skippedNoCompany.push(lead);
+      continue;
+    }
+    withName.push(lead);
   }
   if (skippedNoName.length > 0) {
     console.log(`[LEADGEN] Skipping ${skippedNoName.length}/${qualifiedLeads.length} leads with no identifiable first name (would send "Hey there")`);
     await logExec('info', `Skipped ${skippedNoName.length} nameless leads`, { count: skippedNoName.length, total: qualifiedLeads.length });
-    // Mark them so we don't re-process tomorrow
     try {
       const ids = skippedNoName.map(l => l.id);
       if (ids.length > 0) {
         await dbQuery(`UPDATE leads SET status = 'skipped_no_name' WHERE id = ANY($1::uuid[])`, [ids]);
+      }
+    } catch (_) {}
+  }
+  if (skippedNoCompany.length > 0) {
+    console.log(`[LEADGEN] Skipping ${skippedNoCompany.length}/${qualifiedLeads.length} leads with page-title-only business names (would pollute subject/body)`);
+    await logExec('info', `Skipped ${skippedNoCompany.length} no-company leads`, { count: skippedNoCompany.length });
+    try {
+      const ids = skippedNoCompany.map(l => l.id);
+      if (ids.length > 0) {
+        await dbQuery(`UPDATE leads SET status = 'skipped_bad_company' WHERE id = ANY($1::uuid[])`, [ids]);
       }
     } catch (_) {}
   }

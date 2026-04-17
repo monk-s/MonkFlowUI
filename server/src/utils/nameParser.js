@@ -119,14 +119,82 @@ function extractFirstNameFromEmail(email) {
   return null;
 }
 
+// Whole-string patterns that indicate the value is a page title / nav label,
+// not a real company name. Used by both cleanCompanyName fallback and
+// looksLikePageTitle so new leads with garbage inputs can route to a
+// domain-derived fallback instead of putting "Meet Our Team" in a subject line.
+const PAGE_TITLE_WHOLE = /^(contact( us| our| page)?|meet( our| the)? (team|staff|attorneys|doctors|agents|providers)|our (team|staff|company|agents|location|doctors|attorneys|providers)|about( us)?|home|welcome|services|our services|schedule|book (now|an appointment)|agents|roster|faq|blog|news|testimonials|reviews|gallery|portfolio|pricing|careers|jobs|login|sign in|register|location|small business (accounting|attorney)|real estate agents?|best (dentists?|doctors?|agents?|attorneys?)( near me)?( in .+)?|fee[- ]only (financial )?advisors?( .+)?)$/i;
+
+// Detect if a string looks like a page title or nav link rather than a real company name.
+// Catches the values that leak from scraper output when the site's <title> or nav menu
+// gets used as business_name.
+function looksLikePageTitle(str) {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  if (trimmed.length === 0) return true;
+  // Exact match against whole-string patterns
+  if (PAGE_TITLE_WHOLE.test(trimmed)) return true;
+  // Starts with page-title word followed by space/end
+  if (/^(contact|meet|our|about|welcome|schedule|book|agents?|roster)\b/i.test(trimmed)) {
+    // But allow "Our Lady of Grace" (real business name) — check for page-title markers
+    if (/\b(team|staff|company|services|location|attorneys|doctors|agents|providers|page)\b/i.test(trimmed)) return true;
+    if (trimmed.split(/\s+/).length <= 3) return true; // "Contact Us", "Meet Our Team"
+  }
+  // Sentence-like with punctuation (meta descriptions, CTAs).
+  // "?" or "!" anywhere, OR two period-terminated sentences in a row.
+  if (/[!?]/.test(trimmed)) return true;
+  if (/\.\s+[A-Za-z].*\.\s*$/.test(trimmed)) return true;
+  // "[City], [ST] BusinessType" — SerpAPI result-title template, never a real company name.
+  // e.g. "Panama City, FL Accounting Firm", "Baton Rouge, LA CPA Firm", "Raleigh, NC Dentist"
+  // The third token can be title-case (Accounting) or all-caps (CPA).
+  if (/^[A-Z][a-z]+(\s+[A-Z][a-z]+)*,\s*[A-Z]{2}\s+[A-Z]\w*/.test(trimmed)) return true;
+  // "[City] BusinessType" with no company proper noun — e.g. "Raleigh, NC Dentist"
+  if (/^[A-Z][a-z]+,\s*[A-Z]{2}\s+(Dentist|CPA|Attorney|Lawyer|Realtor|Chiropractor|Advisor|Accountant|Agent|Therapist|Doctor|Physician)\s*$/i.test(trimmed)) return true;
+  // All caps, longer than acronym
+  if (/^[A-Z\s&]+$/.test(trimmed) && trimmed.replace(/\s/g, '').length > 4) return true;
+  return false;
+}
+
+// Extract a reasonable company name from the email domain as a final fallback.
+// e.g., "watermarkdental.com" → "Watermark Dental"
+//       "wellsfargoadvisors.com" → "Wells Fargo Advisors"
+// Imperfect, but always produces something non-garbage for the AI prompt.
+function extractCompanyFromDomain(email) {
+  if (!email || !email.includes('@')) return '';
+  const domain = email.split('@')[1].toLowerCase();
+  // Strip common public domains — we can't derive a company name from gmail/yahoo/etc.
+  const publicDomains = new Set(['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com', 'icloud.com', 'me.com', 'mac.com', 'live.com', 'msn.com', 'comcast.net', 'verizon.net', 'att.net', 'cox.net', 'sbcglobal.net', 'cableone.net']);
+  if (publicDomains.has(domain)) return '';
+  // Strip TLD and www. prefix
+  const base = domain.replace(/^www\./, '').replace(/\.(com|net|org|io|co|us|biz|info)$/i, '');
+  // Split camelCase and hyphens into words, then capitalize each
+  const words = base
+    .replace(/-/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .split(/\s+/)
+    .filter(Boolean);
+  // Insert spaces between concatenated known words when possible
+  // (basic heuristic: split before known company suffixes like "law", "cpa", "dental", etc.)
+  const splits = /(law|cpa|dental|dentistry|chiropractic|realty|realestate|wealth|financial|advisors?|accounting|insurance|plumbing|electric|hvac|roofing|construction|landscaping|therapy|medical|health|group|associates|partners|consulting|properties|firm|office|clinic|center|centre|studio|shop|salon|spa|fitness)/gi;
+  const expanded = words.map(w => w.replace(splits, ' $1').trim().replace(/\s+/g, ' ')).join(' ').split(/\s+/).filter(Boolean);
+  return expanded.map(capitalize).join(' ');
+}
+
 /**
  * Clean page-title cruft from company names.
  * e.g., "Highland Dental Center: Dentist in Salt Lake City, UT" → "Highland Dental Center"
  *       "Smith Law Firm | Attorneys - Dallas, TX" → "Smith Law Firm"
  *       "About - Johnson Chiropractic..." → "Johnson Chiropractic"
+ *       "Contact Us" + email='x@watermarkdental.com' → "Watermark Dental"
+ *
+ * Second arg is optional — when provided, falls back to extracting a company
+ * name from the email domain if the cleaned name still looks like a page title.
  */
-function cleanCompanyName(rawName) {
-  if (!rawName || typeof rawName !== 'string') return '';
+function cleanCompanyName(rawName, fallbackEmail) {
+  if (!rawName || typeof rawName !== 'string') {
+    // No usable raw name — try domain fallback
+    return fallbackEmail ? extractCompanyFromDomain(fallbackEmail) : '';
+  }
 
   let name = rawName.trim();
 
@@ -141,6 +209,7 @@ function cleanCompanyName(rawName) {
     // Filter out segments that are page-title words or location patterns
     const meaningful = segments.filter(seg =>
       !PAGE_TITLE_WORDS.test(seg) &&
+      !PAGE_TITLE_WHOLE.test(seg) &&
       !/^(in\s+)?[A-Z][a-z]+(\s+[A-Z][a-z]+)*,\s*[A-Z]{2}$/.test(seg) &&
       !/^(in\s+)?[A-Z][a-z]+(\s+[A-Z][a-z]+)*,\s*[A-Z][a-z]+$/.test(seg)
     );
@@ -159,8 +228,15 @@ function cleanCompanyName(rawName) {
   // Remove trailing ellipsis again (in case it was after a delimiter)
   name = name.replace(/\.{2,}$/, '').trim();
 
-  // If result is too short, return the original trimmed
-  if (name.length < 2) return rawName.trim();
+  // If the result STILL looks like a page title, fall back to the email domain
+  // (or raw name if no email provided). This catches "Contact Us", "Meet Our Team",
+  // "Panama City, FL Accounting Firm" — strings that have no delimiter to split on
+  // but also aren't a real business name.
+  if (looksLikePageTitle(name) || name.length < 2) {
+    const fromDomain = fallbackEmail ? extractCompanyFromDomain(fallbackEmail) : '';
+    if (fromDomain && fromDomain.length >= 3) return fromDomain;
+    return rawName.trim(); // nothing better available
+  }
 
   return name;
 }
@@ -231,4 +307,4 @@ function isRoleBasedEmail(email) {
   return ROLE_BASED_PREFIX.test(email);
 }
 
-module.exports = { extractFirstNameFromEmail, cleanCompanyName, getFirstName, isRoleBasedEmail };
+module.exports = { extractFirstNameFromEmail, cleanCompanyName, getFirstName, isRoleBasedEmail, looksLikePageTitle, extractCompanyFromDomain };

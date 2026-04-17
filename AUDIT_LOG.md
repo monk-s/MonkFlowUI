@@ -2,6 +2,57 @@
 
 ---
 
+## Session: 2026-04-17 (part 2)
+
+### Audit Findings (live production state)
+- [HIGH] 99 legacy active leads had `contact_name` = page-title text ("Contact Us" ×13, "Meet Our Team" ×6, "Our Team" ×3, "Agents", "About", "FAQ", etc.) — scheduled to receive follow-ups with broken greetings & bodies — **CLOSED via DB cleanup**
+- [HIGH] 16 legacy active leads had `contact_name` = city names ("Baton Rouge" ×5, etc.) or generic nouns — **CLOSED via DB cleanup**
+- [HIGH] `cleanCompanyName()` returned page titles unchanged when input had no delimiter (e.g. "Meet Our Team" in, "Meet Our Team" out) — AI prompts then built subject lines like "Intake at Meet Our Team?" — **FIXED**
+- [HIGH] No ingestion guard for page-title-only business names — AI wasted Claude tokens writing to leads that would never make sense — **FIXED with `skipped_bad_company` gate**
+- [MEDIUM] Bounce rate 5.27% over 14 days (26/493), above Gmail's 2% safe threshold — partially addressed by closing role-based + page-title leads
+
+### Fixes Shipped This Session
+- **`nameParser.js`**: Added `looksLikePageTitle()` + `extractCompanyFromDomain()` helpers. `cleanCompanyName(raw, email)` now accepts optional email and falls back to domain-derived company name ("Meet Our Team" + `watermarkdental.com` → "Watermark Dental"). Detects city/state templates like "Panama City, FL Accounting Firm", all-caps strings, meta-description sentences.
+- **`leadgen.service.js`**: All 8 `cleanCompanyName(lead.business_name)` callsites now pass `lead.email` for domain fallback. Added second ingestion gate — leads with page-title-only business names are marked `skipped_bad_company` before Claude is called.
+- **`outreach.controller.js`** + **`outreach.scheduler.js`** + **`outreach-ai.service.js`**: Same domain-fallback plumbed through follow-up template generation.
+- **`scripts/cleanup-bad-leads.sql`** + **`scripts/cleanup-bad-leads.js`**: One-shot cleanup scripts for the original Phase 1 SQL from the zero-reply plan. Ran against production — closed 1 new garbage-name lead (prior sessions had cleaned most).
+- **DB cleanup**: Closed 115 legacy bad-contact-name active leads (335 → 220 active). 0 null-subject emails, 0 active role-based, 0 active null-subject remaining.
+
+### Verification (post-fix)
+```
+raw="Panama City, FL Accounting Firm" + cpagroup.com  →  "Cpa Group"
+raw="Contact Us" + allbusinesscpa.com                  →  "Allbusiness Cpa"
+raw="Meet Our Team" + watermarkdental.com              →  "Watermark Dental"
+raw="Baton Rouge, LA CPA Firm" + bossermanlaw.com      →  "Bosserman Law"
+raw="Raleigh Dental Associates" + raleighdental.com    →  "Raleigh Dental Associates" (unchanged)
+raw="Our Lady of Grace Dental"                         →  "Our Lady of Grace Dental" (unchanged)
+```
+All 5 modified files pass syntax check. 1-arg regression tests pass.
+
+### Live Pipeline State (as of this session end)
+- Schedulers: all 4 healthy (leadgen/outreach/linkedin/usage) — last run success
+- Today's leadgen: 30 emails generated, 0 errors
+- Active leads: 220 (down from 335)
+- Variant mix last 30d: B=566 (legacy), 1/2/3=10 each (new framework live), C/D/E/F=153 (legacy)
+- 411/754 opens in 14 days = **54.5% open rate** — tracking pixel fix is working
+- Still 0 replies / 0 clicks — content framework just launched, needs a few more days of sends before verdict
+
+### Next Session Priority
+1. Check reply rate after 5-7 more business days of new-framework sends
+2. If still zero, look at subject lines specifically — check open rates per variant (1/2/3)
+3. Audit recent generated bodies for quality (are Framework 2 teardowns shipping with 2-3 bullets? Is Framework 3 peer-reference being specific enough?)
+4. Consider re-generating `original_email_body` for active-but-not-yet-followed-up leads using new prompt (if there are any with the old Framework A/B content)
+5. Monitor bounce rate — should drop as more role-based + page-title leads age out of the active pool
+
+### Metrics
+- Files modified: 5
+- Bugs fixed: 4 (2 HIGH code + 2 HIGH data)
+- Scripts added: 2
+- Legacy DB rows closed: 115 + 1
+- Commits: pending
+
+---
+
 ## Session: 2026-04-17
 
 ### Audit Findings
