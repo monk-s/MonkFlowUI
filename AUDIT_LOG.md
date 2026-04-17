@@ -2,6 +2,54 @@
 
 ---
 
+## Session: 2026-04-17
+
+### Audit Findings
+- [HIGH] A/B dashboard blind to all new variant data — query filtered only A-F, excluded 1/2/3 — FIXED in commit d25628b
+- [HIGH] 3 files used legacy 'B' as variant fallback instead of '1' (scheduler, outreach-ai, controller) — FIXED in commit d25628b
+- [HIGH] UUID/INT type mismatch in skipped_no_name UPDATE ($1::int[] on UUID column) — silently failing every cron run, wasting API tokens — FIXED in commit d25628b
+- [SECURITY] Open redirect on /track/click — no domain validation, could redirect to any URL — FIXED in commit d98bf13
+- [MEDIUM] outreach-ai.service.js first-touch prompt still used retired A/B framework system — FIXED in commit d98bf13
+- [MEDIUM] generateForAllPriority + generateForLead didn't pass variant, polluting A/B data with 'unknown' — FIXED in commit d98bf13
+- [MEDIUM] Temperature inconsistency: outreach-ai 0.7 vs leadgen 0.6 — synced to 0.6 in commit d98bf13
+- [MEDIUM] Controller's follow-up templates diverged from scheduler's rewritten versions — FIXED in commit d25628b
+- [MEDIUM] Touch 3 broke email thread with new subject line (signals automated sequence) — FIXED in commit d25628b
+- [MEDIUM] Follow-up spacing too aggressive (3,4,5 biz days → now 3,5,7) — FIXED in commit d98bf13
+- [LOW] Touch 4 "rest of the quarter" dated the email — changed to "Wishing you well" in commit d98bf13
+- [LOW] Watchdog comment said "30-min" but code was 45-min — FIXED in commit d98bf13
+- [LOW] Stale comments said "4-way C/D/E/F 25% split" but code is 3-way 1/2/3 — FIXED in commit d25628b
+
+### Content Strategy Overhaul (from prior session, deployed in commit 9f1614e)
+- Replaced 4-framework C/D/E/F prompt with 3 new frameworks: Specific Observation (40%), Free Teardown (40%), Peer Reference (20%)
+- Temperature 0.8 → 0.6, word limit 90 → 130
+- All emails now include booking URL as P.S. (was 25%)
+- CTAs rewritten as conversational questions (not yes/no commands)
+- Subject lines: sentence case + curiosity-driven
+- Follow-up sequence redesigned: Touch 2 = value drop (no ask), Touch 3 = social proof, Touch 4 = breakup
+- Data cleanup: 392 bad leads closed (172 role-based + 5 garbage names + 215 NULL subjects)
+- Bridge INSERT changed from ON CONFLICT DO NOTHING → upsert (fixes NULL subjects)
+- trackOpen fixed for follow-up emails via unsubscribe_token matching
+
+### Improvements Made
+- Security: Closed open redirect vulnerability, added Resend webhook rawBody preservation (d98bf13)
+- A/B testing: Dashboard now shows all variant data (historical + current) (d25628b)
+- Consistency: Unified all code paths to same framework system, templates, temperature (d98bf13)
+- Timing: Follow-up sequence widened from 12 to 17 business days — more professional cadence (d98bf13)
+
+### Next Session Priority
+1. Monitor reply rates over next 7 days with new framework system — if still 0, deliverability is the bottleneck
+2. Check Resend dashboard for delivery rate / spam complaint rate
+3. Check Google Postmaster Tools for getmonkflow.com domain reputation
+4. Consider removing tracking pixel + HTML wrapper for pure plaintext (deliverability improvement)
+5. Add RESEND_WEBHOOK_SECRET env var to Railway if not already set
+
+### Metrics
+- Files modified: 8
+- Bugs fixed: 13 (3 HIGH, 1 SECURITY, 6 MEDIUM, 3 LOW)
+- Commits: 3 (9f1614e, d25628b, d98bf13)
+
+---
+
 ## Session: 2026-04-09
 
 ### Audit Findings
