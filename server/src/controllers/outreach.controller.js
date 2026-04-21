@@ -491,38 +491,89 @@ const sendAiEmailEndpoint = catchAsync(async (req, res) => {
 // 1x1 transparent GIF pixel
 const TRACKING_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
 
+// Dual-layer bot detection: user-agent match + latency threshold.
+// UA match catches declared scanners (Barracuda, Mimecast, Proofpoint, etc.).
+// Latency catches stealth scanners (Microsoft ATP, Google link-check) that
+// pre-fetch with a generic Chrome UA — those fire within seconds of send, no
+// human opens an email that fast.
+const SCANNER_UA_RE = /barracuda|mimecast|proofpoint|symantec|forefront|microsoft office|outlook-scan|google-safety|postfix|mailscanner|spamassassin|clamav|amavis|rspamd|messagelabs|prefetch|linkpreview|ggpht|gooletracking|safelinks/i;
+const BOT_LATENCY_SECS = 60; // opens within 60s of send are classified as bots
+
 const trackOpen = catchAsync(async (req, res) => {
   const { emailId } = req.params;
   if (emailId) {
-    // Filter out spam scanner opens — they fire within seconds of delivery
-    // and produce fake open data that makes diagnostics impossible.
-    const ua = (req.headers['user-agent'] || '').toLowerCase();
-    const isScanner = !ua
-      || ua.length < 20
-      || /barracuda|mimecast|proofpoint|symantec|forefront|microsoft office|outlook-scan|google-safety|postfix|mailscanner|spamassassin|clamav|amavis|rspamd|messagelabs/.test(ua);
+    const ua = String(req.headers['user-agent'] || '').slice(0, 500);
+    const ip = String(
+      req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+      req.ip ||
+      req.connection?.remoteAddress ||
+      ''
+    ).slice(0, 64);
+    const uaLower = ua.toLowerCase();
+    const uaLooksBot = !ua || ua.length < 20 || SCANNER_UA_RE.test(uaLower);
 
-    if (!isScanner) {
-      // Only record opens from likely-human clients
-      await query(
-        `UPDATE outreach_leads SET opened_at = COALESCE(opened_at, NOW()), updated_at = NOW()
-         WHERE id = (SELECT lead_id FROM outreach_emails WHERE gmail_message_id = $1 OR id::text = $1 LIMIT 1)
-            OR unsubscribe_token::text = $1`,
-        [emailId]
-      ).catch(() => {});
+    // Resolve the email row + compute latency from sent_at in a single query.
+    // Match by gmail_message_id, outreach_emails.id, OR the lead's
+    // unsubscribe_token (follow-up pixels carry only the token).
+    const emailRow = (await query(
+      `SELECT oe.id, oe.lead_id, oe.sent_at,
+              EXTRACT(EPOCH FROM (NOW() - oe.sent_at))::int AS latency_s
+       FROM outreach_emails oe
+       WHERE oe.gmail_message_id = $1 OR oe.id::text = $1
+          OR (oe.lead_id = (SELECT id FROM outreach_leads WHERE unsubscribe_token::text = $1 LIMIT 1)
+              AND oe.human_opened_at IS NULL)
+       ORDER BY oe.sent_at DESC
+       LIMIT 1`,
+      [emailId]
+    ).catch(() => ({ rows: [] }))).rows[0];
 
-      // Match by gmail_message_id/id directly, OR fall back to the lead's
-      // unsubscribe_token (follow-up pixels only carry the token, not the
-      // per-email ID, so without this branch follow-ups show 0 opens).
-      await query(
-        `UPDATE outreach_emails SET opened_at = COALESCE(opened_at, NOW())
-         WHERE gmail_message_id = $1 OR id::text = $1
-            OR (lead_id = (SELECT id FROM outreach_leads WHERE unsubscribe_token::text = $1 LIMIT 1)
-                AND opened_at IS NULL)`,
-        [emailId]
-      ).catch(() => {});
+    if (emailRow) {
+      const latencyTooFast = typeof emailRow.latency_s === 'number' && emailRow.latency_s < BOT_LATENCY_SECS;
+      const isBot = uaLooksBot || latencyTooFast;
+
+      if (isBot) {
+        // Record bot activity — useful for later audit — but do NOT mark human-open
+        await query(
+          `UPDATE outreach_emails
+           SET bot_opened_at = COALESCE(bot_opened_at, NOW()),
+               open_count = open_count + 1,
+               first_open_ua = COALESCE(first_open_ua, $2),
+               first_open_ip = COALESCE(first_open_ip, $3),
+               first_open_latency_s = COALESCE(first_open_latency_s, $4)
+           WHERE id = $1`,
+          [emailRow.id, ua, ip, emailRow.latency_s]
+        ).catch(() => {});
+
+        await query(
+          `UPDATE outreach_leads SET bot_opened_at = COALESCE(bot_opened_at, NOW()) WHERE id = $1`,
+          [emailRow.lead_id]
+        ).catch(() => {});
+      } else {
+        // Human open — populate both legacy opened_at (for back-compat) and human_opened_at
+        await query(
+          `UPDATE outreach_emails
+           SET opened_at = COALESCE(opened_at, NOW()),
+               human_opened_at = COALESCE(human_opened_at, NOW()),
+               open_count = open_count + 1,
+               first_open_ua = COALESCE(first_open_ua, $2),
+               first_open_ip = COALESCE(first_open_ip, $3),
+               first_open_latency_s = COALESCE(first_open_latency_s, $4)
+           WHERE id = $1`,
+          [emailRow.id, ua, ip, emailRow.latency_s]
+        ).catch(() => {});
+
+        await query(
+          `UPDATE outreach_leads
+           SET opened_at = COALESCE(opened_at, NOW()),
+               human_opened_at = COALESCE(human_opened_at, NOW()),
+               updated_at = NOW()
+           WHERE id = $1`,
+          [emailRow.lead_id]
+        ).catch(() => {});
+      }
     }
   }
-  // Always serve the pixel regardless of scanner detection
+  // Always serve the pixel regardless of classification
   res.set({ 'Content-Type': 'image/gif', 'Cache-Control': 'no-cache, no-store', 'Expires': '0' });
   res.send(TRACKING_PIXEL);
 });
@@ -595,7 +646,8 @@ const getAnalytics = catchAsync(async (req, res) => {
   const { rows: [leadStats] } = await query(
     `SELECT
        COUNT(*) AS total_leads,
-       COUNT(*) FILTER (WHERE opened_at IS NOT NULL AND opened_at >= $1) AS opens_recorded,
+       COUNT(*) FILTER (WHERE human_opened_at IS NOT NULL AND human_opened_at >= $1) AS opens_recorded,
+       COUNT(*) FILTER (WHERE bot_opened_at IS NOT NULL AND bot_opened_at >= $1) AS bot_opens_filtered,
        COUNT(*) FILTER (WHERE (replied_at IS NOT NULL AND replied_at >= $1) OR (status = 'replied' AND updated_at >= $1)) AS replies_received,
        COUNT(*) FILTER (WHERE status = 'replied' AND updated_at >= $1) AS positive_replies,
        COUNT(*) FILTER (WHERE status = 'unsubscribed' AND updated_at >= $1) AS unsubscribed,
@@ -608,7 +660,8 @@ const getAnalytics = catchAsync(async (req, res) => {
     total_leads: leadStats.total_leads,
     emails_sent: emailCount.emails_sent,
     leads_touched: emailCount.leads_touched,
-    opens_recorded: leadStats.opens_recorded,
+    opens_recorded: leadStats.opens_recorded,          // HUMAN opens only
+    bot_opens_filtered: leadStats.bot_opens_filtered,  // transparency: how many bots we excluded
     replies_received: leadStats.replies_received,
     positive_replies: leadStats.positive_replies,
     unsubscribed: leadStats.unsubscribed,
@@ -659,11 +712,14 @@ const getAnalytics = catchAsync(async (req, res) => {
     [since]
   );
 
-  // By touch number
+  // By touch number (human_opened_at for real open rate, bot_opened_at for transparency)
   const { rows: byTouch } = await query(
     `SELECT
        touch_number,
        COUNT(*) AS sent,
+       COUNT(*) FILTER (WHERE human_opened_at IS NOT NULL) AS real_opens,
+       COUNT(*) FILTER (WHERE bot_opened_at IS NOT NULL) AS bot_opens,
+       ROUND(COUNT(*) FILTER (WHERE human_opened_at IS NOT NULL)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS real_open_rate,
        COUNT(*) FILTER (WHERE reply_received_at IS NOT NULL) AS replied,
        ROUND(COUNT(*) FILTER (WHERE reply_received_at IS NOT NULL)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS reply_rate
      FROM outreach_emails
@@ -730,6 +786,9 @@ const getAbResults = catchAsync(async (req, res) => {
     SELECT
       ol.email_variant AS variant,
       COUNT(*) AS sent,
+      COUNT(*) FILTER (WHERE ol.human_opened_at IS NOT NULL) AS real_opens,
+      COUNT(*) FILTER (WHERE ol.bot_opened_at IS NOT NULL) AS bot_opens,
+      ROUND(COUNT(*) FILTER (WHERE ol.human_opened_at IS NOT NULL)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS real_open_rate,
       COUNT(*) FILTER (WHERE ol.replied_at IS NOT NULL OR ol.status = 'replied') AS replied,
       COUNT(*) FILTER (WHERE ol.reply_sentiment = 'positive') AS positive,
       COUNT(*) FILTER (WHERE ol.status = 'unsubscribed') AS unsubscribed,
@@ -874,19 +933,47 @@ const handleResendWebhook = catchAsync(async (req, res) => {
   }
 
   // Handle open tracking (backup — pixel tracking is primary)
+  // Apply same latency-based bot detection: Resend "opens" from within 60s
+  // of send are ESP pre-fetches (very common with Gmail image proxy).
   if (type === 'email.opened') {
     const emailId = data?.email_id;
     if (emailId) {
-      await query(
-        `UPDATE outreach_emails SET opened_at = COALESCE(opened_at, NOW())
-         WHERE gmail_message_id = $1`,
+      const emailRow = (await query(
+        `SELECT id, lead_id, sent_at,
+                EXTRACT(EPOCH FROM (NOW() - sent_at))::int AS latency_s
+         FROM outreach_emails WHERE gmail_message_id = $1 LIMIT 1`,
         [emailId]
-      ).catch(() => {});
-      await query(
-        `UPDATE outreach_leads SET opened_at = COALESCE(opened_at, NOW()), updated_at = NOW()
-         WHERE id = (SELECT lead_id FROM outreach_emails WHERE gmail_message_id = $1 LIMIT 1)`,
-        [emailId]
-      ).catch(() => {});
+      ).catch(() => ({ rows: [] }))).rows[0];
+
+      if (emailRow) {
+        const latencyTooFast = typeof emailRow.latency_s === 'number' && emailRow.latency_s < 60;
+        if (latencyTooFast) {
+          await query(
+            `UPDATE outreach_emails SET bot_opened_at = COALESCE(bot_opened_at, NOW()) WHERE id = $1`,
+            [emailRow.id]
+          ).catch(() => {});
+          await query(
+            `UPDATE outreach_leads SET bot_opened_at = COALESCE(bot_opened_at, NOW()) WHERE id = $1`,
+            [emailRow.lead_id]
+          ).catch(() => {});
+        } else {
+          await query(
+            `UPDATE outreach_emails
+             SET opened_at = COALESCE(opened_at, NOW()),
+                 human_opened_at = COALESCE(human_opened_at, NOW())
+             WHERE id = $1`,
+            [emailRow.id]
+          ).catch(() => {});
+          await query(
+            `UPDATE outreach_leads
+             SET opened_at = COALESCE(opened_at, NOW()),
+                 human_opened_at = COALESCE(human_opened_at, NOW()),
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [emailRow.lead_id]
+          ).catch(() => {});
+        }
+      }
     }
   }
 

@@ -7333,8 +7333,8 @@ function renderOutreachAnalyticsPage() {
       </div>
     </div>`;
 
-  // ── A/B Variant Breakdown — reply rate is the only real metric ──
-  const ACTIVE_VARIANTS = ['C', 'D', 'E', 'F'];
+  // ── A/B Variant Breakdown — real open rate (bots filtered) + reply rate ──
+  const ACTIVE_VARIANTS = ['1', '2', '3'];
   const sortedAb = [...abResults].sort((a, b) => {
     const aActive = ACTIVE_VARIANTS.includes(a.variant) ? 0 : 1;
     const bActive = ACTIVE_VARIANTS.includes(b.variant) ? 0 : 1;
@@ -7359,6 +7359,9 @@ function renderOutreachAnalyticsPage() {
     const positive = parseInt(row.positive) || 0;
     const unsubs = parseInt(row.unsubscribed) || 0;
     const unsubRate = parseFloat(row.unsub_rate) || 0;
+    const realOpens = parseInt(row.real_opens) || 0;
+    const botOpens = parseInt(row.bot_opens) || 0;
+    const realOpenRate = parseFloat(row.real_open_rate) || 0;
     const opacity = isActive ? 1 : 0.45;
     const borderColor = isWinner ? '#00cc6a' : 'var(--border)';
     const bgTint = isWinner ? 'linear-gradient(135deg, rgba(0,204,106,0.06), transparent)' : 'transparent';
@@ -7370,12 +7373,17 @@ function renderOutreachAnalyticsPage() {
           <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${label}</div>
           <div style="font-size:11px;color:var(--text-tertiary);">${sent} sent</div>
         </div>
-        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:8px;">
+        <div style="display:flex;align-items:baseline;gap:20px;margin-bottom:8px;">
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:2px;">Real Open Rate</div>
+            <div style="font-size:20px;font-weight:700;color:${realOpenRate > 15 ? '#00cc6a' : realOpenRate > 5 ? '#f59e0b' : 'var(--text-primary)'};">${realOpenRate}%</div>
+            <div style="font-size:10px;color:var(--text-tertiary);">${realOpens} human${botOpens > 0 ? ` &middot; ${botOpens} bot filtered` : ''}</div>
+          </div>
           <div>
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:2px;">Reply Rate</div>
-            <div style="font-size:24px;font-weight:700;color:${replyRate > 0 ? '#00cc6a' : 'var(--text-primary)'};">${replyRate}%</div>
+            <div style="font-size:20px;font-weight:700;color:${replyRate > 0 ? '#00cc6a' : 'var(--text-primary)'};">${replyRate}%</div>
+            <div style="font-size:10px;color:var(--text-tertiary);">${replied} repl${replied === 1 ? 'y' : 'ies'}${positive > 0 ? ` (${positive}+)` : ''}</div>
           </div>
-          <div style="font-size:12px;color:var(--text-tertiary);">${replied} replies${positive > 0 ? ` (${positive} positive)` : ''}</div>
         </div>
         <div style="height:4px;background:var(--bg-primary);border-radius:2px;overflow:hidden;margin-bottom:6px;">
           <div style="height:100%;width:${Math.min(replyRate * 10, 100)}%;background:#00cc6a;"></div>
@@ -7462,23 +7470,30 @@ function renderOutreachAnalyticsPage() {
       </table>
     </div>` : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No industry data available.</div>';
 
-  // ── By touch conversion ──
+  // ── By touch conversion (real open rate + reply rate) ──
   const touchLabels = { 0: 'Touch 0 (AI Initial)', 1: 'Touch 1 (Initial)', 2: 'Touch 2 (Bump)', 3: 'Touch 3 (Value-add)', 4: 'Touch 4 (Breakup)' };
   const touchHtml = byTouch.length > 0 ? byTouch.map(t => {
-    const rate = parseFloat(t.reply_rate) || 0;
+    const replyRate = parseFloat(t.reply_rate) || 0;
+    const openRate = parseFloat(t.real_open_rate) || 0;
     const sent = parseInt(t.sent) || 0;
     const replied = parseInt(t.replied) || 0;
+    const realOpens = parseInt(t.real_opens) || 0;
+    const botOpens = parseInt(t.bot_opens) || 0;
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);">
         <div>
           <div style="font-size:13px;font-weight:500;color:var(--text-primary);">${touchLabels[t.touch_number] || 'Touch ' + t.touch_number}</div>
-          <div style="font-size:11px;color:var(--text-tertiary);">${sent} sent / ${replied} replied</div>
+          <div style="font-size:11px;color:var(--text-tertiary);">${sent} sent &middot; ${realOpens} human open${realOpens === 1 ? '' : 's'}${botOpens > 0 ? ` (${botOpens} bot)` : ''} &middot; ${replied} replied</div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="width:80px;height:6px;background:var(--bg-primary);border-radius:3px;overflow:hidden;">
-            <div style="height:100%;width:${Math.min(rate * 5, 100)}%;background:#00cc6a;border-radius:3px;"></div>
+        <div style="display:flex;align-items:center;gap:18px;">
+          <div style="text-align:right;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Real Open</div>
+            <div style="font-size:14px;font-weight:600;color:${openRate > 15 ? '#00cc6a' : openRate > 5 ? '#f59e0b' : 'var(--text-secondary)'};">${openRate}%</div>
           </div>
-          <span style="font-size:14px;font-weight:600;color:${rate > 3 ? '#00cc6a' : 'var(--text-secondary)'};">${rate}%</span>
+          <div style="text-align:right;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Reply</div>
+            <div style="font-size:14px;font-weight:600;color:${replyRate > 3 ? '#00cc6a' : 'var(--text-secondary)'};">${replyRate}%</div>
+          </div>
         </div>
       </div>`;
   }).join('') : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No touch data available.</div>';
