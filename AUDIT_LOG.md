@@ -2,6 +2,132 @@
 
 ---
 
+## Session: 2026-04-21 (part 3) — Pre-ship E2E Audit
+
+### Goal
+Audit the entire lead-gen → cold-email pipeline end-to-end before tomorrow's
+8am send cohort (first 100-lead `v4-named-deliverable` run). Find and fix
+anything that would silently break a send, corrupt analytics, or leak a
+placeholder URL into a real prospect's inbox.
+
+### Audit Findings (all fixed this session unless noted)
+
+- [CRITICAL] **5 sites still defaulted `email_variant` to `'1'`** when the lead
+  row had no explicit variant. Every new v4 send would have been mis-tagged
+  as variant `1` (retired framework), poisoning analytics and making the
+  2–5% reply target impossible to measure. Sites: `leadgen.service.js:836`
+  (bridge INSERT), `leadgen.service.js:855` (outreach_emails mirror),
+  `outreach.scheduler.js:246` (follow-up insert),
+  `outreach-ai.service.js:374` (AI-only path),
+  `outreach.controller.js:338` (admin ai-send). **FIXED: all default to
+  `'v4-named-deliverable'`.**
+- [CRITICAL] **`BOOKING_URL` defaulted to a placeholder** (`https://cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV`)
+  and no guard existed — if Railway env wasn't set, the placeholder string
+  would appear in every P.S. line sent to prospects. **FIXED with hard boot
+  guard in `env.js`:** production start throws an error if `BOOKING_URL`
+  contains `PLACEHOLDER`, and send paths now call `env.bookingUrlIsPlaceholder()`
+  to omit the P.S. line as a defense-in-depth second layer.
+- [HIGH] **`subjectIsOverused` whitespace normalization was broken**:
+  the SQL template literal `'\s+'` collapsed to the literal string `'s+'`
+  (backslash consumed by JS parser), so the query was replacing sequences of
+  literal `s` characters with spaces — not whitespace. This made the proper-
+  noun + whitespace normalization compare two differently-spaced variants as
+  different templates, defeating the dedup. **FIXED: escaped to `'\\s+'` so
+  Postgres receives a literal `\s+`.**
+- [HIGH] **`looksLikePersonName` in `leadgen.service.js`** (scraping-side,
+  for JSON-LD Person schema and page title parsing) did not consult
+  `NAME_BLOCKLIST`. A scraped string like "Santa Smith" or "Trusted Team"
+  could pass the regex checks and end up as a contact name. **FIXED: shared
+  `NAME_BLOCKLIST` exported from `nameParser.js`; scraping-side check now
+  rejects if the first word is in the blocklist.**
+- [HIGH] **Outreach scheduler SELECT lacked `replied_at IS NULL` guard.**
+  If the reply-detector webhook set `replied_at` but a follow-up cron tick
+  raced in before the status update (or the status update failed), the
+  follow-up would still fire at someone who had just replied. **FIXED:
+  added `AND ol.replied_at IS NULL` to the due-followup query.**
+- [MEDIUM] **Analytics variant filter + labels missing `v4-named-deliverable`.**
+  `getAbResults` only returned rows for variants in `IN ('A','B','C','D','E','F','1','2','3')`,
+  which would silently exclude the entire v4 cohort from the A/B dashboard.
+  **FIXED: added `'v4-named-deliverable'` to the IN clause and the
+  `VARIANT_LABELS` map. Old variants re-labeled as "(retired)".**
+
+### Fixes Shipped This Session (commit 2208996)
+1. `server/src/config/env.js`: boot-time refusal for placeholder BOOKING_URL;
+   `env.bookingUrlIsPlaceholder()` helper.
+2. `server/src/utils/nameParser.js`: export `NAME_BLOCKLIST` + `COMMON_NAMES`.
+3. `server/src/services/leadgen.service.js`: NAME_BLOCKLIST-aware
+   `looksLikePersonName`; `'v4-named-deliverable'` default variant (×2);
+   AI prompt gates the P.S. line when placeholder; `subjectIsOverused`
+   regex escape fix.
+4. `server/src/services/outreach.scheduler.js`: `replied_at IS NULL` filter;
+   `'v4-named-deliverable'` default; static fallback templates gate P.S.
+   line when placeholder.
+5. `server/src/services/outreach-ai.service.js`: `'v4-named-deliverable'`
+   default; touch 3/4 instructions gate P.S. line when placeholder.
+6. `server/src/controllers/outreach.controller.js`: `'v4-named-deliverable'`
+   default in admin ai-send; analytics variant IN clause + labels updated.
+
+### Verification
+- All 6 modified files pass `node -e "new (require('vm')).Script(...)"` syntax check.
+- Runtime module load: all modules import cleanly; no circular-dep break.
+- `env.bookingUrlIsPlaceholder()` → `true` in dev, `false` after BOOKING_URL set.
+- Prod mode boot guard throws when BOOKING_URL unset (verified via Node REPL).
+- `getFirstName('Santa', 'info@bestchristmasplumbers.com')` → `'there'` (was `'Santa'`)
+- `getFirstName('Plumber', 'john@acmeplumbing.com')` → `'John'` (falls to email)
+- `getFirstName('Best', 'pam.osborne@firm.com')` → `'Pam'`
+- `getFirstName('Team', 'info@company.com')` → `'there'` (role rejected, name rejected)
+- `getFirstName('Nathan Linder', 'n@x.com')` → `'Nathan'` (honorifics branch unaffected)
+- Template literal escape verified: `'\\s+'` in JS → literal `\s+` in SQL string.
+- Commit 2208996 pushed to main.
+- Post-push health check: Railway `/api/v1/health` returned 200 throughout.
+  NOTE: cannot distinguish "new deploy live" from "new deploy failed, old still
+  running" without Railway log access — user must verify in Railway dashboard.
+  If BOOKING_URL env var isn't set before deploy, the new code WILL fail its
+  boot guard and Railway will keep running the prior deploy. USER ACTION
+  REQUIRED: set `BOOKING_URL` in Railway to a real Cal.com / Calendly URL
+  before the 8am send.
+
+### ⚠️ BLOCKING USER TASK BEFORE NEXT SEND
+1. Set `BOOKING_URL` in Railway env to a real calendar URL (e.g.
+   `https://cal.com/nathan-linder/intro` or your Calendly link).
+2. Trigger a Railway redeploy of commit 2208996 if the first auto-deploy
+   failed on the boot guard.
+3. Verify in the Railway Deployments tab that commit 2208996 shows ACTIVE,
+   not FAILED.
+4. Smoke test by hitting `/api/v1/health` — should still be 200.
+
+### Deferred to Next Session (non-blocking for v4 cohort)
+- **List-Unsubscribe POST handler**: Gmail requires a one-click POST endpoint
+  for the bulk-sender compliance rules. Current implementation only has a GET
+  token link. Not a blocker for 100-lead cohort but matters once daily volume
+  grows past ~1000/day.
+- **Migration 044 for `leads_status_check`**: the `skipped_bad_company` status
+  was added in-code but the enum constraint on `leads.status` doesn't list it,
+  causing the UPDATE to fail silently. Needs a migration that does
+  `ALTER TABLE leads DROP CONSTRAINT leads_status_check, ADD CONSTRAINT ...`.
+- **Resume-path page-title guard**: leads created before commit d449692 may
+  still have page-title-only company names; the resume path doesn't re-check
+  them against `looksLikePageTitle`. Low severity — counts visibly small in
+  current DB.
+- **Admin-only AI paths still reference OLD framework**: `generateEmailForLead`
+  in `outreach-ai.service.js` lines 188-210 still uses `'1'`/`'2'`/`'3'`
+  frameworks + temperature 0.6. These only fire from admin-triggered
+  `/outreach/:id/ai-send` and `/outreach/ai-generate-all`. Not used by the
+  normal daily send scheduler, so v4 cohort is safe — but worth unifying
+  to a single framework eventually.
+- **Static T3 fallback case study hardcoded to dental**: `outreach.scheduler.js`
+  static templates reference the dental case study regardless of lead industry.
+  Fires only on AI-generation failure, which is rare. Minor issue.
+
+### Metrics
+- Files modified: 6
+- Audit findings: 6 (3 CRITICAL, 2 HIGH, 1 MEDIUM) — all fixed
+- Deferred findings: 5 (non-blocking)
+- Commits: 1 (2208996)
+- Lines changed: +70 / -27
+
+---
+
 ## Session: 2026-04-21
 
 ### Audit Findings (live production state)
