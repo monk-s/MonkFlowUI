@@ -45,6 +45,32 @@ const COMMON_NAMES = new Set([
   'warren','wayne','wendy','wesley','whitney','william','willie','zachary','zach',
 ]);
 
+// Single-word strings that LOOK like names (capitalized, in COMMON_NAMES or
+// pass other checks) but are actually industry/marketing/company words scraped
+// from page titles, company names, or meta descriptions. Production data shows
+// leads addressed as "Hey Santa", "Hey Plumber", "Hey Best" because these
+// single capitalized words slipped through getFirstName's single-word branch.
+const NAME_BLOCKLIST = new Set([
+  // Marketing/descriptor words
+  'santa','best','top','trusted','local','premier','elite','quality','professional',
+  'affordable','expert','licensed','certified','family','welcome','home','office',
+  'schedule','book','booking','about','contact','services','service','team','staff',
+  'admin','support','help','sales','billing','marketing','general','main','meet',
+  'our','providers','doctors','attorneys','agents','faq','blog','news','gallery',
+  'pricing','careers','jobs','login','signup','register','reviews','testimonials',
+  // Industry/occupation words (same as BUSINESS_KEYWORDS but lowercased for O(1) lookup)
+  'plumber','plumbing','electric','electrician','hvac','roofing','construction',
+  'landscaping','painting','cleaning','auto','dental','dent','chiro','chiropractic',
+  'chiropractor','realty','group','associates','partners','practice','clinic',
+  'center','centre','agency','firm','studio','shop','salon','spa','insurance',
+  'financial','consulting','solutions','properties','management','advisors',
+  'veterinary','vet','orthodont','pediatric','medical','health','wellness','fitness',
+  'yoga','crossfit','barber','beauty','legal','law','accounting','tax',
+  // Generic words that showed up in production
+  'attention','required','allow','discover','opportunities','explore','click',
+  'learn','submit','request','start','join','free','limited','exclusive',
+]);
+
 // Role-based email prefixes that aren't real names
 const ROLE_PREFIXES = new Set([
   'info','admin','support','office','team','hello','contact','reception','receptionist',
@@ -276,14 +302,24 @@ function getFirstName(contactName, contactEmail) {
       nameWords[0].length >= 2 &&
       // Reject page titles / CTA phrases / meta descriptions
       !(/[!?]/.test(trimmed)) &&
-      !(/\b(allow|discover|attention|required|click|opportunities|explore|submit|request|exclusive)\b/i.test(trimmed));
+      !(/\b(allow|discover|attention|required|click|opportunities|explore|submit|request|exclusive)\b/i.test(trimmed)) &&
+      // Blocklist common industry/marketing words that look like names
+      !NAME_BLOCKLIST.has(nameWords[0].toLowerCase());
 
     if (isRealName) {
       return nameWords[0];
     }
 
-    // Single-word name — only if it's in our common names dictionary
-    if (words.length === 1 && COMMON_NAMES.has(words[0].toLowerCase()) && !PAGE_TITLE_WORDS.test(words[0])) {
+    // Single-word name — only if it's in our common names dictionary AND not blocklisted.
+    // Blocklist prevents "Santa", "Plumber", "Best" from passing even though they match COMMON_NAMES
+    // or look name-like. Length >= 3 also rejects two-letter initials.
+    if (
+      words.length === 1 &&
+      words[0].length >= 3 &&
+      COMMON_NAMES.has(words[0].toLowerCase()) &&
+      !NAME_BLOCKLIST.has(words[0].toLowerCase()) &&
+      !PAGE_TITLE_WORDS.test(words[0])
+    ) {
       return capitalize(words[0]);
     }
   }
@@ -307,4 +343,48 @@ function isRoleBasedEmail(email) {
   return ROLE_BASED_PREFIX.test(email);
 }
 
-module.exports = { extractFirstNameFromEmail, cleanCompanyName, getFirstName, isRoleBasedEmail, looksLikePageTitle, extractCompanyFromDomain };
+/**
+ * Returns true only if `str` is plausibly a real first name.
+ * Centralizes the same rejection logic used inside getFirstName so callers
+ * upstream (leadgen.service.js, outreach-ai.service.js) can pre-check inputs
+ * without duplicating the checks.
+ */
+function looksLikePersonName(str) {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  if (!trimmed) return false;
+  const words = trimmed.split(/\s+/);
+
+  // Strip honorifics before checking
+  let nameWords = [...words];
+  if (nameWords.length >= 2 && /^(dr\.?|mr\.?|mrs\.?|ms\.?|prof\.?)$/i.test(nameWords[0])) {
+    nameWords = nameWords.slice(1);
+  }
+
+  // Universal rejections
+  if (/[!?]/.test(trimmed)) return false;
+  if (/\b(allow|discover|attention|required|click|opportunities|explore|submit|request|exclusive)\b/i.test(trimmed)) return false;
+  if (BUSINESS_KEYWORDS.test(trimmed)) return false;
+  if (PAGE_TITLE_WORDS.test(trimmed)) return false;
+  if (/\.(com|net|org|io|co|us|biz)$/i.test(trimmed)) return false;
+  if (NAME_BLOCKLIST.has(nameWords[0].toLowerCase())) return false;
+
+  // Multi-word branch
+  if (words.length >= 2) {
+    return (
+      /^[A-Z]/.test(nameWords[0]) &&
+      /^[A-Za-z'-]+$/.test(nameWords[0]) &&
+      nameWords[0].length >= 2 &&
+      nameWords[0].length <= 15
+    );
+  }
+
+  // Single-word branch — must be in dictionary and not blocklisted
+  return (
+    words[0].length >= 3 &&
+    COMMON_NAMES.has(words[0].toLowerCase()) &&
+    !PAGE_TITLE_WORDS.test(words[0])
+  );
+}
+
+module.exports = { extractFirstNameFromEmail, cleanCompanyName, getFirstName, isRoleBasedEmail, looksLikePageTitle, looksLikePersonName, extractCompanyFromDomain };

@@ -220,7 +220,7 @@ async function testFollowupTemplates(testLeadIds) {
       // Simulate what the controller/scheduler does
       const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';
       const reSubject = `Re: ${origSubject}`;
-      const bookingUrl = env.bookingUrl || 'https://monkflow.io/#schedule';
+      const bookingUrl = env.bookingUrl || 'https://cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV';
 
       let template;
       switch (touch) {
@@ -496,9 +496,12 @@ function testBookingUrl() {
 
   const env = require('../src/config/env');
   assert(env.bookingUrl, 'env.bookingUrl is defined');
-  assert(env.bookingUrl.includes('#schedule'), 'bookingUrl contains #schedule');
   assert(env.bookingUrl.startsWith('https://'), 'bookingUrl starts with https://');
-  assertEqual(env.bookingUrl, 'https://monkflow.io/#schedule', 'bookingUrl is correct default');
+  // If BOOKING_URL env var isn't set yet, the placeholder default is acceptable
+  // but warn — real Cal.com URL should be configured in Railway before sending.
+  if (!process.env.BOOKING_URL) {
+    console.warn('  ⚠ BOOKING_URL env var not set — using placeholder. Set a real Cal.com URL before cohort v4.');
+  }
 }
 
 // ═══════════════════════════════════════════════════════

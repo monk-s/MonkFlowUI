@@ -294,7 +294,9 @@ async function generateForAllPriority() {
 
   let generated = 0;
   let errors = 0;
-  const VARIANTS = ['1', '2', '3'];
+  // Single-variant cohort: tag every new send with 'v4-named-deliverable' so
+  // we can cleanly compare reply rate vs. the historical '1'/'2'/'3' cohorts.
+  const VARIANTS = ['v4-named-deliverable'];
   let variantCursor = 0;
 
   for (const lead of leads) {
@@ -385,20 +387,35 @@ async function sendAiEmail(leadId) {
 
 // ── AI follow-up generator (for touches 2-4) ─────────────────
 
-const FOLLOWUP_SYSTEM_PROMPT = `You are writing a follow-up email for Nathan, who runs MonkFlow — a dev agency that builds custom automation tools, client portals, and workflow software for SMBs.
+/**
+ * Local copy of leadgen.service.js::selectCaseStudy — inlined here to avoid a
+ * circular import (leadgen.service.js already imports CASE_STUDIES from this
+ * module). Keep the logic in sync across the two copies.
+ */
+function selectCaseStudyForFollowup(industryOrType) {
+  const t = (industryOrType || '').toLowerCase();
+  if (/dent/.test(t)) return CASE_STUDIES.find(c => /dental/i.test(c.industry));
+  if (/chiro/.test(t)) return CASE_STUDIES.find(c => /chiropractic/i.test(c.industry));
+  if (/financial|wealth|advisor|cpa|accounting|tax|ria/.test(t)) {
+    return CASE_STUDIES.find(c => /wealth|financial/i.test(c.industry));
+  }
+  if (/ecommerce|e-commerce|retail|shopify|shop|store/.test(t)) {
+    return CASE_STUDIES.find(c => /e-commerce|retail/i.test(c.industry));
+  }
+  return CASE_STUDIES.find(c => /e-commerce/i.test(c.industry)) || CASE_STUDIES[0];
+}
 
-This is a FOLLOW-UP email in an existing thread. The prospect received a first email and hasn't replied yet. Each touch has a specific strategy — follow the touch-specific instructions exactly.
+const FOLLOWUP_SYSTEM_PROMPT = `You are writing a follow-up email for Nathan, founder of MonkFlow — a solo dev agency that builds custom automation, client portals, and workflow tools for small businesses.
 
-CASE STUDIES (pick the one closest to this prospect's industry):
-${CASE_STUDIES.map((cs, i) => `${i + 1}. ${cs.name} (${cs.industry}): ${cs.what}. Result: ${cs.result}. Detail: ${cs.detail}.`).join('\n')}
+This is a FOLLOW-UP in an existing cold-email thread. The original email offered a named deliverable: a 1-page map of the 3 highest-ROI automations for the prospect's industry. The entire sequence has ONE coherent offer — re-asked with decreasing intensity. Each touch has a specific structure; follow it EXACTLY.
 
 HARD RULES:
-- NEVER start with "I" — start with value, a stat, or a question.
 - NEVER use "following up", "circling back", "checking in", "bumping this", "just wanted to", "touching base".
-- Be conversational, not salesy. Sound like a real person continuing a conversation.
-- No sign-off block — just "Nathan".
+- Do NOT invent case studies — use only the one provided in the touch instructions.
+- Plain prose, no bullet points, no numbered lists.
 - Output valid JSON only: {"subject": "...", "body": "..."}
-- Body is plain text with \\n for line breaks.`;
+- Body is plain text with \\n for line breaks.
+- Hard character limits are hard — if the generated body exceeds the limit, shorten it.`;
 
 async function generateFollowup(lead, touchNumber) {
   if (!env.anthropicApiKey) {
@@ -426,33 +443,66 @@ async function generateFollowup(lead, touchNumber) {
     if (gaps.length) diagnosisContext = `Website gaps identified: ${gaps.join(', ')}.`;
   }
 
+  // Match the right case study to the lead's industry so Touch 3 doesn't send
+  // a Dallas financial services proof to a dental practice.
+  const caseStudy = selectCaseStudyForFollowup(lead.industry || lead.business_type || industry);
+
   let touchInstruction;
   switch (touchNumber) {
     case 2:
-      touchInstruction = `TOUCH 2 — "Value Drop" (NO booking link, NO meeting ask):
-- Share something genuinely useful: a relevant industry stat, a process tip, or a specific insight about their business based on their website gaps.
-- End with: "No agenda — just thought this might be useful."
-- Do NOT include a booking link or ask for a meeting. This email is purely about building trust and showing you're a real person who adds value.
-- Under 60 words. 2-3 short paragraphs max.
-Subject: Use "Re: ${origSubject}" for email threading.`;
+      // "Still open?" — one-word-reply bump, no new case study, no booking link.
+      // HARD LIMIT 350 chars. The single offer from touch 0 is the only ask.
+      touchInstruction = `TOUCH 2 — "Still open?" — HARD LIMIT 350 characters.
+
+Write exactly this structure (fill placeholders, no other variation):
+
+"Hey ${firstName},
+
+Still have that 1-page map of automations I offered to send${company ? ` for ${company}` : ''} — want it?
+
+Reply 'send it' and it's yours.
+
+Nathan"
+
+Do NOT add a case study, a P.S., or a booking link. The ONLY ask is the one-word reply. Do not exceed 350 characters total.
+Subject: Use "Re: ${origSubject}" for threading.`;
       break;
     case 3:
-      touchInstruction = `TOUCH 3 — "Social Proof + Soft Ask" (include booking link):
-- Lead with a specific, concrete result from the most relevant case study. Include industry, location, and specific metrics.
-- Connect it to their situation based on their website gaps.
-- Soft CTA: "If ${company || 'your team'} ever wants to explore this, happy to walk through it"
-- Include the booking link casually as a P.S. line: "P.S. Calendar's here: ${env.bookingUrl}"
-- Under 70 words. 2-3 short paragraphs.
-Subject: Use "Re: ${origSubject}" for email threading — keeps the conversation in one thread.`;
+      // "Proof + last offer" — add the industry-matched case study and the
+      // booking link in P.S. HARD LIMIT 400 chars.
+      touchInstruction = `TOUCH 3 — "Proof + last offer" — HARD LIMIT 400 characters.
+
+Write exactly this structure:
+
+"Hey ${firstName},
+
+For ${caseStudy.name}, we ${caseStudy.what} — ${caseStudy.result}. Same opportunity at ${company || 'your practice'}.
+
+Still happy to send the 1-page map — just reply 'send it'.
+
+Nathan
+
+P.S. Or grab a 15-min slot: ${env.bookingUrl}"
+
+Do not exceed 400 characters. No bullet points, no extra prose beyond the structure above.
+Subject: Use "Re: ${origSubject}" for threading.`;
       break;
     case 4:
-      touchInstruction = `TOUCH 4 — "Genuine Breakup" (under 40 words, booking link in P.S. only):
-- Acknowledge the timing may not be right. Be genuinely warm, not guilt-trippy.
-- Keep it SHORT — under 40 words in the main body.
-- Example tone: "Totally get if this isn't a priority right now. If it ever comes up, I'm here."
-- Include booking link ONLY as a P.S.: "P.S. Calendar's always open: ${env.bookingUrl}"
-- Wish them well genuinely.
-Subject: Use "Re: ${origSubject}" for email threading.`;
+      // "Breakup" — genuinely warm, under 250 chars, booking link in P.S. only.
+      touchInstruction = `TOUCH 4 — "Breakup" — HARD LIMIT 250 characters.
+
+Write exactly this structure:
+
+"Hey ${firstName},
+
+Closing the loop — totally get if this isn't a priority. Best of luck with ${company || 'the practice'}.
+
+Nathan
+
+P.S. If it ever comes up: ${env.bookingUrl}"
+
+Do NOT guilt-trip. Do not add a case study. Do not exceed 250 characters.
+Subject: Use "Re: ${origSubject}" for threading.`;
       break;
     default:
       throw new Error(`Invalid touch number: ${touchNumber}`);

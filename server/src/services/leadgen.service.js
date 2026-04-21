@@ -3,6 +3,7 @@ const leadModel = require('../models/leadgen.model');
 const { sendEmail } = require('./email.service');
 const { query: dbQuery } = require('../config/database');
 const { getFirstName, cleanCompanyName } = require('../utils/nameParser');
+const { CASE_STUDIES } = require('./outreach-ai.service');
 const pushover = require('./pushover.client');
 const https = require('https');
 const http = require('http');
@@ -496,90 +497,154 @@ async function diagnoseWebsite(url) {
 
 // ── Claude API: Generate Outreach Email ─────────────
 
+/**
+ * Deterministically picks the right case study based on a lead's business_type.
+ * Replaces the old approach of dumping all four cases into the prompt and asking
+ * the AI to pick — which failed in production (dental leads were consistently
+ * sent the Dallas financial services case study).
+ */
+function selectCaseStudy(businessType) {
+  const t = (businessType || '').toLowerCase();
+  if (/dent/.test(t)) return CASE_STUDIES.find(c => /dental/i.test(c.industry));
+  if (/chiro/.test(t)) return CASE_STUDIES.find(c => /chiropractic/i.test(c.industry));
+  if (/financial|wealth|advisor|cpa|accounting|tax|ria/.test(t)) {
+    return CASE_STUDIES.find(c => /wealth|financial/i.test(c.industry));
+  }
+  if (/ecommerce|e-commerce|retail|shopify|shop|store/.test(t)) {
+    return CASE_STUDIES.find(c => /e-commerce|retail/i.test(c.industry));
+  }
+  // Generic fallback — e-commerce case study is the most broadly applicable
+  return CASE_STUDIES.find(c => /e-commerce/i.test(c.industry)) || CASE_STUDIES[0];
+}
+
+/**
+ * Returns true if a subject line's "template shape" has been used 5+ times
+ * in the last 30 days. Strips proper nouns so "Quick question about Acme"
+ * and "Quick question about Beta" collapse to the same shape.
+ * Used to prevent spam-filter pattern detection.
+ */
+async function subjectIsOverused(subject) {
+  if (!subject || typeof subject !== 'string') return false;
+  try {
+    const { rows } = await dbQuery(
+      `SELECT COUNT(*)::int AS n
+         FROM outreach_emails
+        WHERE touch_number = 0
+          AND sent_at > NOW() - INTERVAL '30 days'
+          AND lower(regexp_replace(
+                regexp_replace(subject, '[A-Z][a-z]+( [A-Z][a-z]+)*', '_X_', 'g'),
+                '\s+', ' ', 'g'
+              )) = lower(regexp_replace(
+                regexp_replace($1, '[A-Z][a-z]+( [A-Z][a-z]+)*', '_X_', 'g'),
+                '\s+', ' ', 'g'
+              ))`,
+      [subject]
+    );
+    return rows[0].n >= 5;
+  } catch (err) {
+    // On DB error, don't block the send — just log and let it through
+    console.warn('[LEADGEN] subjectIsOverused query failed:', err.message);
+    return false;
+  }
+}
+
 async function generateOutreachEmail(lead, diagnosis, onRetry, variant) {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: env.anthropicApiKey });
 
-  const prompt = `You are writing a cold email for Nathan, who runs MonkFlow — a dev agency that builds custom automation, client portals, and workflow tools for small businesses.
+  // Pre-compute values used throughout the prompt — avoids re-running
+  // cleanCompanyName/getFirstName in every template interpolation.
+  const company = cleanCompanyName(lead.business_name, lead.email);
+  const firstName = getFirstName(lead.contact_person, lead.email);
+  const hasRealName = firstName && firstName !== 'there';
+  const caseStudy = selectCaseStudy(lead.business_type);
+  // Short industry label for the signature line
+  const shortIndustry = (() => {
+    const t = (lead.business_type || '').toLowerCase();
+    if (/dent/.test(t)) return 'dental practices';
+    if (/chiro/.test(t)) return 'chiropractic offices';
+    if (/financial|wealth|advisor|cpa|accounting|tax/.test(t)) return 'financial advisors';
+    if (/ecommerce|e-commerce|retail|shopify/.test(t)) return 'e-commerce brands';
+    return 'small businesses';
+  })();
 
-This email needs to stand out. The recipient gets cold emails daily. Yours must feel different from every "I noticed your website..." template.
+  const bookingUrl = env.bookingUrl;
+
+  const prompt = `You are writing a cold email for Nathan, founder of MonkFlow — a solo dev agency building custom automation, client portals, and workflow tools for small businesses.
+
+GOAL: ONE REPLY. The offer is a named deliverable — a 1-page map of the 3 highest-ROI automations for this prospect's practice type. They reply "send it" and receive the PDF. No call required. They keep it regardless.
 
 BUSINESS INFO:
-- Company: ${cleanCompanyName(lead.business_name, lead.email)}
-- Contact: ${getFirstName(lead.contact_person, lead.email)}
+- Company: ${company}
+- First name (if real): ${hasRealName ? firstName : '(none — omit greeting entirely)'}
 - Type: ${lead.business_type}
 - City: ${lead.city}, ${lead.state}
-- Website: ${lead.website_url || 'None'}
-- Email: ${lead.email}
 
-WEBSITE DIAGNOSIS:
-- SSL/HTTPS: ${diagnosis.has_ssl ? 'Yes' : 'No'}
-- Online Scheduling: ${diagnosis.has_booking_software ? `Yes (${diagnosis.booking_software_name})` : 'No'}
-- Client Portal: ${diagnosis.has_client_portal ? 'Yes' : 'No'}
-- Intake Forms: ${diagnosis.has_intake_forms ? 'Yes' : 'No'}
-- Design: ${diagnosis.design_age_estimate}
-- Issues: ${diagnosis.issues.join(', ') || 'None major'}
+WEBSITE DIAGNOSIS (infer PAIN, do not describe the website):
+- SSL: ${diagnosis.has_ssl ? 'Yes' : 'No'}
+- Online booking: ${diagnosis.has_booking_software ? 'Yes' : 'No'}
+- Client portal: ${diagnosis.has_client_portal ? 'Yes' : 'No'}
+- Intake forms: ${diagnosis.has_intake_forms ? 'Yes' : 'No'}
+- Gaps: ${diagnosis.issues.join(', ') || 'none major'}
 
-STRUCTURE — use the framework specified below (1, 2, or 3). Each has a distinct approach. Follow it exactly.
+THE CASE STUDY TO USE (use THIS one exactly, do not invent others):
+- Client descriptor: ${caseStudy.name}
+- What we built: ${caseStudy.what}
+- Result: ${caseStudy.result}
 
-FRAMEWORK 1 — "Specific Observation + Question" (used for ~40% of sends):
-- Open with ONE hyper-specific observation about their BUSINESS OPERATIONS (not their website). Use the diagnosis to INFER the operational pain, don't describe the website symptom.
-  - BAD: "Saw your booking routes through a contact form"
-  - GOOD: "If ${cleanCompanyName(lead.business_name, lead.email)} is still handling new patient intake by phone, your front desk is probably spending 8-10 hours a week on it"
-- ONE sentence of social proof with a specific result: include industry, city, size, and metric.
-- CTA: An open-ended question that invites a real conversational response. NOT yes/no, NOT "reply 'send it'".
-  - GOOD: "Is intake something your team has talked about fixing, or is it pretty dialed in?"
-  - BAD: "Yes or no?", "Reply 'send it'", "Thoughts?"
-- End with P.S. containing booking link: "P.S. If easier to just talk: ${env.bookingUrl || 'https://monkflow.io/#schedule'}"
+STRUCTURE — follow exactly in this order:
 
-FRAMEWORK 2 — "Free Teardown" (used for ~40% of sends):
-- Open with "I looked at ${cleanCompanyName(lead.business_name, lead.email)}'s site and mapped out 3 things I'd automate first:"
-- List 2-3 bullet points specific to THEIR diagnosis gaps (not generic). Be concrete about what you'd build.
-- One-line proof: a specific case study result with industry, city, and metric.
-- CTA: "Want me to send the full breakdown? Takes 2 min to read." (simple reply CTA, conversational — NOT "reply 'send it'")
-- End with P.S. containing booking link: "P.S. Or if you'd rather just talk through it: ${env.bookingUrl || 'https://monkflow.io/#schedule'}"
+1. Greeting:
+   ${hasRealName
+     ? `Write exactly: "Hey ${firstName},"`
+     : `DO NOT write any greeting. Open the email directly with the observation in step 2. NEVER write "Hey there", "Hey team", or "Hi" — these read as mass-sent.`}
 
-FRAMEWORK 3 — "Peer Reference" (used for ~20% of sends):
-- Open by referencing what a similar business in their area or industry is doing: "A [industry] practice in [nearby city] just automated their entire [process] — saves them [X hours/week]."
-- Connect to THEIR situation using diagnosis gaps: "Your site shows you're still handling [gap] manually — same spot they were in."
-- CTA: Open-ended conversational question. "Curious if this is on your radar at all? Happy to share what they did."
-- End with P.S. containing booking link: "P.S. Calendar's here if easier: ${env.bookingUrl || 'https://monkflow.io/#schedule'}"
+2. ONE specific operational observation (18–25 words). Infer the BUSINESS PAIN, not the website symptom.
+   GOOD: "If ${company} is still handling new-patient intake by phone, your front desk is probably spending 8–12 hours a week on it."
+   BAD: "I noticed your site doesn't have online booking."
 
-CASE STUDIES (use the one that matches their industry; include specifics):
-1. Team Financial Strategies (4-advisor wealth management firm, Dallas): automated client onboarding + CRM sync. Cut new-client setup from 45 min to under 5. Built in 2 weeks.
-2. Dental practice (4-provider, Tulsa, 6 front-desk staff): online scheduling + intake forms + patient portal. Went from 18 hrs/week on scheduling to under 2. Built in 3 weeks.
-3. Chiropractic office (3-provider, Columbus): digital intake + automated scheduling. Saved 11 hrs/week of front-desk time. Built in 9 business days.
-4. E-commerce brand (Shopify store, Austin): order-to-fulfillment automation. Eliminated 15 hrs/week of manual processing, shipping errors near zero.
+3. ONE sentence of proof using THE case study above (reference it naturally):
+   "For ${caseStudy.name}, we ${caseStudy.what} — ${caseStudy.result}."
+   Then ONE sentence connecting that result to ${company}'s likely situation.
 
-HARD RULES (apply to ALL frameworks):
-- 100-130 words total. The email must be skimmable in under 15 seconds.
-- Start with "Hey ${getFirstName(lead.contact_person, lead.email)}," — use this exact name. If the name is "there", use "Hey ${cleanCompanyName(lead.business_name, lead.email)} team," instead. Never "Hi".
-- The first sentence after the greeting must reference something CONCRETE about them: their company name, a specific operational gap inferred from the diagnosis, or an observable fact. Never start with a generic industry stat.
-- Every email MUST include the booking URL as a P.S. line at the end. Never bury it in the body or exclude it.
-- The CTA must be an open-ended question, NOT a yes/no or command. Ask something they can answer conversationally.
-- NEVER use these phrases: "Curious —", "Worth exploring", "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to chat", "thoughts?", "interested?"
-- The case study mention must include a specific number AND a specific client descriptor (industry + city or size). Never "a healthcare practice" — always "a 4-provider dental office in Tulsa" or similar.
-- Sign off as just "Nathan" — no last name, no company, no title.
+4. The OFFER (the named deliverable, ~20–30 words):
+   "I put together a 1-page map of the 3 highest-ROI automations for ${lead.business_type} practices like yours. Yours to keep, no call required."
 
-Subject line rules:
-- 2-6 words, sentence case (capitalize first word only, rest lowercase unless proper noun), no emoji.
-- Must create curiosity or feel like it came from a colleague.
-- Include a "?" in roughly half of subjects (questions have higher open rates).
-- GOOD patterns: "Question about ${cleanCompanyName(lead.business_name, lead.email)}", "${getFirstName(lead.contact_person, lead.email)} — quick thought", "Intake at ${cleanCompanyName(lead.business_name, lead.email)}?", "Saw something on your site"
-- BAD patterns: "${cleanCompanyName(lead.business_name, lead.email)} + intake" (looks automated), all-lowercase everything (looks mass-sent), generic keywords ("scheduling headaches")
+5. The MICRO-CTA — write exactly this line, no paraphrasing:
+   Reply 'send it' and I'll email it over today.
 
-Return JSON: {"subject": "...", "body": "..."}`;
+6. Sign-off (three lines exactly):
+   Nathan
+   Founder, MonkFlow — automation for ${shortIndustry}
+   monkflow.io
 
-  // Variant → framework mapping. Each variant hard-locks the AI to one framework.
-  const frameworkMap = {
-    '1': '1 ("Specific Observation + Question")',
-    '2': '2 ("Free Teardown")',
-    '3': '3 ("Peer Reference")',
-  };
-  let variantInstruction = '';
-  if (frameworkMap[variant]) {
-    variantInstruction = `\n\nIMPORTANT: You MUST use FRAMEWORK ${frameworkMap[variant]} for this email. Do NOT use any other framework. Follow its structure and CTA rules exactly.`;
-  }
+7. P.S. with booking URL (exactly this line):
+   P.S. Or if easier to just talk: ${bookingUrl}
+
+HARD RULES:
+- 95–120 words body total (excluding signature + P.S.).
+- NEVER use these phrases: "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to chat", "thoughts?", "interested?", "circling back", "curious if this is on your radar".
+- The CTA is exactly "Reply 'send it' and I'll email it over today." Do not paraphrase. Do not add a second question. Do not append anything.
+- Plain prose only. NO bullet points. NO numbered lists.
+- Sign off exactly as specified. No "Best,", no "Thanks,", no last name, no phone number.
+- Do NOT invent case study names — only use "${caseStudy.name}".
+
+SUBJECT LINE:
+- 3–6 words, sentence case (capitalize first word only), no emoji, no all-lowercase.
+- Prefer patterns tied to a concrete operational signal:
+  - "${hasRealName ? firstName + ', a question' : 'A question about ' + company}"
+  - "3 automations for ${company}"
+  - "${lead.business_type} intake — a question"
+  - "Saw something at ${company}"
+- AVOID overused patterns (all used >200× recently — will hit spam filters):
+  "Quick question", "Re: Quick question", "Question about {company}", "{city} {industry} + intake".
+
+Return JSON only: {"subject": "...", "body": "..."}`;
+
+  // Track regenerations due to subject overuse (separate from API retry backoff)
+  let dedupAttempts = 0;
+  const MAX_DEDUP = 2;
+  let extraInstruction = '';
 
   const MAX_RETRIES = 5;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -588,9 +653,12 @@ Return JSON: {"subject": "...", "body": "..."}`;
       const response = await Promise.race([
         client.messages.create({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 500,
-          temperature: 0.6,
-          messages: [{ role: 'user', content: prompt + variantInstruction }],
+          max_tokens: 600,
+          // Temperature 0.4: structurally consistent output with substantive variation.
+          // The prompt is rigid (exact CTA string, fixed signature) so we want the AI
+          // to vary the observation and pain wording, not the structure.
+          temperature: 0.4,
+          messages: [{ role: 'user', content: prompt + extraInstruction }],
         }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('Claude API timeout after 60s')), 60000)),
       ]);
@@ -599,9 +667,27 @@ Return JSON: {"subject": "...", "body": "..."}`;
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
-        return { ...parsed, variant: variant || 'unknown' };
+
+        // Subject-line dedup: if the same template shape has been used 5+ times
+        // in the last 30 days, force a regenerate with explicit guidance.
+        if (parsed.subject && dedupAttempts < MAX_DEDUP && await subjectIsOverused(parsed.subject)) {
+          console.warn(`[LEADGEN] Subject overused: "${parsed.subject}" — regenerating`);
+          dedupAttempts++;
+          extraInstruction = `\n\nREJECTED: Subject "${parsed.subject}" is a template shape that has been used too many times recently. Generate a COMPLETELY different subject pattern. Do NOT use "Quick question", "Re:", "Question about", or "{city} {industry}" templates. Try an observation-style subject instead.`;
+          // Don't count this against MAX_RETRIES — it's a content regenerate, not an API failure
+          attempt--;
+          continue;
+        }
+
+        return { ...parsed, variant: variant || 'v4-named-deliverable' };
       }
-      return { subject: `Quick question about ${lead.business_name}`, body: text, variant: variant || 'unknown' };
+      // No JSON parsed — return a minimal safe fallback rather than sending
+      // a generic "Quick question about X" that will fail the dedup check next time.
+      return {
+        subject: `3 automations for ${company}`,
+        body: text,
+        variant: variant || 'v4-named-deliverable',
+      };
     } catch (err) {
       const isRetryable = err.message.includes('529') || err.message.includes('overloaded') || err.message.includes('rate') || err.status === 529 || err.status === 429;
       if (isRetryable && attempt < MAX_RETRIES) {
@@ -899,7 +985,9 @@ async function runDailyLeadGeneration() {
         const recCounts = new Map(recSenders.map(s => [s.email, 0]));
         let recIdx = 0;
         let recoveredSends = 0;
-        const REC_VARIANTS = ['1', '2', '3'];
+        // Single-variant cohort for A/B measurement vs. historical '1'/'2'/'3'.
+        // New named-deliverable framework — see plan phase 4.
+        const REC_VARIANTS = ['v4-named-deliverable'];
         let recVariantCursor = 0;
         for (const lead of stuckLeads) {
           // Stop once we've drained up to today's remaining capacity.
@@ -1221,7 +1309,9 @@ async function runDailyLeadGeneration() {
   // Distribute evenly across 3 frameworks: 1 (Specific Observation), 2 (Free Teardown), 3 (Peer Reference).
   // Previous variants A/B and C/D/E/F are retired — historical data preserved.
   // Round-robin ensures ~33% split per run.
-  const TEST_VARIANTS = ['1', '2', '3'];
+  // Single-variant cohort for A/B measurement vs. historical '1'/'2'/'3'.
+  // New named-deliverable framework — see plan phase 4.
+  const TEST_VARIANTS = ['v4-named-deliverable'];
   let variantCursor = 0;
   for (const lead of toEmail) {
     try {

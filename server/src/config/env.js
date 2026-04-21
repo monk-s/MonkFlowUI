@@ -32,7 +32,11 @@ const env = {
   resendWebhookSecret: process.env.RESEND_WEBHOOK_SECRET || '',
   apiUrl: process.env.API_URL || 'http://localhost:8080',
   inboundWebhookSecret: process.env.INBOUND_WEBHOOK_SECRET || '',
-  bookingUrl: process.env.BOOKING_URL || 'https://monkflow.io/#schedule',
+  // TODO(nathan): Set BOOKING_URL env var in Railway to a real Cal.com / Calendly
+  // link (e.g. https://cal.com/nathan-linder/intro) BEFORE the next send cohort.
+  // The hash anchor below is a placeholder — it loads the marketing homepage and
+  // forces the reader to scroll + fill a contact form, which kills conversion.
+  bookingUrl: process.env.BOOKING_URL || 'https://cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV',
   pushoverUserKey: process.env.PUSHOVER_USER_KEY || '',
   pushoverAppToken: process.env.PUSHOVER_APP_TOKEN || '',
   unipileApiKey: process.env.UNIPILE_API_KEY || '',

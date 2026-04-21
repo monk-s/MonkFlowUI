@@ -53,19 +53,23 @@ function getFollowupTemplate(touchNumber, lead) {
     ? `<img src="https://monkflow.io/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`
     : '';
 
-  const bookingUrl = env.bookingUrl || 'https://monkflow.io/#schedule';
+  // Placeholder fallback matches env.js — set BOOKING_URL in Railway.
+  const bookingUrl = env.bookingUrl || 'https://cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV';
+  // New named-deliverable sequence: one offer, re-asked with decreasing length.
+  // These fallbacks only fire when AI generation errors — the AI path uses the
+  // matching instructions in outreach-ai.service.js::generateFollowup.
   switch (touchNumber) {
     case 2: return {
       subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Came across a stat I thought was relevant — businesses${company} that automate their intake and scheduling processes typically save 10-15 hours per week in front-desk time. Most of that is just eliminating phone tag and manual data entry.</p><p>No agenda — just thought this might be useful as you think about operations.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Still have that 1-page map of automations I offered to send${rawCompany ? ` for ${rawCompany}` : ''} — want it?</p><p>Reply "send it" and it's yours.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
     };
     case 3: return {
       subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>We just wrapped up an automation build for a financial services firm — cut their client onboarding from 45 minutes to under 5. Contracts, CRM sync, the whole workflow running on autopilot.</p><p>If${rawCompany ? ` ${rawCompany}` : ' your team'} ever wants to explore something similar, happy to walk through what we built — <a href="${bookingUrl}">here's my calendar</a>.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>We cut a dental practice's scheduling from 18 hrs/week to under 2 with a similar build. Same opportunity${company}.</p><p>Still happy to send the 1-page map — just reply "send it".</p><p>Nathan</p><p style="font-size:13px;color:#666;">P.S. Or grab 15 min: <a href="${bookingUrl}">${bookingUrl}</a></p></div>${unsubFooter}${trackingPixel}`,
     };
     case 4: return {
       subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Totally get if this isn't a priority right now — no worries at all. If automating any part of${rawCompany ? ` ${rawCompany}'s` : ' your'} operations ever moves up the list, I'm here.</p><p>Wishing you well.</p><p>Nathan</p><p style="font-size:13px;color:#666;">P.S. Calendar's always open: <a href="${bookingUrl}">${bookingUrl}</a></p></div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Closing the loop — totally get if this isn't a priority. Best of luck${company}.</p><p>Nathan</p><p style="font-size:13px;color:#666;">P.S. If it ever comes up: <a href="${bookingUrl}">${bookingUrl}</a></p></div>${unsubFooter}${trackingPixel}`,
     };
     default: return null;
   }
