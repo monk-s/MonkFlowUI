@@ -387,4 +387,4 @@ function looksLikePersonName(str) {
   );
 }
 
-module.exports = { extractFirstNameFromEmail, cleanCompanyName, getFirstName, isRoleBasedEmail, looksLikePageTitle, looksLikePersonName, extractCompanyFromDomain };
+module.exports = { extractFirstNameFromEmail, cleanCompanyName, getFirstName, isRoleBasedEmail, looksLikePageTitle, looksLikePersonName, extractCompanyFromDomain, NAME_BLOCKLIST, COMMON_NAMES };

@@ -2,7 +2,7 @@ const env = require('../config/env');
 const leadModel = require('../models/leadgen.model');
 const { sendEmail } = require('./email.service');
 const { query: dbQuery } = require('../config/database');
-const { getFirstName, cleanCompanyName } = require('../utils/nameParser');
+const { getFirstName, cleanCompanyName, NAME_BLOCKLIST } = require('../utils/nameParser');
 const { CASE_STUDIES } = require('./outreach-ai.service');
 const pushover = require('./pushover.client');
 const https = require('https');
@@ -316,6 +316,10 @@ function extractPersonName(html, pageTitle) {
   return null;
 }
 
+// Scraping-side helper: true only if `str` is plausibly a 2+ word PERSON name.
+// (The single-word branch lives in nameParser.getFirstName.) Shares NAME_BLOCKLIST
+// with nameParser so industry/marketing words can't leak in via a fake "Santa
+// Smith" first-word match.
 function looksLikePersonName(str) {
   if (!str || str.length < 4 || str.length > 50) return false;
   // Must have at least 2 words (first + last name)
@@ -324,6 +328,10 @@ function looksLikePersonName(str) {
   // Each word should start with uppercase (names are capitalized)
   const allCapitalized = words.every(w => /^[A-Z][a-z]/.test(w) || /^[A-Z]\.?$/.test(w));
   if (!allCapitalized) return false;
+  // Reject if the first word is in the shared NAME_BLOCKLIST (industry/marketing
+  // terms like "Santa", "Plumber", "Best", "Trusted" that the rest of the regex
+  // wouldn't catch).
+  if (NAME_BLOCKLIST.has(words[0].toLowerCase())) return false;
   // Reject if it contains business keywords
   const bizWords = /\b(llc|llp|inc|corp|p\.?c\.?|pllc|group|associates|firm|law|legal|office|services|solutions|company|practice|dental|chiropractic|accounting|consultants?|advisors?|partners?|attorneys?|cpas?)\b/i;
   if (bizWords.test(str)) return false;
@@ -533,10 +541,10 @@ async function subjectIsOverused(subject) {
           AND sent_at > NOW() - INTERVAL '30 days'
           AND lower(regexp_replace(
                 regexp_replace(subject, '[A-Z][a-z]+( [A-Z][a-z]+)*', '_X_', 'g'),
-                '\s+', ' ', 'g'
+                '\\s+', ' ', 'g'
               )) = lower(regexp_replace(
                 regexp_replace($1, '[A-Z][a-z]+( [A-Z][a-z]+)*', '_X_', 'g'),
-                '\s+', ' ', 'g'
+                '\\s+', ' ', 'g'
               ))`,
       [subject]
     );
@@ -569,6 +577,11 @@ async function generateOutreachEmail(lead, diagnosis, onRetry, variant) {
   })();
 
   const bookingUrl = env.bookingUrl;
+  // Belt-and-suspenders: if BOOKING_URL isn't configured (local dev or Railway
+  // misconfig), skip the PS line entirely rather than send PLACEHOLDER to
+  // prospects. env.js ALSO hard-refuses to boot in prod with a placeholder, so
+  // this is a second line of defense for dev/staging / partial config drift.
+  const includePs = !env.bookingUrlIsPlaceholder();
 
   const prompt = `You are writing a cold email for Nathan, founder of MonkFlow — a solo dev agency building custom automation, client portals, and workflow tools for small businesses.
 
@@ -618,11 +631,11 @@ STRUCTURE — follow exactly in this order:
    Founder, MonkFlow — automation for ${shortIndustry}
    monkflow.io
 
-7. P.S. with booking URL (exactly this line):
-   P.S. Or if easier to just talk: ${bookingUrl}
+${includePs ? `7. P.S. with booking URL (exactly this line):
+   P.S. Or if easier to just talk: ${bookingUrl}` : `7. DO NOT add a P.S. line. No booking URL is configured — omit the P.S. entirely.`}
 
 HARD RULES:
-- 95–120 words body total (excluding signature + P.S.).
+- 95–120 words body total (excluding signature${includePs ? ' + P.S.' : ''}).
 - NEVER use these phrases: "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to chat", "thoughts?", "interested?", "circling back", "curious if this is on your radar".
 - The CTA is exactly "Reply 'send it' and I'll email it over today." Do not paraphrase. Do not add a second question. Do not append anything.
 - Plain prose only. NO bullet points. NO numbered lists.
@@ -833,7 +846,7 @@ async function sendColdEmail(lead, sender) {
           lead.diagnosis_json ? JSON.stringify(lead.diagnosis_json) : null, // diagnosis_scores
           lead.outreach_body || null,             // original_email_body
           leadScore,                              // lead_score
-          lead.email_variant || '1',              // email_variant (1/2/3 rotation; fallback 1)
+          lead.email_variant || 'v4-named-deliverable', // email_variant (v4 is the live cohort — old '1'/'2'/'3' remain on historical rows)
           leadScore >= 75,                        // priority (auto-flag high-scoring leads)
         ]
       );
@@ -852,7 +865,7 @@ async function sendColdEmail(lead, sender) {
            SELECT id, 0, $2, $3, $4, $5, NOW(), NOW()
            FROM outreach_leads WHERE contact_email = $1
            LIMIT 1`,
-          [lead.email, lead.outreach_subject, lead.outreach_body || '', emailId, lead.email_variant || '1']
+          [lead.email, lead.outreach_subject, lead.outreach_body || '', emailId, lead.email_variant || 'v4-named-deliverable']
         );
       } catch (mirrorErr) {
         console.warn(`[LEADGEN] outreach_emails mirror failed for ${lead.email}:`, mirrorErr.message);

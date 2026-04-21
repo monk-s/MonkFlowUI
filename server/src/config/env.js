@@ -59,6 +59,20 @@ if (env.isProd) {
       throw new Error(`Missing required environment variable: ${key}`);
     }
   }
+  // Refuse to boot in prod with the placeholder booking URL — otherwise the
+  // PLACEHOLDER string leaks into real sent emails' P.S. lines. Set BOOKING_URL
+  // in Railway to a real Cal.com / Calendly URL before the next send cohort.
+  if (env.bookingUrl.includes('PLACEHOLDER')) {
+    throw new Error(
+      'BOOKING_URL env var is not set (or still contains PLACEHOLDER). ' +
+      'Refusing to start in production — set BOOKING_URL in Railway to a real ' +
+      'calendar URL (e.g. https://cal.com/your-handle/15min) before boot.'
+    );
+  }
 }
+
+// Helper exposed to services: detect whether the booking URL is a placeholder.
+// Send paths use this to skip the P.S. line rather than emit a broken link.
+env.bookingUrlIsPlaceholder = () => !env.bookingUrl || env.bookingUrl.includes('PLACEHOLDER');
 
 module.exports = env;

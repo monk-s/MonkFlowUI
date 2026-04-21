@@ -371,7 +371,7 @@ async function sendAiEmail(leadId) {
   await query(
     `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, delivered_at)
      VALUES ($1, 0, $2, $3, $4, $5, NOW())`,
-    [leadId, lead.ai_email_subject, lead.ai_email_body, gmailId, lead.email_variant || '1']
+    [leadId, lead.ai_email_subject, lead.ai_email_body, gmailId, lead.email_variant || 'v4-named-deliverable']
   );
 
   // Store original message ID and subject for follow-up threading
@@ -467,9 +467,13 @@ Nathan"
 Do NOT add a case study, a P.S., or a booking link. The ONLY ask is the one-word reply. Do not exceed 350 characters total.
 Subject: Use "Re: ${origSubject}" for threading.`;
       break;
-    case 3:
+    case 3: {
       // "Proof + last offer" — add the industry-matched case study and the
-      // booking link in P.S. HARD LIMIT 400 chars.
+      // booking link in P.S. HARD LIMIT 400 chars. Skip the PS line when
+      // BOOKING_URL is a placeholder (dev / misconfig).
+      const psT3 = env.bookingUrlIsPlaceholder()
+        ? ''
+        : `\n\nP.S. Or grab a 15-min slot: ${env.bookingUrl}`;
       touchInstruction = `TOUCH 3 — "Proof + last offer" — HARD LIMIT 400 characters.
 
 Write exactly this structure:
@@ -480,15 +484,17 @@ For ${caseStudy.name}, we ${caseStudy.what} — ${caseStudy.result}. Same opport
 
 Still happy to send the 1-page map — just reply 'send it'.
 
-Nathan
-
-P.S. Or grab a 15-min slot: ${env.bookingUrl}"
+Nathan${psT3}"
 
 Do not exceed 400 characters. No bullet points, no extra prose beyond the structure above.
 Subject: Use "Re: ${origSubject}" for threading.`;
       break;
-    case 4:
+    }
+    case 4: {
       // "Breakup" — genuinely warm, under 250 chars, booking link in P.S. only.
+      const psT4 = env.bookingUrlIsPlaceholder()
+        ? ''
+        : `\n\nP.S. If it ever comes up: ${env.bookingUrl}`;
       touchInstruction = `TOUCH 4 — "Breakup" — HARD LIMIT 250 characters.
 
 Write exactly this structure:
@@ -497,13 +503,12 @@ Write exactly this structure:
 
 Closing the loop — totally get if this isn't a priority. Best of luck with ${company || 'the practice'}.
 
-Nathan
-
-P.S. If it ever comes up: ${env.bookingUrl}"
+Nathan${psT4}"
 
 Do NOT guilt-trip. Do not add a case study. Do not exceed 250 characters.
 Subject: Use "Re: ${origSubject}" for threading.`;
       break;
+    }
     default:
       throw new Error(`Invalid touch number: ${touchNumber}`);
   }

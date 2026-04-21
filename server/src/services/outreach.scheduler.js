@@ -55,6 +55,15 @@ function getFollowupTemplate(touchNumber, lead) {
 
   // Placeholder fallback matches env.js — set BOOKING_URL in Railway.
   const bookingUrl = env.bookingUrl || 'https://cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV';
+  // Skip the PS line entirely when the booking URL is a placeholder (dev /
+  // misconfig). env.js hard-refuses to boot in prod with a placeholder, so this
+  // only matters if someone forgets BOOKING_URL on staging or local.
+  const psLine = env.bookingUrlIsPlaceholder()
+    ? ''
+    : `<p style="font-size:13px;color:#666;">P.S. Or grab 15 min: <a href="${bookingUrl}">${bookingUrl}</a></p>`;
+  const psBreakup = env.bookingUrlIsPlaceholder()
+    ? ''
+    : `<p style="font-size:13px;color:#666;">P.S. If it ever comes up: <a href="${bookingUrl}">${bookingUrl}</a></p>`;
   // New named-deliverable sequence: one offer, re-asked with decreasing length.
   // These fallbacks only fire when AI generation errors — the AI path uses the
   // matching instructions in outreach-ai.service.js::generateFollowup.
@@ -65,11 +74,11 @@ function getFollowupTemplate(touchNumber, lead) {
     };
     case 3: return {
       subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>We cut a dental practice's scheduling from 18 hrs/week to under 2 with a similar build. Same opportunity${company}.</p><p>Still happy to send the 1-page map — just reply "send it".</p><p>Nathan</p><p style="font-size:13px;color:#666;">P.S. Or grab 15 min: <a href="${bookingUrl}">${bookingUrl}</a></p></div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>We cut a dental practice's scheduling from 18 hrs/week to under 2 with a similar build. Same opportunity${company}.</p><p>Still happy to send the 1-page map — just reply "send it".</p><p>Nathan</p>${psLine}</div>${unsubFooter}${trackingPixel}`,
     };
     case 4: return {
       subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Closing the loop — totally get if this isn't a priority. Best of luck${company}.</p><p>Nathan</p><p style="font-size:13px;color:#666;">P.S. If it ever comes up: <a href="${bookingUrl}">${bookingUrl}</a></p></div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Closing the loop — totally get if this isn't a priority. Best of luck${company}.</p><p>Nathan</p>${psBreakup}</div>${unsubFooter}${trackingPixel}`,
     };
     default: return null;
   }
@@ -139,6 +148,7 @@ async function processDueFollowups() {
        WHERE ol.status = 'active'
          AND ol.next_followup_at <= NOW()
          AND ol.touch_count < 4
+         AND ol.replied_at IS NULL
        ORDER BY COALESCE(ol.lead_score, 0) DESC, ol.next_followup_at ASC`
     );
 
@@ -243,7 +253,7 @@ async function processDueFollowups() {
         await query(
           `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, delivered_at)
            VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-          [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || '1']
+          [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || 'v4-named-deliverable']
         );
 
         const nextFollowup = getNextFollowupDate(nextTouch);

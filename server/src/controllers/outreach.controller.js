@@ -335,7 +335,7 @@ const processDueFollowups = catchAsync(async (req, res) => {
       await query(
         `INSERT INTO outreach_emails (lead_id, touch_number, subject, body, gmail_message_id, variant, delivered_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-        [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || '1']
+        [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || 'v4-named-deliverable']
       );
 
       // Update lead — close sequence after touch 4
@@ -778,9 +778,10 @@ const getAbResults = catchAsync(async (req, res) => {
     D: 'D — Teardown Offer (retired)',
     E: 'E — Sharp Question (retired)',
     F: 'F — Cost of Inaction (retired)',
-    '1': '1 — Specific Observation + Question',
-    '2': '2 — Free Teardown',
-    '3': '3 — Peer Reference',
+    '1': '1 — Specific Observation + Question (retired)',
+    '2': '2 — Free Teardown (retired)',
+    '3': '3 — Peer Reference (retired)',
+    'v4-named-deliverable': 'v4 — Named Deliverable',
   };
   const { rows } = await query(`
     SELECT
@@ -796,7 +797,7 @@ const getAbResults = catchAsync(async (req, res) => {
       ROUND(COUNT(*) FILTER (WHERE ol.status = 'unsubscribed')::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS unsub_rate
     FROM outreach_leads ol
     WHERE ol.touch_count >= 1
-      AND ol.email_variant IN ('A', 'B', 'C', 'D', 'E', 'F', '1', '2', '3')
+      AND ol.email_variant IN ('A', 'B', 'C', 'D', 'E', 'F', '1', '2', '3', 'v4-named-deliverable')
     GROUP BY ol.email_variant
     ORDER BY variant
   `);
