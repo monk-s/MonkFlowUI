@@ -2,6 +2,68 @@
 
 ---
 
+## Session: 2026-04-21
+
+### Audit Findings (live production state)
+- [CRITICAL] **68% of reported "opens" were security-scanner bots** firing within seconds of send (Microsoft ATP, Barracuda, corporate mail gateways). Existing UA-based filter missed scanners that rewrite links and pre-fetch with generic Chrome UAs. Backfill revealed 179 bot opens vs only 75 human opens — "54% open rate" was actually ~4% real. **FIXED via migration 043 + latency-based detection.**
+- [CRITICAL] Zero replies across 1,761 emails now explained: only 47 of 815 leads (5.8%) were ever actually opened by a human. The content problem is real but the denominator was misleading — we thought half were reading, reality is ~6%.
+- [MEDIUM] Analytics dashboards showed inflated open rates; no distinction between human and scanner activity. **FIXED: variant cards + by-touch both show real_open_rate + bot_opens.**
+- [LOW] `ACTIVE_VARIANTS` in admin frontend still listed C/D/E/F (retired) as current rotation. **FIXED: now 1/2/3.**
+- [INFO] Scraping "paused" since 4/14 is by design — leadgen scheduler skips fresh SerpAPI searches when daily quota fills from backlog recovery (640 diagnosed leads, ~21 days of inventory). No action needed.
+
+### Fixes Shipped This Session
+- **migration 043-outreach-open-metadata.sql**: Added `human_opened_at`, `bot_opened_at`, `open_count`, `first_open_ua`, `first_open_ip`, `first_open_latency_s` to `outreach_emails`; mirrored `human_opened_at` + `bot_opened_at` on `outreach_leads`. Backfilled historical data using 60-second latency threshold.
+- **`outreach.controller.js` trackOpen**: Rewrote to dual-layer bot detection — UA match + latency < 60s. Captures UA/IP on every hit. Writes `human_opened_at` only for confirmed humans; bot pings recorded separately for forensics.
+- **Resend webhook `email.opened` handler**: Same latency-based filtering applied (backup path to primary pixel).
+- **Outreach analytics endpoint**: `funnel.opens_recorded` now humans-only; added `bot_opens_filtered` for transparency. `byTouch` + `getAbResults` return `real_opens`, `bot_opens`, `real_open_rate`.
+- **app.js frontend**: A/B variant cards show real open rate prominently with bot-filtered count ("12 human · 51 bot filtered"). By-touch section shows both real open rate and reply rate columns.
+
+### Verification
+- Migration 043 ran clean against production. Final counts:
+  - outreach_emails: 1,761 total / 75 human opens / 179 bot opens
+  - outreach_leads: 815 total / 47 human opens / 396 bot opens
+- Real variant performance (last 14d touch 0):
+  ```
+  C:  29.3% real open, 0 bot     (retired but mature data)
+  E:  26.3% real open, 0 bot
+  D:  23.1% real open, 0 bot
+  F:  14.3% real open, 0 bot
+  3:  10.0% real open, 43.3% bot (active)
+  1:   6.7% real open, 36.7% bot (active)
+  2:   3.3% real open, 53.3% bot (active)
+  B:   0.0% real open, 55.4% bot (retired, all opens were bots)
+  ```
+- Touch-by-touch real open rates all-time:
+  ```
+  Touch 0 (initial):  10.2% (46/450)
+  Touch 2 (follow 1): 3.7% (26/694)
+  Touch 3 (follow 2): 0.5% (3/613)
+  Touch 4 (breakup): 0.0% (0/4)
+  ```
+- Syntax check passed on all modified files.
+- Commit 47e236a pushed, deploy healthy.
+
+### Key Interpretation
+- **New frameworks (1/2/3) are hitting heavy-scanner environments** (corporate inboxes with ATP/Proofpoint). Real human open rate 3-10% — lower than mature C/D/E/F runs which mostly went to consumer inboxes. This doesn't mean the content is worse — it means the audience changed.
+- **47 humans actually read these emails and nobody replied.** Even stripping bot inflation, the reply conversion from real readers is 0/47. That's the actual content problem to solve.
+- **Follow-up open-rate collapse (10.2% → 3.7% → 0.5%)** suggests follow-ups are landing in Promotions/Spam. Possible: threading with same In-Reply-To makes Gmail cluster them into the original's folder; if initial was filtered, follow-ups inherit that fate.
+
+### Next Session Priority
+1. **Investigate why touch-2 and touch-3 open rate collapses.** Check if follow-ups are landing in spam/promotions by sending test to personal Gmail. Consider breaking thread on touch 3+.
+2. **Audit reply rate on 47 "confirmed human reader" leads.** If any trend (industry, company size, sender, subject line style), double down.
+3. **Consider adding click tracking parity** — `clicked_at` likely has same bot problem. Quick check + filter if needed.
+4. **SerpAPI scraping will resume automatically** once backlog drains (~21 days). Monitor.
+5. **Investigate if bot opens correlate with delivery problems.** High bot ratio = email hit a corporate gateway; low bot ratio + no human open = likely went to spam. Could use bot presence as a positive deliverability signal.
+
+### Metrics
+- Files modified: 3
+- Migrations added: 1
+- Commits: 1 (47e236a)
+- Critical findings: 1 (bot-inflated opens)
+- Backfilled records: 254 opens reclassified (179 bot + 75 human)
+
+---
+
 ## Session: 2026-04-17 (part 2)
 
 ### Audit Findings (live production state)
