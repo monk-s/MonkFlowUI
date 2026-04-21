@@ -21,5 +21,9 @@ npm-debug.log*
 google-service-account.json
 
 # Local artifacts (not code)
-Client Kickoff/
+# Ignore everything in Client Kickoff/ by default (signed agreements, .DS_Store, etc.)
+# but allow the industry 1-pager deliverables (HTML source + generated PDFs).
+Client Kickoff/*
+!Client Kickoff/*.html
+!Client Kickoff/MonkFlow_*_3_automations.pdf
 DIRECTORY_LISTINGS_RESEARCH.md
