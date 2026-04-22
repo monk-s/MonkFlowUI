@@ -2,6 +2,115 @@
 
 ---
 
+## Session: 2026-04-21 (part 5) — Live Test + Three Rendered-Email Fixes
+
+### Goal
+After part 4's code fixes were deployed, user ran a live test send to
+nate@thelinders.com and gave three concrete content complaints from the
+*rendered* email (not theoretical — actual Gmail render). Triage, fix, live-
+retest, and commit before 2026-04-22 8am CT cohort.
+
+### Findings (from live rendered email, not static audit)
+1. **[HIGH] No greeting at all** — live v4 email to "Nate" opened with the
+   operational observation, skipping "Hey Nate,". Root cause: `getFirstName`
+   returned `'there'` for "Nate" because `COMMON_NAMES` was missing common
+   short forms. Prompt logic was correct; word set was too narrow.
+2. **[HIGH] Signature pigeonholed MonkFlow** — rendered as `Founder, MonkFlow
+   — automation for dental practices`, which reads as a specialist shop. Real
+   customer base spans many industries; industry-specific signature hurts
+   positioning and discourages cross-industry replies.
+3. **[HIGH] Booking URL was broken placeholder** — part 4's over-conservative
+   revert left `BOOKING_URL` default as `https://cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV`.
+   Verified against app.js that `monkflow.io/#schedule` IS a working 3-step
+   scheduling modal (hash triggers `handleHashRoute()` → `showSchedulingModal()`
+   at app.js:632–636, modal at app.js:5210). Not a broken anchor — it's the
+   built-in booking UX. Production Railway env already matched; only default
+   fallback was wrong.
+4. **[NOTE] Spam foldering on the test** — user reported the test email hit
+   junk. Root cause *for this test specifically* is Gmail's self-impersonation
+   heuristic (same last name "Linder" + unfamiliar sender domain
+   `mail.getmonkflow.com` is a classic phish signal Gmail scores aggressively).
+   Real prospects with different last names won't trigger this. DNS audit
+   confirmed SPF/DKIM/DMARC all correct for the sending domain. No code change
+   required — monitor first 100 cohort sends for inbox placement.
+
+### Fixes (commit 4770484)
+- **`server/src/utils/nameParser.js`** — Added ~130 nicknames / short forms
+  to `COMMON_NAMES` Set (Nate, Liz, Ben, Tom, Max, Meg, Abby, Gabe, Marty,
+  etc.). Garbage blocklist (`Santa`, `Plumber`, `Best`) still rejects correctly.
+- **`server/src/services/leadgen.service.js:631`** — Changed sign-off prompt
+  from `Founder, MonkFlow — automation for ${shortIndustry}` → `Founder, MonkFlow`.
+  Industry still injected at line 624 in the offer phrase (`automations for
+  dental practices like yours`) — that's value-prop personalization, not
+  company positioning.
+- **`server/src/config/env.js:40`** — Reverted `bookingUrl` default from
+  `cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV` → `https://monkflow.io/#schedule`
+  with explanatory comment.
+- **`server/src/services/outreach.scheduler.js:66`** — Matching revert of
+  follow-up template fallback.
+- **`server/scripts/e2e-outreach-test.js:223`** — Matching revert of E2E test
+  fallback so the script stays consistent.
+
+### Verification
+- Unit: `getFirstName('Nate', 'nate@thelinders.com') → 'Nate'`;
+  `getFirstName('Liz', ...) → 'Liz'`; `getFirstName('Santa', 'info@best.com') → 'there'`
+  (blocklist still works). All five edge cases pass.
+- Syntax: `node -e "new (require('vm')).Script(...)"` clean on all 5 files.
+- Live E2E: Generated + sent v4 email via Resend to nate@thelinders.com.
+  Resend ID `a00a635e-6671-497b-a118-b33afad29383`. Five rendered-output
+  assertions all pass: greeting `Hey Nate,`, signature exactly
+  `Founder, MonkFlow`, booking URL `https://monkflow.io/#schedule`, exact
+  micro-CTA `Reply 'send it'`, no industry pigeonhole in signature.
+- Deploy: Pushed to main → Railway auto-deploy → `/api/v1/health` returns 200.
+
+### Next Session Priority
+1. **Monitor the 2026-04-22 8am CT 100-lead cohort** during send and first
+   24h. Watch Resend dashboard for bounces, spam complaints, Gmail inbox
+   placement. If spam rate > 5%, pause remaining cohort and investigate.
+2. **Build "reply 'send it' → auto-deliver PDF" flow** — currently 1-pagers
+   are sent manually. At 1–5% reply on 100 leads = 1–5 manual sends, so
+   manual is fine for this cohort but won't scale to 500/1000-lead cohorts.
+3. **Run reply-rate query 2 weeks post-send** (~2026-05-06) after T4 fires.
+   Success gate: ≥1% reply = signal, ≥3% = ship default, <0.5% = pivot offer.
+4. **Review Gmail postmaster tools** for mail.getmonkflow.com reputation —
+   first cohort will generate enough volume for domain reputation to start
+   registering. Spam-fold rate is the blocker to watch.
+5. **Body length post-send audit** — after T2 fires for v4 cohort, run:
+   ```sql
+   SELECT touch_number, AVG(LENGTH(body))::int AS avg_chars,
+          MAX(LENGTH(body))::int AS max_chars
+   FROM outreach_emails WHERE variant = 'v4-named-deliverable' AND touch_number > 0
+   GROUP BY touch_number;
+   ```
+   T2 avg should be <400, T3 <500, T4 <300. If exceeded, enforce via post-
+   generation truncate-and-regenerate (AI tends to ignore hard word limits).
+
+### Follow-up: Hyperlink Verification
+After commit 4770484 shipped, user reported the P.S. URL in the test email
+wasn't a clickable hyperlink. Traced the render pipeline end-to-end:
+- **Initial send (touch 0):** `leadgen.service.js:784` runs `(https?:\/\/[^\s<]+)`
+  regex on each line AFTER `escapeHtml` (which leaves `#` untouched). Correctly
+  wraps `https://monkflow.io/#schedule` in `<a href>`. VERIFIED.
+- **Static fallback follow-ups (touches 2–4):** `outreach.scheduler.js:72,75`
+  uses explicit `<a href="${bookingUrl}">${bookingUrl}</a>`. VERIFIED.
+- **AI-generated follow-ups:** `outreach.scheduler.js:108` uses the same
+  linkify regex. VERIFIED.
+
+Root cause of the user-seen unlinked URL: my throwaway test script used
+bare `<p>${l}</p>` wrapping without the linkify step. Production will render
+hyperlinks correctly. Re-sent a test using the EXACT production render path
+(Resend ID `5def55a2-97fb-4b3c-b329-4abc0eaf1d61`) — verified `<a href>` tag
+emitted in HTML, assertion passed, no code change required.
+
+### Metrics
+- Files modified: 5
+- Bugs fixed: 3 (HIGH: 3)
+- Live test sends: 2 (Resend IDs a00a635e-…, 5def55a2-…)
+- Commits: 1 (4770484)
+- Tests added: 0 (inline verification in throwaway scripts, deleted after use)
+
+---
+
 ## Session: 2026-04-21 (part 4) — Final Pre-ship Polish + Soft Fixes
 
 ### Goal
