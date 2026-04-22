@@ -2,6 +2,112 @@
 
 ---
 
+## Session: 2026-04-21 (part 4) — Final Pre-ship Polish + Soft Fixes
+
+### Goal
+Last-mile audit before tomorrow 2026-04-22 8am CT send. User ask: "NOT have me
+end up in the spam folder." Find any remaining soft concerns from content,
+deliverability, or measurement perspectives and patch before the cohort fires.
+
+### Audit Findings
+- [HIGH] **No RFC 8058 one-click unsubscribe POST handler.** Outbound headers
+  advertise `List-Unsubscribe-Post: List-Unsubscribe=One-Click`, but only a GET
+  handler existed at `/unsubscribe/:token`. If Gmail / Apple Mail / Outlook
+  tries the one-click POST (which compliant clients DO, per RFC 8058 §3.1), the
+  POST 404s and the mailbox provider counts it as a negative deliverability
+  signal — directly undermining the header's purpose. — FIXED in commit `e2b127e`.
+- [MEDIUM] **Subject monoculture.** Rendering test produced "3 automations for
+  {company}" on ALL 4 test leads at temperature 0.4. The AI was anchoring on
+  the cheapest example in the preferred-patterns list. Across a 100-lead
+  cohort this would trip `subjectIsOverused()` dedup from lead #6 onward —
+  adding latency + AI cost and potentially still producing corpus-duplicate
+  subject fingerprints. — FIXED in commit `ec41767` (reorder preferred patterns
+  to put name+question and "Saw something at X" first, add explicit "VARY your
+  choice" directive, bump `MAX_DEDUP` from 2 to 3). Post-fix rendering test:
+  5 unique subjects / 5 sends across 4 industries.
+- [MEDIUM] **Awkward offer phrasing.** Line 624 of leadgen.service.js said
+  `${lead.business_type} practices like yours` — for `business_type = "e-commerce
+  retailer"` this rendered as "e-commerce retailer practices" (a retail brand
+  is not a "practice"). Same redundancy for "chiropractic office practices".
+  — FIXED in commit `ec41767` (use already-computed `${shortIndustry}` which
+  gives "dental practices", "e-commerce brands", "financial advisors",
+  "chiropractic offices" cleanly). Post-fix: 5/5 offer lines clean.
+- [MEDIUM] **T3 static fallback hardcoded dental case study.** Case 3 in
+  outreach.scheduler.js::getFollowupTemplate had a Tulsa dental proof
+  paragraph baked in. Rare path (fires only when AI generation errors on
+  touch 3), but a real foot-gun when it does — a financial advisor on day 12
+  with a Tulsa dental proof is obviously templated. — FIXED in commit
+  `ec41767` (use `selectCaseStudyForFollowup()` from outreach-ai.service.js
+  to industry-match; exported the selector from that module for reuse).
+- [LOW / FALSE-ALARM] **Follow-up plain-text alternative was flagged as
+  missing by the spam analysis agent.** Actually already present in both send
+  paths: initial send at leadgen.service.js:791 derives plain text from
+  `outreach_body` + unsubscribe URL and passes as `text:`; follow-up send at
+  outreach.scheduler.js:225-241 strips HTML tags to plain text and passes as
+  `text:`. Both pass through `sendEmail()` which forwards `text` to Resend's
+  `text` field. — NO-OP (logged so next audit doesn't re-flag).
+
+### Production DB State (verified via ballast.proxy.rlwy.net)
+- Leads inventory: 1,607 sent, 640 diagnosed (ready), 320 skipped_no_name,
+  29 unsubscribed, 24 bounced.
+- outreach_leads: 538 closed, 277 active, 0 orphans (no `status='active' AND
+  next_followup_at IS NULL AND touch_count < 4`).
+- **Replies EVER detected: 0.** Across 1,607 sends. 29 unsubscribes happened,
+  so inboxes ARE engaging — yet 0 replies. This is statistically very
+  suspicious and is consistent with the MX/SES reply-routing concern.
+- First-touch variant counts: B/C/D/E/F/1/2/3/A all pre-v4 — `v4-named-deliverable`
+  count = 0 (clean slate for tomorrow).
+- Sender health 7d: 7 senders on mail.getmonkflow.com + 1 on getmonkflow.com,
+  0 bounces today, 3 historical bounces across the week (all isolated, not a
+  trending signal). All healthy for tomorrow's warming-day-12 send.
+- Latest migration: current (041-linkedin-recent-post series).
+
+### Operational Concern Flagged for User Decision (not code)
+- **MX for `mail.getmonkflow.com` → `inbound-smtp.us-east-1.amazonaws.com`**
+  (raw AWS SES inbound). `Reply-To` header sets `nathan@mail.getmonkflow.com`.
+  If SES Receiving Rules are not configured for that subdomain, every reply
+  is silently dropped. The 0-replies-across-1,607-sends DB finding is
+  consistent with either (a) content was bad OR (b) replies never routed.
+  v4 framework hinges on "Reply 'send it'" — if replies aren't monitored, the
+  framework can't self-correct. Safest mitigation: `LEADGEN_REPLY_TO=nate@thelinders.com`
+  in Railway env → overrides the default in all 5 code sites, guarantees
+  capture. User to decide before 8am.
+
+### Deploy Verification
+- `ec41767` pushed to main, Railway deploy green, health returns 200.
+- POST `/leadgen/unsubscribe/:token` with invalid-UUID returns 400 (proving
+  new handler active, not route-not-found 404).
+- Module load + selectCaseStudyForFollowup unit test: 5/5 industries route
+  correctly.
+- Live rendering with real Anthropic API (5 leads): 5 unique subjects,
+  5/5 offer lines using clean `${shortIndustry}`, CTAs exact, signatures
+  compliant.
+
+### Next Session Priority
+1. After 8am CT send: run Q4/Q5/Q7/Q9 again to confirm v4 cohort landed at
+   full 100 leads, senders distributed evenly, no new bounces.
+2. Monitor nathan@mail.getmonkflow.com AND nate@thelinders.com inboxes for
+   first reply — and compare. If replies land only at nate@, the MX/SES
+   concern is confirmed; update code comments + consider changing the
+   default.
+3. After T2 fires (~day 8), run the follow-up length verification SQL from
+   the plan.
+
+### Commits This Session
+- `e2b127e` — RFC 8058 one-click unsubscribe POST handler
+- `ec41767` — three soft-concern fixes (subject variety, offer phrasing,
+  T3 static fallback industry-match)
+
+### Metrics
+- Files modified: 4 (leadgen.controller, leadgen.routes, leadgen.service,
+  outreach-ai.service, outreach.scheduler)
+- Bugs fixed: 4 (HIGH: 1, MEDIUM: 3)
+- Commits: 2
+- Tests: 1 live-API rendering test (5 leads, 5 unique subjects) + 1 unit test
+  (5 case study mappings)
+
+---
+
 ## Session: 2026-04-21 (part 3) — Pre-ship E2E Audit
 
 ### Goal
