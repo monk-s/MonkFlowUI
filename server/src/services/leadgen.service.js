@@ -628,7 +628,7 @@ STRUCTURE — follow exactly in this order:
 
 6. Sign-off (three lines exactly):
    Nathan
-   Founder, MonkFlow — automation for ${shortIndustry}
+   Founder, MonkFlow
    monkflow.io
 
 ${includePs ? `7. P.S. with booking URL (exactly this line):

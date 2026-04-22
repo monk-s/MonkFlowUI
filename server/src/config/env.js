@@ -32,11 +32,12 @@ const env = {
   resendWebhookSecret: process.env.RESEND_WEBHOOK_SECRET || '',
   apiUrl: process.env.API_URL || 'http://localhost:8080',
   inboundWebhookSecret: process.env.INBOUND_WEBHOOK_SECRET || '',
-  // TODO(nathan): Set BOOKING_URL env var in Railway to a real Cal.com / Calendly
-  // link (e.g. https://cal.com/nathan-linder/intro) BEFORE the next send cohort.
-  // The hash anchor below is a placeholder — it loads the marketing homepage and
-  // forces the reader to scroll + fill a contact form, which kills conversion.
-  bookingUrl: process.env.BOOKING_URL || 'https://cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV',
+  // The #schedule hash triggers handleHashRoute() in app.js, which opens the
+  // 3-step scheduling modal (calendar → time slot → details) directly. Not a
+  // hash anchor to scroll — it IS the booking UX. Verified 2026-04-21 against
+  // production. Override with BOOKING_URL in Railway env only if switching to
+  // a different calendar provider (Cal.com, Calendly, etc.).
+  bookingUrl: process.env.BOOKING_URL || 'https://monkflow.io/#schedule',
   pushoverUserKey: process.env.PUSHOVER_USER_KEY || '',
   pushoverAppToken: process.env.PUSHOVER_APP_TOKEN || '',
   unipileApiKey: process.env.UNIPILE_API_KEY || '',

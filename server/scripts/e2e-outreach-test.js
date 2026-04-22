@@ -220,7 +220,7 @@ async function testFollowupTemplates(testLeadIds) {
       // Simulate what the controller/scheduler does
       const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';
       const reSubject = `Re: ${origSubject}`;
-      const bookingUrl = env.bookingUrl || 'https://cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV';
+      const bookingUrl = env.bookingUrl || 'https://monkflow.io/#schedule';
 
       let template;
       switch (touch) {

@@ -43,6 +43,26 @@ const COMMON_NAMES = new Set([
   'tom','tommy','tony','tonya','tracey','tracy','travis','trent','trevor','troy','tyler','valerie',
   'vanessa','vernon','vicki','victor','victoria','vincent','virginia','vivian','wade','walter','wanda',
   'warren','wayne','wendy','wesley','whitney','william','willie','zachary','zach',
+  // Common nicknames / short forms — missing from base list caused live test
+  // to render "Hey [no greeting]," when contact_person was "Nate" (producing
+  // a cold-looking open). Extending coverage keeps greeting intact for the
+  // nicknames real small-business owners actually use.
+  'abby','al','ali','allie','ally','andi','angie','barb','bea','ben','benny','bert','bev','bill',
+  'bo','bonn','brad','brie','cal','cam','carl','caro','cas','cass','cat','cathy','cece','chad','chas',
+  'chip','chrissy','cici','cj','cliff','connie','cris','dani','debi','dee','deedee','del','demi','dez',
+  'dom','dominic','don','dot','drew','edie','el','ellie','em','ernie','ess','finn','fran','francis',
+  'fred','freddie','freddy','gabby','gabe','gene','georgie','gil','ginny','gus','hal','hank','harv',
+  'hunt','ike','izzy','jackie','jake','jan','jas','jeb','jen','jenna','jerry','jess','jessie','jim',
+  'jo','jodi','jodie','jody','joelle','joey','jojo','jon','jules','june','kaci','kacy','kara','kas',
+  'kass','kat','kate','katy','kay','ken','kira','kit','kris','kristy','lance','lani','lara','larry',
+  'les','lex','lexi','lili','lily','liz','lizzie','lois','lori','lou','louie','luc','lucy','luis',
+  'mac','maddie','mal','manny','marc','marco','margie','marty','mary','mattie','matty','meg','mel',
+  'mia','mike','milo','mitch','moe','mona','nat','nate','ned','nelly','nessa','nick','niki','nikki',
+  'nina','norm','ollie','otto','pat','paddy','paige','pat','pete','phil','pip','ray','reg','rich',
+  'rick','rita','rob','robby','ron','rory','rosa','roxy','rudy','rusty','sal','sally','sammy','sandy',
+  'shan','shay','shea','shel','sid','sonia','sonny','stan','steph','sue','suze','syd','tad','tam',
+  'tate','teddy','tess','thad','theo','tiff','toby','todd','toby','trish','trixie','van','vic','vince',
+  'vinny','vinnie','wade','wally','walt','wes','will','winnie','yvette','zack','zane',
 ]);
 
 // Single-word strings that LOOK like names (capitalized, in COMMON_NAMES or

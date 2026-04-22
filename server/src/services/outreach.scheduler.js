@@ -60,8 +60,10 @@ function getFollowupTemplate(touchNumber, lead) {
     ? `<img src="https://monkflow.io/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`
     : '';
 
-  // Placeholder fallback matches env.js — set BOOKING_URL in Railway.
-  const bookingUrl = env.bookingUrl || 'https://cal.com/PLACEHOLDER-SET-BOOKING-URL-ENV';
+  // Default matches env.js — the #schedule hash opens the built-in scheduling
+  // modal directly. Override with BOOKING_URL in Railway only if switching
+  // calendar providers.
+  const bookingUrl = env.bookingUrl || 'https://monkflow.io/#schedule';
   // Skip the PS line entirely when the booking URL is a placeholder (dev /
   // misconfig). env.js hard-refuses to boot in prod with a placeholder, so this
   // only matters if someone forgets BOOKING_URL on staging or local.
