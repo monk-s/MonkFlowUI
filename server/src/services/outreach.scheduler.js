@@ -38,11 +38,18 @@ function getNextFollowupDate(touchCount) {
 function getFollowupTemplate(touchNumber, lead) {
   const { getFirstName, cleanCompanyName } = require('../utils/nameParser');
   const env = require('../config/env');
+  // Industry-matched case study for the T3 fallback. The AI path in
+  // outreach-ai.service.js::generateFollowup already does this; mirroring it
+  // here so the static fallback (which only fires on AI failure) doesn't send
+  // a Tulsa dental proof to a financial advisor. Cheap insurance — rare path,
+  // avoids a real foot-gun when AI is down.
+  const { selectCaseStudyForFollowup } = require('./outreach-ai.service');
   const firstName = getFirstName(lead.contact_name, lead.contact_email);
   const rawCompany = lead.company ? cleanCompanyName(lead.company, lead.contact_email) : '';
   const company = rawCompany ? ` at ${rawCompany}` : '';
   const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';
   const reSubject = `Re: ${origSubject}`;
+  const caseStudy = selectCaseStudyForFollowup(lead.industry || lead.business_type || '');
 
   const unsubToken = lead.unsubscribe_token;
   const unsubUrl = unsubToken ? `https://monkflow.io/api/v1/leadgen/unsubscribe/${unsubToken}` : null;
@@ -74,7 +81,7 @@ function getFollowupTemplate(touchNumber, lead) {
     };
     case 3: return {
       subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>We cut a dental practice's scheduling from 18 hrs/week to under 2 with a similar build. Same opportunity${company}.</p><p>Still happy to send the 1-page map — just reply "send it".</p><p>Nathan</p>${psLine}</div>${unsubFooter}${trackingPixel}`,
+      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>For ${caseStudy.name}, we ${caseStudy.what} — ${caseStudy.result}. Same opportunity${company}.</p><p>Still happy to send the 1-page map — just reply "send it".</p><p>Nathan</p>${psLine}</div>${unsubFooter}${trackingPixel}`,
     };
     case 4: return {
       subject: reSubject,

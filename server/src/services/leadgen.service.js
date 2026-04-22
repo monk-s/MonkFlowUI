@@ -621,7 +621,7 @@ STRUCTURE — follow exactly in this order:
    Then ONE sentence connecting that result to ${company}'s likely situation.
 
 4. The OFFER (the named deliverable, ~20–30 words):
-   "I put together a 1-page map of the 3 highest-ROI automations for ${lead.business_type} practices like yours. Yours to keep, no call required."
+   "I put together a 1-page map of the 3 highest-ROI automations for ${shortIndustry} like yours. Yours to keep, no call required."
 
 5. The MICRO-CTA — write exactly this line, no paraphrasing:
    Reply 'send it' and I'll email it over today.
@@ -644,19 +644,29 @@ HARD RULES:
 
 SUBJECT LINE:
 - 3–6 words, sentence case (capitalize first word only), no emoji, no all-lowercase.
-- Prefer patterns tied to a concrete operational signal:
-  - "${hasRealName ? firstName + ', a question' : 'A question about ' + company}"
-  - "3 automations for ${company}"
-  - "${lead.business_type} intake — a question"
-  - "Saw something at ${company}"
+- VARY your choice across the patterns below — do not always pick the same one.
+  The first two options involve the prospect's name/company pain and are
+  preferred; mix in the others so the 100-lead cohort doesn't ship with a
+  single subject template (spam filters flag near-duplicate subject corpora).
+- Preferred patterns, in order of preference:
+  ${hasRealName ? `1. "${firstName}, a question about ${company}"
+  2. "Saw something at ${company}"
+  3. "${company} intake question"
+  4. "3 automations for ${company}"` : `1. "A question about ${company}"
+  2. "Saw something at ${company}"
+  3. "${company} intake question"
+  4. "3 automations for ${company}"`}
 - AVOID overused patterns (all used >200× recently — will hit spam filters):
   "Quick question", "Re: Quick question", "Question about {company}", "{city} {industry} + intake".
 
 Return JSON only: {"subject": "...", "body": "..."}`;
 
-  // Track regenerations due to subject overuse (separate from API retry backoff)
+  // Track regenerations due to subject overuse (separate from API retry backoff).
+  // Bumped 2 → 3 so that if the AI picks the same "3 automations for {company}"
+  // shape on consecutive sends, the regenerate pass has more room to land on a
+  // truly different pattern before we give up and send whatever came back.
   let dedupAttempts = 0;
-  const MAX_DEDUP = 2;
+  const MAX_DEDUP = 3;
   let extraInstruction = '';
 
   const MAX_RETRIES = 5;

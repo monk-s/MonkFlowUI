@@ -759,4 +759,5 @@ module.exports = {
   generateEmailForLead,
   generateFollowup,
   CASE_STUDIES,
+  selectCaseStudyForFollowup,
 };
