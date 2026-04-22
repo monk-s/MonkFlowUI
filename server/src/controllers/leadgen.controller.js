@@ -66,4 +66,28 @@ const unsubscribe = async (req, res) => {
   }
 };
 
-module.exports = { getLeads, getStats, getLead, triggerRun, unsubscribe };
+// Gmail / Apple Mail / Outlook one-click unsubscribe (RFC 8058). The outbound
+// cold emails advertise `List-Unsubscribe-Post: List-Unsubscribe=One-Click`,
+// which means bulk-sender-compliant clients POST to the unsub URL when the
+// user clicks the "Unsubscribe" chip in the inbox. If we only respond to GET,
+// the POST 404s and the mailbox provider counts it as a deliverability signal.
+// This handler mirrors the GET handler's behavior but returns an empty 200
+// instead of HTML (per RFC 8058 §3.1).
+const unsubscribeOneClick = async (req, res) => {
+  try {
+    const token = req.params.token;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(token)) {
+      return res.status(400).end();
+    }
+    const lead = await leadModel.findByUnsubscribeToken(token);
+    if (!lead) return res.status(404).end();
+    await leadModel.update(lead.id, { status: 'unsubscribed' });
+    res.status(200).end();
+  } catch (err) {
+    console.error('[LEADGEN] one-click unsub error:', err.message);
+    res.status(500).end();
+  }
+};
+
+module.exports = { getLeads, getStats, getLead, triggerRun, unsubscribe, unsubscribeOneClick };

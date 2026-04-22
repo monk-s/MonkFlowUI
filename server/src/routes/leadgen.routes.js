@@ -5,6 +5,10 @@ const ctrl = require('../controllers/leadgen.controller');
 
 // Public: unsubscribe link (no auth needed)
 router.get('/unsubscribe/:token', ctrl.unsubscribe);
+// Gmail / Apple Mail / Outlook RFC 8058 one-click POST handler. The outbound
+// emails advertise `List-Unsubscribe-Post: List-Unsubscribe=One-Click` — if we
+// only honor GET, the POST 404s and hurts sender reputation.
+router.post('/unsubscribe/:token', ctrl.unsubscribeOneClick);
 
 // Protected routes (admin-only — lead gen is a platform-level feature)
 const requireSuperadmin = require('../middleware/requireSuperadmin');
