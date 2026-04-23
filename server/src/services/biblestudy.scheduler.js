@@ -15,9 +15,10 @@ async function hb(status, detail) {
 }
 
 function start() {
-  // Run daily at 12:00 UTC (= 06:00 AM CT standard, 07:00 AM CT during DST).
-  // Delivers the daily study into Nathan's inbox before morning coffee.
-  task = cron.schedule('0 12 * * *', async () => {
+  // Run daily at 08:00 America/Chicago (DST-aware — fires at 13:00 UTC in
+  // summer, 14:00 UTC in winter). Delivers the daily study into inboxes
+  // at morning-coffee time for Central-time recipients.
+  task = cron.schedule('0 8 * * *', async () => {
     console.log('[BibleStudyScheduler] Running daily study generation...');
     await hb('started', null);
     try {
@@ -34,9 +35,9 @@ function start() {
       console.error('[BibleStudyScheduler] Error:', err.message);
       await hb('failed', { error: err.message });
     }
-  }, { timezone: 'UTC' });
+  }, { timezone: 'America/Chicago' });
 
-  console.log('[BibleStudyScheduler] Started — runs daily at 12:00 UTC');
+  console.log('[BibleStudyScheduler] Started — runs daily at 08:00 America/Chicago');
 }
 
 function stop() {
