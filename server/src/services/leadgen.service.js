@@ -1514,4 +1514,4 @@ async function sendOwnerSummary(batchDate, stats, leads) {
   });
 }
 
-module.exports = { runDailyLeadGeneration, diagnoseWebsite, generateOutreachEmail, searchSerpAPI, trackSend, trackBounce, trackComplaint, getHealthySenders, getWarmingLimits, scoreLead, FIRM_TYPES, US_CITIES };
+module.exports = { runDailyLeadGeneration, diagnoseWebsite, generateOutreachEmail, searchSerpAPI, trackSend, trackBounce, trackComplaint, getHealthySenders, getWarmingLimits, scoreLead, escapeHtml, FIRM_TYPES, US_CITIES };

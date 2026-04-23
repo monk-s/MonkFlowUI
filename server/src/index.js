@@ -92,6 +92,14 @@ runMigrations().then(() => {
     } catch (err) {
       logger.error('LinkedIn scheduler failed to start: %s', err.message);
     }
+
+    // Start daily Bible study cron (12:00 UTC daily — Nathan's morning digest)
+    try {
+      const bibleStudyScheduler = require('./services/biblestudy.scheduler');
+      bibleStudyScheduler.start();
+    } catch (err) {
+      logger.error('Bible study scheduler failed to start: %s', err.message);
+    }
   });
 
   // Graceful shutdown
@@ -119,6 +127,8 @@ runMigrations().then(() => {
         outreachScheduler.stop();
         const linkedinScheduler = require('./services/linkedin.scheduler');
         linkedinScheduler.stop();
+        const bibleStudyScheduler = require('./services/biblestudy.scheduler');
+        bibleStudyScheduler.stop();
         logger.info('Cron jobs stopped');
       } catch { /* scheduler not loaded yet */ }
 
