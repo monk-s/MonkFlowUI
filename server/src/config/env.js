@@ -79,6 +79,25 @@ if (env.isProd) {
       'calendar URL (e.g. https://cal.com/your-handle/15min) before boot.'
     );
   }
+  // Refuse to send outreach from the ROOT getmonkflow.com domain. The main
+  // domain is reserved for transactional (billing, auth, bible study, owner
+  // summaries). Cold outreach MUST go through the warmed mail.getmonkflow.com
+  // subdomain to keep reputation segmented. If you see this error, either:
+  //   - unset OUTREACH_FROM_EMAIL on Railway (defaults to nathan@mail.getmonkflow.com), OR
+  //   - set OUTREACH_FROM_EMAIL="Nathan Linder <nathan@mail.getmonkflow.com>", OR
+  //   - set OUTREACH_SENDING_DOMAIN=mail.getmonkflow.com (or another sending subdomain)
+  // Historical bug: 370 cold follow-ups leaked onto the root domain between
+  // 2026-04-06 and 2026-04-23 because OUTREACH_FROM_EMAIL was set to the root.
+  const outreachAddrMatch = env.outreachFromEmail && env.outreachFromEmail.match(/<([^>]+)>|^([^\s<>]+@[^\s<>]+)$/);
+  const outreachAddr = outreachAddrMatch ? (outreachAddrMatch[1] || outreachAddrMatch[2] || '').toLowerCase() : '';
+  if (outreachAddr && /@getmonkflow\.com$/i.test(outreachAddr) && !/@mail\.getmonkflow\.com$/i.test(outreachAddr)) {
+    throw new Error(
+      `OUTREACH_FROM_EMAIL resolves to "${outreachAddr}" which is on the ROOT getmonkflow.com domain. ` +
+      `Cold outreach must go through a warmed sending subdomain (e.g. mail.getmonkflow.com). ` +
+      `Fix on Railway: unset OUTREACH_FROM_EMAIL (default is nathan@mail.getmonkflow.com), ` +
+      `or explicitly set OUTREACH_SENDING_DOMAIN=mail.getmonkflow.com.`
+    );
+  }
 }
 
 // Helper exposed to services: detect whether the booking URL is a placeholder.

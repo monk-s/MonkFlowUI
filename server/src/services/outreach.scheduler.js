@@ -29,8 +29,8 @@ function addBusinessDays(from, days) {
 function getNextFollowupDate(touchCount) {
   const from = new Date();
   switch (touchCount) {
-    case 2: return addBusinessDays(from, 5);  // After Touch 2: +5 biz days (~Day 8)
-    case 3: return addBusinessDays(from, 7);  // After Touch 3: +7 biz days (~Day 17)
+    case 2: return addBusinessDays(from, 5);  // After Touch 2: +5 biz days → Touch 3 breakup (~Day 8)
+    // Touch 3 is the terminal breakup — no Touch 4. Sequence ends here.
     default: return null;
   }
 }
@@ -73,19 +73,21 @@ function getFollowupTemplate(touchNumber, lead) {
   const psBreakup = env.bookingUrlIsPlaceholder()
     ? ''
     : `<p style="font-size:13px;color:#666;">P.S. If it ever comes up: <a href="${bookingUrl}">${bookingUrl}</a></p>`;
-  // New named-deliverable sequence: one offer, re-asked with decreasing length.
-  // These fallbacks only fire when AI generation errors — the AI path uses the
-  // matching instructions in outreach-ai.service.js::generateFollowup.
+  // 3-touch named-deliverable sequence: one offer, re-asked once, then breakup.
+  // Previously a 4-touch cadence with a value-add case study at T3 and breakup
+  // at T4 — flattened to 3 touches after the T3 case-study variant showed zero
+  // incremental replies in the 2026-04 cohort. The breakup now owns the T3
+  // slot. These fallbacks only fire when AI generation errors — the AI path
+  // uses matching instructions in outreach-ai.service.js::generateFollowup.
+  // caseStudy/psLine are computed above but unused now that T3 = breakup —
+  // kept in scope so removing them doesn't ripple through other code paths.
+  void caseStudy; void psLine;
   switch (touchNumber) {
     case 2: return {
       subject: reSubject,
       body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Still have that 1-page map of automations I offered to send${rawCompany ? ` for ${rawCompany}` : ''} — want it?</p><p>Reply "send it" and it's yours.</p><p>Nathan</p></div>${unsubFooter}${trackingPixel}`,
     };
     case 3: return {
-      subject: reSubject,
-      body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>For ${caseStudy.name}, we ${caseStudy.what} — ${caseStudy.result}. Same opportunity${company}.</p><p>Still happy to send the 1-page map — just reply "send it".</p><p>Nathan</p>${psLine}</div>${unsubFooter}${trackingPixel}`,
-    };
-    case 4: return {
       subject: reSubject,
       body: `<div style="font-family:sans-serif;max-width:600px;"><p>Hey ${firstName},</p><p>Closing the loop — totally get if this isn't a priority. Best of luck${company}.</p><p>Nathan</p>${psBreakup}</div>${unsubFooter}${trackingPixel}`,
     };
@@ -156,7 +158,7 @@ async function processDueFollowups() {
        FROM outreach_leads ol
        WHERE ol.status = 'active'
          AND ol.next_followup_at <= NOW()
-         AND ol.touch_count < 4
+         AND ol.touch_count < 3
          AND ol.replied_at IS NULL
        ORDER BY COALESCE(ol.lead_score, 0) DESC, ol.next_followup_at ASC`
     );
@@ -266,7 +268,8 @@ async function processDueFollowups() {
         );
 
         const nextFollowup = getNextFollowupDate(nextTouch);
-        if (nextTouch >= 4) {
+        if (nextTouch >= 3) {
+          // Touch 3 is the breakup — sequence ends here (was Touch 4 under the old 4-touch cadence).
           await query(
             `UPDATE outreach_leads SET touch_count = $1, last_sent_at = NOW(), next_followup_at = NULL, status = 'closed', updated_at = NOW() WHERE id = $2`,
             [nextTouch, lead.id]

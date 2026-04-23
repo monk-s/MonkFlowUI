@@ -6685,7 +6685,7 @@ function renderOutreachPage() {
     unsubscribed: { bg: '#ef444422', fg: '#ef4444' },
   };
 
-  const touchLabels = { 1: 'Initial', 2: 'Bump', 3: 'Value-add', 4: 'Breakup' };
+  const touchLabels = { 1: 'Initial', 2: 'Bump', 3: 'Breakup' };
 
   const rows = outreachData.map(lead => {
     const sc = statusColors[lead.status] || statusColors.active;
@@ -6719,7 +6719,7 @@ function renderOutreachPage() {
         </td>
         <td style="font-size:12px;color:var(--text-secondary);">${escapeHtml(lead.contact_email)}</td>
         <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${sc.bg};color:${sc.fg};">${lead.status}</span></td>
-        <td style="font-size:12px;color:var(--text-secondary);">${touchLabels[lead.touch_count] || lead.touch_count}/4</td>
+        <td style="font-size:12px;color:var(--text-secondary);">${touchLabels[lead.touch_count] || lead.touch_count}/3</td>
         <td style="font-size:12px;">${engagementStr}</td>
         <td style="font-size:12px;">${nextStr}</td>
         <td style="font-size:12px;">${aiStatus}</td>
@@ -6731,7 +6731,7 @@ function renderOutreachPage() {
     <div class="page-header">
       <div>
         <h1>Outreach Sequences</h1>
-        <p class="page-desc">Automated follow-up emails on a 3-touch cadence (Day 3, Day 7, Day 14)</p>
+        <p class="page-desc">Automated follow-up emails on a 3-touch cadence (Day 0 initial, Day 3 bump, Day 8 breakup)</p>
       </div>
       <div class="page-actions" style="display:flex;gap:8px;">
         <button class="btn ${outreachFilterPriority ? 'btn-primary' : 'btn-ghost'}" onclick="toggleOutreachPriorityFilter()" style="${outreachFilterPriority ? '' : 'color:#f59e0b;'}">
@@ -6771,8 +6771,7 @@ function renderOutreachPage() {
       <div style="display:flex;gap:32px;font-size:13px;color:var(--text-secondary);">
         <div><strong style="color:var(--text-primary);">Touch 1:</strong> Your initial cold email (logged when you add the lead)</div>
         <div><strong style="color:var(--text-primary);">Touch 2:</strong> Day 3 — casual bump</div>
-        <div><strong style="color:var(--text-primary);">Touch 3:</strong> Day 7 — value add</div>
-        <div><strong style="color:var(--text-primary);">Touch 4:</strong> Day 14 — breakup</div>
+        <div><strong style="color:var(--text-primary);">Touch 3:</strong> Day 8 — breakup</div>
       </div>
     </div>
 
@@ -6926,7 +6925,7 @@ async function viewOutreachLead(id) {
       unsubscribed: { bg: '#ef444422', fg: '#ef4444' },
     };
     const sc = statusColors[lead.status] || statusColors.active;
-    const touchLabels = { 1: 'Initial Cold Email', 2: 'Day 3 — Bump', 3: 'Day 7 — Value Add', 4: 'Day 14 — Breakup' };
+    const touchLabels = { 1: 'Initial Cold Email', 2: 'Day 3 — Bump', 3: 'Day 8 — Breakup' };
 
     const timeline = (lead.emails || []).map(em => {
       const engBadges = [];
@@ -6978,7 +6977,7 @@ async function viewOutreachLead(id) {
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px;">
           <div style="background:var(--bg-secondary);padding:10px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Touches</div>
-            <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${lead.touch_count || 0}/4</div>
+            <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${lead.touch_count || 0}/3</div>
           </div>
           <div style="background:${lead.opened_at ? '#3b82f611' : 'var(--bg-secondary)'};padding:10px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Opened</div>
@@ -7009,7 +7008,7 @@ async function viewOutreachLead(id) {
             </div>
           </div>
           ${timeline}
-          ${lead.status === 'active' && lead.touch_count < 4 ? `
+          ${lead.status === 'active' && lead.touch_count < 3 ? `
             <div style="display:flex;gap:12px;padding:12px 0;opacity:0.5;">
               <div style="width:8px;height:8px;border-radius:50%;border:2px dashed var(--text-tertiary);margin-top:6px;flex-shrink:0;"></div>
               <div style="font-size:13px;color:var(--text-tertiary);">Touch ${lead.touch_count + 1} scheduled for ${nextDate}</div>
@@ -7471,7 +7470,7 @@ function renderOutreachAnalyticsPage() {
     </div>` : '<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:20px;">No industry data available.</div>';
 
   // ── By touch conversion (real open rate + reply rate) ──
-  const touchLabels = { 0: 'Touch 0 (AI Initial)', 1: 'Touch 1 (Initial)', 2: 'Touch 2 (Bump)', 3: 'Touch 3 (Value-add)', 4: 'Touch 4 (Breakup)' };
+  const touchLabels = { 0: 'Touch 0 (AI Initial)', 1: 'Touch 1 (Initial)', 2: 'Touch 2 (Bump)', 3: 'Touch 3 (Breakup)' };
   const touchHtml = byTouch.length > 0 ? byTouch.map(t => {
     const replyRate = parseFloat(t.reply_rate) || 0;
     const openRate = parseFloat(t.real_open_rate) || 0;

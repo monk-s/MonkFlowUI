@@ -216,7 +216,9 @@ async function testFollowupTemplates(testLeadIds) {
     const firstName = getFirstName(lead.contact_name, lead.contact_email);
     const rawCompany = lead.company ? cleanCompanyName(lead.company) : '';
 
-    for (const touch of [2, 3, 4]) {
+    // 3-touch cadence: T1 is the initial cold email (logged at lead creation),
+    // T2 is the "still open?" bump, T3 is the terminal breakup. There is no T4.
+    for (const touch of [2, 3]) {
       // Simulate what the controller/scheduler does
       const origSubject = lead.original_subject || lead.ai_email_subject || 'your business';
       const reSubject = `Re: ${origSubject}`;
@@ -231,12 +233,7 @@ async function testFollowupTemplates(testLeadIds) {
           };
           break;
         case 3:
-          template = {
-            subject: `${rawCompany || firstName} + automation`,
-            body: `Hey ${firstName}, ... ${bookingUrl}`,
-          };
-          break;
-        case 4:
+          // Terminal breakup — Re:-threaded, warm close, no case study.
           template = {
             subject: reSubject,
             body: `Hey ${firstName}, ... ${bookingUrl}`,
@@ -250,12 +247,6 @@ async function testFollowupTemplates(testLeadIds) {
       assert(!template.body.includes('Hey About'), `Touch ${touch} template does NOT say "Hey About"`);
       assert(!template.body.includes('Hey Contact'), `Touch ${touch} template does NOT say "Hey Contact"`);
       assert(template.body.includes(bookingUrl), `Touch ${touch} template includes booking URL`);
-
-      // Verify company name is cleaned in subject
-      if (touch === 3 && rawCompany) {
-        assert(!template.subject.includes(': Dentist'), `Touch 3 subject does NOT contain page-title cruft`);
-        assert(!template.subject.includes('| Attorneys'), `Touch 3 subject does NOT contain pipe separator`);
-      }
     }
   }
 }
@@ -287,7 +278,7 @@ async function testFollowupProcessing(testLeadIds) {
      FROM outreach_leads ol
      WHERE ol.status = 'active'
        AND ol.next_followup_at <= NOW()
-       AND ol.touch_count < 4
+       AND ol.touch_count < 3
        AND ol.contact_email LIKE '%@e2etest-fake-monkflow.com'
      ORDER BY ol.next_followup_at ASC`
   );

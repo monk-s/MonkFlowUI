@@ -256,7 +256,7 @@ const processDueFollowups = catchAsync(async (req, res) => {
      FROM outreach_leads ol
      WHERE ol.status = 'active'
        AND ol.next_followup_at <= NOW()
-       AND ol.touch_count < 4
+       AND ol.touch_count < 3
      ORDER BY ol.next_followup_at ASC`
   );
 
@@ -338,9 +338,9 @@ const processDueFollowups = catchAsync(async (req, res) => {
         [lead.id, nextTouch, template.subject, template.body, gmailId, lead.email_variant || 'v4-named-deliverable']
       );
 
-      // Update lead — close sequence after touch 4
+      // Update lead — close sequence after touch 3 (breakup). Was 4 under the old cadence.
       const nextFollowup = getNextFollowupDate(nextTouch, new Date());
-      if (nextTouch >= 4) {
+      if (nextTouch >= 3) {
         await query(
           `UPDATE outreach_leads SET touch_count = $1, last_sent_at = NOW(), next_followup_at = NULL, status = 'closed', updated_at = NOW() WHERE id = $2`,
           [nextTouch, lead.id]

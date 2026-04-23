@@ -385,7 +385,7 @@ async function sendAiEmail(leadId) {
   return { sent: true, to: lead.contact_email };
 }
 
-// ── AI follow-up generator (for touches 2-4) ─────────────────
+// ── AI follow-up generator (for touches 2-3) ─────────────────
 
 /**
  * Local copy of leadgen.service.js::selectCaseStudy — inlined here to avoid a
@@ -468,34 +468,17 @@ Do NOT add a case study, a P.S., or a booking link. The ONLY ask is the one-word
 Subject: Use "Re: ${origSubject}" for threading.`;
       break;
     case 3: {
-      // "Proof + last offer" — add the industry-matched case study and the
-      // booking link in P.S. HARD LIMIT 400 chars. Skip the PS line when
-      // BOOKING_URL is a placeholder (dev / misconfig).
+      // "Breakup" — genuinely warm, under 250 chars, booking link in P.S. only.
+      // Promoted from Touch 4 in the 4-touch cadence. The intermediate value-add
+      // case-study touch was removed after the 2026-04 cohort showed zero
+      // incremental replies from it, so T3 now owns the breakup slot.
+      // caseStudy is unused on this path but still defined above — noop it
+      // to keep the reference stable and avoid lint noise.
+      void caseStudy;
       const psT3 = env.bookingUrlIsPlaceholder()
         ? ''
-        : `\n\nP.S. Or grab a 15-min slot: ${env.bookingUrl}`;
-      touchInstruction = `TOUCH 3 — "Proof + last offer" — HARD LIMIT 400 characters.
-
-Write exactly this structure:
-
-"Hey ${firstName},
-
-For ${caseStudy.name}, we ${caseStudy.what} — ${caseStudy.result}. Same opportunity at ${company || 'your practice'}.
-
-Still happy to send the 1-page map — just reply 'send it'.
-
-Nathan${psT3}"
-
-Do not exceed 400 characters. No bullet points, no extra prose beyond the structure above.
-Subject: Use "Re: ${origSubject}" for threading.`;
-      break;
-    }
-    case 4: {
-      // "Breakup" — genuinely warm, under 250 chars, booking link in P.S. only.
-      const psT4 = env.bookingUrlIsPlaceholder()
-        ? ''
         : `\n\nP.S. If it ever comes up: ${env.bookingUrl}`;
-      touchInstruction = `TOUCH 4 — "Breakup" — HARD LIMIT 250 characters.
+      touchInstruction = `TOUCH 3 — "Breakup" (terminal) — HARD LIMIT 250 characters.
 
 Write exactly this structure:
 
@@ -503,7 +486,7 @@ Write exactly this structure:
 
 Closing the loop — totally get if this isn't a priority. Best of luck with ${company || 'the practice'}.
 
-Nathan${psT4}"
+Nathan${psT3}"
 
 Do NOT guilt-trip. Do not add a case study. Do not exceed 250 characters.
 Subject: Use "Re: ${origSubject}" for threading.`;
