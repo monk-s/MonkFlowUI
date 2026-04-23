@@ -429,6 +429,7 @@ module.exports = {
   // exposed for testing / manual inspection:
   pickVerse,
   dayOfYearUTC,
+  generateAnalysis,
   renderEmailHtml,
   renderEmailText,
 };
