@@ -32,10 +32,15 @@ const env = {
   resendWebhookSecret: process.env.RESEND_WEBHOOK_SECRET || '',
   apiUrl: process.env.API_URL || 'http://localhost:8080',
   inboundWebhookSecret: process.env.INBOUND_WEBHOOK_SECRET || '',
-  // Daily Bible study digest — single recipient, no UI, email-only.
-  // Override in Railway env if the address changes; otherwise defaults to
-  // Nathan's personal inbox. Never required (no throw in prod validation).
-  bibleStudyRecipient: process.env.BIBLE_STUDY_RECIPIENT || 'nate@thelinders.com',
+  // Daily Bible study digest — multiple recipients supported (comma-separated).
+  // Each recipient gets their own send (not to/cc/bcc together) so nobody sees
+  // anyone else's address. Override via BIBLE_STUDY_RECIPIENT env in Railway.
+  // Default: Nathan + Prof. Alejandro Ezquerra (ACU, consented — the axe16a
+  // prefix is just his ACU username, not a nickname). Never required.
+  bibleStudyRecipients: (process.env.BIBLE_STUDY_RECIPIENT || 'nate@thelinders.com,axe16a@acu.edu')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean),
   // The #schedule hash triggers handleHashRoute() in app.js, which opens the
   // 3-step scheduling modal (calendar → time slot → details) directly. Not a
   // hash anchor to scroll — it IS the booking UX. Verified 2026-04-21 against

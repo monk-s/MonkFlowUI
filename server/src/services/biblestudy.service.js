@@ -361,28 +361,67 @@ async function generateAndSendDailyStudy() {
   const textBody = renderEmailText(verse, analysis, now);
   const subject = `${analysis.title} — ${verse.reference}`;
 
-  // 6. Send
-  const sendResult = await emailService.sendEmail({
-    to: env.bibleStudyRecipient,
-    from: env.emailFrom,
-    subject,
-    html,
-    text: textBody,
-  });
+  // 6. Send — one send per recipient (not to/cc/bcc together). That way
+  // every recipient sees only their own address in the To: header — no
+  // cross-leak of subscriber list. `email_id` column stores the tagged
+  // list `"recipient1:id1,recipient2:id2"` so a later lookup can tell
+  // which Resend message went where.
+  const recipients = env.bibleStudyRecipients;
+  const sentTags = [];
+  const failures = [];
+  for (const recipient of recipients) {
+    try {
+      const sendResult = await emailService.sendEmail({
+        to: recipient,
+        from: env.emailFrom,
+        subject,
+        html,
+        text: textBody,
+      });
 
-  if (sendResult?.error) {
-    throw new Error(`Resend returned error: ${sendResult.error.message || JSON.stringify(sendResult.error)}`);
+      if (sendResult?.error) {
+        const msg = sendResult.error.message || JSON.stringify(sendResult.error);
+        console.error(`[BibleStudy] Send to ${recipient} failed: ${msg}`);
+        failures.push(`${recipient}: ${msg}`);
+        continue;
+      }
+
+      const id = sendResult?.data?.id || sendResult?.id || null;
+      if (id) sentTags.push(`${recipient}:${id}`);
+    } catch (err) {
+      console.error(`[BibleStudy] Send to ${recipient} threw: ${err.message}`);
+      failures.push(`${recipient}: ${err.message}`);
+    }
   }
 
-  const emailId = sendResult?.data?.id || sendResult?.id || null;
+  // If every recipient failed, bubble up so the scheduler heartbeat
+  // records the failure and the row stays un-stamped for retry.
+  if (sentTags.length === 0) {
+    throw new Error(`All recipient sends failed: ${failures.join(' | ')}`);
+  }
 
-  // 7. Stamp the row
+  // 7. Stamp the row — any successful send counts as "sent today" for
+  // idempotency. Failed recipients are logged but don't trigger a
+  // second-day resend (by design — partial delivery is better than no
+  // delivery, and Resend retries internally for transient failures).
+  const emailIdStr = sentTags.join(',');
   await query(
     `UPDATE daily_studies SET email_sent_at = NOW(), email_id = $1, updated_at = NOW() WHERE id = $2`,
-    [emailId, studyId]
+    [emailIdStr, studyId]
   );
 
-  return { id: studyId, verse_reference: verse.reference, email_id: emailId };
+  if (failures.length > 0) {
+    console.warn(`[BibleStudy] Partial send — ${sentTags.length}/${recipients.length} succeeded. Failed: ${failures.join(' | ')}`);
+  }
+
+  return {
+    id: studyId,
+    verse_reference: verse.reference,
+    email_id: emailIdStr,
+    recipients: recipients.length,
+    succeeded: sentTags.length,
+    failed: failures.length,
+  };
 }
 
 module.exports = {
