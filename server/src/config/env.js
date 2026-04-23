@@ -79,26 +79,49 @@ if (env.isProd) {
       'calendar URL (e.g. https://cal.com/your-handle/15min) before boot.'
     );
   }
-  // Refuse to send outreach from the ROOT getmonkflow.com domain. The main
-  // domain is reserved for transactional (billing, auth, bible study, owner
-  // summaries). Cold outreach MUST go through the warmed mail.getmonkflow.com
-  // subdomain to keep reputation segmented. If you see this error, either:
-  //   - unset OUTREACH_FROM_EMAIL on Railway (defaults to nathan@mail.getmonkflow.com), OR
-  //   - set OUTREACH_FROM_EMAIL="Nathan Linder <nathan@mail.getmonkflow.com>", OR
-  //   - set OUTREACH_SENDING_DOMAIN=mail.getmonkflow.com (or another sending subdomain)
-  // Historical bug: 370 cold follow-ups leaked onto the root domain between
-  // 2026-04-06 and 2026-04-23 because OUTREACH_FROM_EMAIL was set to the root.
-  const outreachAddrMatch = env.outreachFromEmail && env.outreachFromEmail.match(/<([^>]+)>|^([^\s<>]+@[^\s<>]+)$/);
-  const outreachAddr = outreachAddrMatch ? (outreachAddrMatch[1] || outreachAddrMatch[2] || '').toLowerCase() : '';
-  if (outreachAddr && /@getmonkflow\.com$/i.test(outreachAddr) && !/@mail\.getmonkflow\.com$/i.test(outreachAddr)) {
-    throw new Error(
-      `OUTREACH_FROM_EMAIL resolves to "${outreachAddr}" which is on the ROOT getmonkflow.com domain. ` +
-      `Cold outreach must go through a warmed sending subdomain (e.g. mail.getmonkflow.com). ` +
-      `Fix on Railway: unset OUTREACH_FROM_EMAIL (default is nathan@mail.getmonkflow.com), ` +
-      `or explicitly set OUTREACH_SENDING_DOMAIN=mail.getmonkflow.com.`
-    );
-  }
 }
+
+// Outreach sender domain guard — auto-rewrite root → mail. subdomain.
+//
+// The root getmonkflow.com domain is reserved for transactional traffic
+// (billing, auth, bible study, owner summaries). Cold outreach must go
+// through the warmed mail.getmonkflow.com subdomain to keep reputation
+// segmented. Historical bug: 370 cold follow-ups leaked onto the root
+// domain between 2026-04-06 and 2026-04-23 because OUTREACH_FROM_EMAIL
+// on Railway was set to the root.
+//
+// We auto-rewrite rather than throw so a misconfigured Railway env var
+// can't take the whole API down. The rewrite logs loudly so it's visible
+// in Railway logs until Nathan fixes OUTREACH_FROM_EMAIL / OUTREACH_SENDING_DOMAIN.
+(() => {
+  const addrMatch = env.outreachFromEmail && env.outreachFromEmail.match(/<([^>]+)>|^([^\s<>]+@[^\s<>]+)$/);
+  const addr = addrMatch ? (addrMatch[1] || addrMatch[2] || '').toLowerCase() : '';
+  if (!addr) return;
+  const isRootOnly = /@getmonkflow\.com$/i.test(addr) && !/@mail\.getmonkflow\.com$/i.test(addr);
+  if (!isRootOnly) return;
+  const localPart = addr.split('@')[0];
+  const fixedAddr = `${localPart}@mail.getmonkflow.com`;
+  // Preserve "Display Name <...>" wrapping if the original had it
+  const nameMatch = env.outreachFromEmail.match(/^([^<]+?)\s*<[^>]+>$/);
+  const rewritten = nameMatch ? `${nameMatch[1].trim()} <${fixedAddr}>` : fixedAddr;
+  console.warn('━'.repeat(72));
+  console.warn(`⚠️  OUTREACH SENDER DOMAIN AUTO-REWRITTEN`);
+  console.warn(`    OUTREACH_FROM_EMAIL resolved to "${addr}" (root domain — transactional only).`);
+  console.warn(`    Auto-rewriting to "${fixedAddr}" for this process.`);
+  console.warn(`    FIX ON RAILWAY: unset OUTREACH_FROM_EMAIL (default is correct),`);
+  console.warn(`    or set OUTREACH_FROM_EMAIL="Nathan Linder <nathan@mail.getmonkflow.com>".`);
+  console.warn('━'.repeat(72));
+  env.outreachFromEmail = rewritten;
+  // Also fix leadgenFromEmail if it was pulling from the same root address
+  if (env.leadgenFromEmail && /@getmonkflow\.com$/i.test(env.leadgenFromEmail) && !/@mail\.getmonkflow\.com$/i.test(env.leadgenFromEmail)) {
+    const lgLocal = env.leadgenFromEmail.split('@')[0];
+    env.leadgenFromEmail = `${lgLocal}@mail.getmonkflow.com`;
+  }
+  // And outreachSendingDomain so SENDERS array in leadgen.service.js uses the subdomain
+  if (env.outreachSendingDomain && /^getmonkflow\.com$/i.test(env.outreachSendingDomain)) {
+    env.outreachSendingDomain = 'mail.getmonkflow.com';
+  }
+})();
 
 // Helper exposed to services: detect whether the booking URL is a placeholder.
 // Send paths use this to skip the P.S. line rather than emit a broken link.
