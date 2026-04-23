@@ -768,3 +768,88 @@ GROUP BY variant ORDER BY sent DESC;
 - Commits: 1 (aff7733)
 - Tests added: 0 (unit-test-executed manually in REPL; no persistent test suite)
 
+---
+
+## Session: 2026-04-23 — Daily Bible Study Email Digest (new feature)
+
+### Goal
+New feature (not an audit): per user request, build a daily in-depth Bible
+study email that picks a verse, has Claude break down the Greek/Hebrew
+words with Strong's lexicon notes, cross-references, historical/literary
+context, commentary, application, and prayer — then emails the rendered
+HTML+text to nate@thelinders.com every morning. Email-only (no UI),
+curated 365-verse cycle, leverages existing Railway/Resend/Anthropic/
+Postgres stack.
+
+### What shipped (commit 3a58796)
+- **server/data/bible-study-verses.json** — 365 curated WEB-text verses,
+  each with day_of_year, reference, testament, original_language, theme.
+  Distribution: ~60 Pentateuch, ~40 Psalms, ~30 Prophets, ~40 Wisdom,
+  ~90 Gospels, ~60 Acts/Pauline, ~25 General Epistles/Rev, ~20
+  Advent/Incarnation themed for December. Feb 29 falls back to day 59.
+- **server/migrations/044-daily-bible-study.sql** — `daily_studies` table
+  with `study_date UNIQUE` idempotency guard and JSONB `analysis` column.
+- **server/src/services/biblestudy.scheduler.js** — node-cron at
+  `'0 12 * * *'` UTC (= 06:00/07:00 AM CT). Heartbeat writes to existing
+  `scheduler_heartbeats` table under `name='biblestudy'`.
+- **server/src/services/biblestudy.service.js** — single entry point
+  `generateAndSendDailyStudy()`: idempotency SELECT → verse pick → Claude
+  (sonnet-4, temp 0.4, max_tokens 4096, structured JSON) → INSERT (23505
+  race-caught) → HTML+text render → sendEmail → stamp email_sent_at.
+  Validates Claude's JSON schema before storing.
+- **server/src/config/env.js** — added `bibleStudyRecipient` (default
+  `nate@thelinders.com`, override via `BIBLE_STUDY_RECIPIENT` env).
+- **server/src/services/leadgen.service.js** — now exports `escapeHtml`
+  for reuse (one-line module.exports change).
+- **server/src/index.js** — wired scheduler into startup + shutdown flow.
+
+### Scoping decisions locked in
+- Email-only, no UI, single recipient.
+- Sender: `noreply@getmonkflow.com` (main transactional domain), NOT
+  `mail.getmonkflow.com` (outreach domain) — keeps outreach sender
+  reputation clean.
+- Temperature 0.4 (scholarly consistency over creative variation).
+- WEB translation (public domain) — no licensing concerns storing text.
+
+### Zero new dependencies
+`@anthropic-ai/sdk`, `resend`, `node-cron`, `pg` all already present.
+
+### Verification still pending
+1. **Railway deploy green** — pushed to main, auto-deploy triggered. Health
+   endpoint responds but can't distinguish old-vs-new version from this
+   session. User can verify at Railway deployments tab.
+2. **Migration 044 applied** — should auto-run on next boot via
+   `server/migrations/migrate.js`. Confirm with:
+   ```sql
+   SELECT name FROM _migrations WHERE name LIKE '044%';
+   SELECT column_name FROM information_schema.columns
+     WHERE table_name = 'daily_studies' ORDER BY ordinal_position;
+   ```
+3. **End-to-end dry-run send** — first real fire is next 12:00 UTC (a few
+   hours from commit time). To trigger immediately via Railway shell:
+   ```bash
+   node -e "require('./src/services/biblestudy.service').generateAndSendDailyStudy().then(r=>console.log('OK:',r)).catch(e=>{console.error(e);process.exit(1)})"
+   ```
+   Expected inbox arrival at nate@thelinders.com from
+   noreply@getmonkflow.com with subject `${title} — ${reference}`.
+
+### Next Session Priority
+1. After first scheduled fire (or manual trigger), verify the rendered
+   email in Gmail: Hebrew/Greek glyphs render correctly, cross-references
+   cite real verses, commentary is substantive (not fluff). If tone is off,
+   tune the SYSTEM_PROMPT.
+2. Decide whether the recurring Anthropic spend is acceptable — one call
+   per day at ~4k output tokens on sonnet-4 is roughly $0.05-0.15/day,
+   $20-50/year. Trivial, but track it against outreach budget.
+3. Consider a "previous days" CLI query — not a UI page, just
+   `SELECT study_date, verse_reference FROM daily_studies ORDER BY
+   study_date DESC LIMIT 30;` — useful for reviewing what's been sent.
+
+### Metrics
+- Files modified: 3 (env, index, leadgen.service)
+- Files created: 4 (verses.json, migration, scheduler, service)
+- New dependencies: 0
+- Bugs fixed: 0 (new feature, not fixes)
+- Commits: 1 (3a58796)
+- Tests added: 0 (module smoke-tested locally; pure render fns validated)
+
