@@ -919,6 +919,10 @@ const handleResendWebhook = catchAsync(async (req, res) => {
   }
 
   const { type, data } = req.body;
+  // Diagnostic: log every event type Resend delivers so we can see whether
+  // email.received subscription is actually firing post-Inbound cutover. At
+  // ~30 sends/day with delivered+opened events, this is ~70 lines/day — cheap.
+  console.log(`[OUTREACH] Resend webhook received: type=${type}, email_id=${data?.email_id || 'n/a'}`);
   const { trackBounce, trackComplaint } = require('../services/leadgen.service');
 
   // Handle delivery tracking

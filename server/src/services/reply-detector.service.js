@@ -137,14 +137,24 @@ async function processInboundReply({ from, to, subject, body, inReplyTo }) {
   let matchedEmail = null;
 
   if (inReplyTo) {
+    // RFC 5322 In-Reply-To headers look like `<uuid@domain>`. Strip the angle
+    // brackets, then ALSO split off the @domain so we can match on the bare
+    // UUID. Resend's send API returns an `id` (UUID-only) which we store as
+    // `gmail_message_id` — but on inbound, the recipient's mail client echoes
+    // the full Message-ID header (`uuid@resend.com` or `uuid@mail.getmonkflow.com`
+    // depending on Resend's outbound posture). Verified 2026-04-25: 2040/2040
+    // rows in `outreach_emails.gmail_message_id` are bare UUIDs (no `@`).
+    // Without the local-part fallback, the In-Reply-To match path is dead
+    // code and we'd be relying entirely on the sender-email fallback.
     const messageRef = inReplyTo.replace(/[<>]/g, '');
+    const messageRefLocal = messageRef.split('@')[0];
     const { rows } = await query(
       `SELECT oe.*, ol.id AS lead_id, ol.contact_email, ol.status AS lead_status
        FROM outreach_emails oe
        JOIN outreach_leads ol ON ol.id = oe.lead_id
-       WHERE oe.gmail_message_id = $1
+       WHERE oe.gmail_message_id IN ($1, $2)
        LIMIT 1`,
-      [messageRef]
+      [messageRef, messageRefLocal]
     );
     if (rows.length > 0) {
       matchedEmail = rows[0];
