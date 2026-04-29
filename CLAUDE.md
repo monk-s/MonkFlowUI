@@ -31,6 +31,33 @@
 - Leave ~10% context for final commit + push + verification.
 - Log all changes to `AUDIT_LOG.md` in the project root (append, never overwrite).
 
+## 0. Truthful social proof (NEVER fabricate)
+
+**Never fabricate social proof.** AI prompts that generate cold-outreach content
+must reference only real, named, permission-granted case studies. Hardcoded
+case-study lists (e.g. `CASE_STUDIES` in `server/src/services/outreach-ai.service.js`)
+must match the production client roster — if a firm isn't a real paying client
+who has agreed to be named, it does not belong in the array.
+
+If a feature requires example data and no real client fits the shape:
+- Label it `EXAMPLE_DATA` in code comments + the variable name
+- Gate it behind an env var (e.g. `ALLOW_EXAMPLE_PROOF=true`) so it cannot
+  ship to production cold sends
+- Default the env var to false in `server/src/config/env.js`
+
+History: between ~2026-04-01 and 2026-04-29, three fabricated case studies
+(Tulsa dental, Columbus chiropractic, Austin Shopify) were live in
+production cold outreach, citing fake results to ~2,000 real recipients.
+This was a CAN-SPAM / FTC §5 / state UDAP exposure that was caught and
+corrected during the wealth-mgmt pivot. Don't reintroduce it. The original
+array is archived at `~/Desktop/monkflow-archive/case-studies-pre-trim-2026-04-29.txt`
+as remediation-timeline evidence — do not destroy.
+
+When updating prompts: read the live `CASE_STUDIES` array; if it has only
+one entry, the prompt should not pretend there are more. Anonymized
+references ("a 4-advisor RIA in Dallas") are acceptable IF AND ONLY IF
+the underlying engagement is real.
+
 ---
 
 ## 1. CRITICAL CHECKS (Run First Every Session)

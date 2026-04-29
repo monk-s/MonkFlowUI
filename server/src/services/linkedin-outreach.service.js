@@ -29,10 +29,24 @@ const OWNER_TITLE_KEYWORDS = ['owner', 'founder', 'partner', 'president', 'CEO',
 // Boolean-search industry keywords per firm.type (mirrors leadgen.FIRM_TYPES).
 // Used by buildOwnerBooleanQuery to produce LinkedIn classic search strings that
 // target owners directly instead of going through SerpAPI first.
+//
+// Wealth-mgmt pivot 2026-04-29: leadgen.FIRM_TYPES is trimmed to a single
+// 'wealth_management' entry. The legacy keys below (cpa/law/dental/etc) are
+// preserved as no-op fallbacks so any orphaned linkedin_leads rows from the
+// pre-pivot era don't crash the personalization path. New runs will only
+// hit the wealth_management bucket.
 const INDUSTRY_KEYWORDS = {
+  wealth_management: [
+    'financial advisor', 'wealth advisor', 'wealth management',
+    'RIA', 'registered investment advisor', 'fiduciary advisor',
+    'fee-only advisor', 'fee-only planner', 'CFP', 'CFA',
+    'investment advisor representative', 'IAR', 'independent advisor',
+  ],
+  // Legacy buckets — kept for backwards-compat with existing linkedin_leads rows.
+  // Do NOT use for new discovery. Will be deleted once the leads cohort drains.
   cpa:             ['CPA', 'accounting', 'tax', 'accountant'],
   law:             ['attorney', 'law firm', 'lawyer', 'legal'],
-  financial:       ['financial advisor', 'wealth', 'RIA', 'planner'],
+  financial:       ['financial advisor', 'wealth', 'RIA', 'planner'], // legacy alias of wealth_management
   dental:          ['dental', 'dentist', 'DDS', 'orthodontist'],
   chiropractic:    ['chiropractor', 'chiropractic', 'DC'],
   real_estate:     ['real estate', 'realtor', 'broker'],
@@ -338,13 +352,17 @@ function buildPersonalizePrompt(lead, { tighten = false } = {}) {
   const diagnosis = lead.diagnosis_json
     ? (typeof lead.diagnosis_json === 'string' ? JSON.parse(lead.diagnosis_json) : lead.diagnosis_json)
     : {};
-  const topGap = !diagnosis.has_booking_software ? 'no online booking'
-    : !diagnosis.has_intake_forms ? 'paper intake forms'
-    : !diagnosis.has_client_portal ? 'no client portal'
-    : 'outdated workflow';
+  // Wealth-mgmt-relevant gap priority — intake forms first (the productized
+  // offer), then CRM/portal, then booking. Wealth firms don't book like
+  // dental practices; intake + CRM sync is where their pain is.
+  const topGap = !diagnosis.has_intake_forms ? 'paper or PDF intake forms'
+    : !diagnosis.has_client_portal ? 'no secure client portal'
+    : !diagnosis.has_booking_software ? 'no online consult booking'
+    : 'outdated client onboarding workflow';
 
-  // If the business name is really just "<First Last>, CPA, PC" style, strip the person's name
-  // so the hook says "your practice" instead of literally repeating their own name back at them.
+  // If the business name is really just "<First Last>" style (common for
+  // sole-advisor RIAs), strip the person's name so the hook says
+  // "your firm" instead of repeating their own name back at them.
   const firstName = (lead.contact_first_name || '').trim();
   const lastName = (lead.contact_name || '').replace(firstName, '').trim();
   let displayBusiness = lead.business_name || '';
@@ -352,47 +370,53 @@ function buildPersonalizePrompt(lead, { tighten = false } = {}) {
     displayBusiness.toLowerCase().startsWith(firstName.toLowerCase()) ||
     (lastName && displayBusiness.toLowerCase().includes(lastName.toLowerCase()))
   );
-  if (looksLikePersonName) displayBusiness = 'your practice';
-  // Clean trailing "CPA, PC" / "LLC" / "DDS" suffixes from display
-  displayBusiness = displayBusiness.replace(/,?\s*(P\.?C\.?|L\.?L\.?C\.?|Inc\.?|PLLC|DDS|CPA|DMD|DVM|P\.?A\.?)\b.*$/i, '').trim() || 'your practice';
+  if (looksLikePersonName) displayBusiness = 'your firm';
+  // Clean trailing entity suffixes (LLC / Inc / RIA / Wealth Management)
+  displayBusiness = displayBusiness.replace(/,?\s*(P\.?C\.?|L\.?L\.?C\.?|Inc\.?|PLLC|RIA|LLP|LP|Wealth Management|Financial Group|Advisors)\b.*$/i, '').trim() || 'your firm';
 
-  // Hook priority: (1) recent post, (2) business + diagnosis finding, (3) city + industry.
+  // Hook priority: (1) recent post, (2) firm + diagnosis finding, (3) city + RIA reference.
   const hookHint = lead.recent_post_snippet
     ? `HOOK: Reference this recent post: "${lead.recent_post_snippet.slice(0, 200)}"`
-    : displayBusiness && displayBusiness !== 'your practice'
+    : displayBusiness && displayBusiness !== 'your firm'
       ? `HOOK: Reference ${displayBusiness} + the diagnosis finding "${topGap}"`
-      : `HOOK: Reference the ${lead.business_city || 'local'} ${lead.business_type || ''} scene and the "${topGap}" gap — DO NOT use the business name, use "your practice" instead`;
+      : `HOOK: Reference the ${lead.business_city || 'local'} RIA scene and the "${topGap}" gap — DO NOT use the firm name, use "your firm" instead`;
 
-  return `You are Nate Linder — a student at Abilene Christian University (ACU) building MonkFlow, a small automation platform for service businesses. You are reaching out personally, founder-to-owner. Not a rep, not a sales team.
+  return `You are Nate Linder — founder of MonkFlow. You build digital intake and CRM-sync systems for independent advisor firms (RIAs). You are reaching out personally, founder-to-founder. Not a rep, not a sales team.
 
 Generate a LinkedIn connection note + first DM. Return ONLY valid JSON.
 
 PROSPECT
 - First name: ${firstName || 'there'}
 - Title: ${lead.contact_title || 'unknown'}
-- Business (for context): ${displayBusiness}
+- Firm (for context): ${displayBusiness}
 - City: ${lead.business_city || ''}
-- Industry: ${lead.business_type || ''}
-- Diagnosis gap: ${topGap}
 - About: ${(lead.about_snippet || '').slice(0, 300)}
 - Recent post: ${lead.recent_post_snippet ? lead.recent_post_snippet.slice(0, 200) : 'none'}
+- Diagnosis gap: ${topGap}
+
+REAL CASE STUDY (use truthfully, never embellish):
+- Client: Team Financial Strategies, a 4-advisor RIA in Dallas
+- What we built: digital intake form + Redtail CRM auto-sync + signed-PDF generation
+- Outcome: cut new-client setup from 45 minutes to under 5
+- Built in: 2 weeks
 
 ${hookHint}
 
 CONNECT NOTE — HARD RULES (≤${CONNECT_NOTE_MAX} chars${tighten ? ' — PREVIOUS ATTEMPT WAS TOO LONG, TIGHTEN' : ''}):
-- Open with "${firstName || 'Hey'}," — use first name ONLY, never the full business name
-- Introduce yourself briefly: "I'm Nate, an ACU student building a tiny automation tool for ${lead.business_type || 'practices'} like yours"
-- Then ONE specific reference from the hook above (use "your practice" instead of repeating their name back at them)
+- Open with "${firstName || 'Hey'}," — use first name ONLY, never the full firm name
+- Introduce yourself: "I'm Nate, founder of MonkFlow — I build digital intake systems for RIAs"
+- Then ONE specific reference from the hook above (use "your firm" not "your practice")
 - End with a SOFT value line like "Figured you'd get what I'm building" — NOT a CTA, NOT a question
-- NEVER: link, URL, "quick chat", "20 min", "would love to", "reaching out", "touching base", "I noticed", repeat the business name if it contains the prospect's own name, the word "MonkFlow"
+- NEVER use: link, URL, "quick chat", "20 min", "would love to", "reaching out", "touching base", "I noticed", "tiny", "student", "ACU", "your practice", repeat firm name if it contains the prospect's own name, the word "MonkFlow"
 - Sign nothing (LinkedIn shows your name)
 
 FIRST DM — HARD RULES (≤${FIRST_DM_MAX} chars${tighten ? ' — PREVIOUS ATTEMPT WAS TOO LONG, TIGHTEN' : ''}):
 - Thank them for connecting in 5 words max
-- Remind them you're a student founder: "Quick context — I'm building MonkFlow solo out of Abilene, focused on ${lead.business_type || 'small practices'}"
-- State ONE specific outcome with a NUMBER (e.g. "cut 4 hrs/week off booking coordination for a 3-person practice")
+- Lead with the named case study + outcome: "Recently rebuilt new-client onboarding for Team Financial Strategies (4-advisor RIA in Dallas) — cut intake from 45 min to under 5 with Redtail auto-sync."
+- ONE sentence connecting it to their firm — reference the diagnosis gap if applicable
 - Exactly ONE close-ended CTA on its own line: "Worth a 15-min look? Yes or no."
 - Sign "— Nate"
+- NEVER use: "tiny", "student", "ACU", "small tool", "side project", "your practice"
 
 Return ONLY: {"connectNote": "...", "firstDM": "..."}`;
 }

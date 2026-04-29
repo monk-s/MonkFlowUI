@@ -167,27 +167,49 @@ const SENDERS = [
   // { email: `nlinder@${SENDER_DOMAIN}`,   name: 'Nathan Linder' }, // REBUILD: re-enable Day 28+ if Gmail open-rate ≥10%
 ];
 
+// Wealth-mgmt pivot 2026-04-29: trimmed from 50 mid-market cities to 18
+// high-density wealth hubs. These are the markets with the highest
+// concentration of small/mid RIAs ($25M-$100M AUM) per HNW-household
+// metrics. Adding cities outside this list dilutes search relevance and
+// returns more false positives (insurance brokers, broker-dealers,
+// non-fiduciary firms). Re-evaluate at month 6 if the funnel is starved.
 const US_CITIES = [
-  'Austin TX', 'Denver CO', 'Phoenix AZ', 'Charlotte NC', 'Portland OR',
-  'Nashville TN', 'Atlanta GA', 'Tampa FL', 'Raleigh NC', 'Columbus OH',
-  'Miami FL', 'San Diego CA', 'Baltimore MD', 'Kansas City MO', 'Pittsburgh PA',
-  'Richmond VA', 'Boise ID', 'Albuquerque NM', 'Minneapolis MN', 'Indianapolis IN',
-  'Louisville KY', 'Oklahoma City OK', 'Tucson AZ', 'Omaha NE', 'Milwaukee WI',
-  'Memphis TN', 'Jacksonville FL', 'Salt Lake City UT', 'Charleston SC',
-  'Des Moines IA', 'Little Rock AR', 'Knoxville TN', 'Spokane WA',
-  'Greenville SC', 'Lexington KY', 'Baton Rouge LA', 'Chattanooga TN',
-  'Savannah GA', 'Asheville NC', 'Boulder CO', 'Tulsa OK', 'Wichita KS',
-  'Reno NV', 'Sioux Falls SD', 'Madison WI', 'Scottsdale AZ', 'Fargo ND',
-  'Fort Worth TX', 'Sacramento CA', 'Birmingham AL', 'Fresno CA',
-  'Anchorage AK', 'Honolulu HI', 'Burlington VT', 'Santa Fe NM',
+  'New York NY', 'Stamford CT', 'Westchester NY',
+  'Boston MA', 'Wellesley MA',
+  'Philadelphia PA', 'Bryn Mawr PA',
+  'Washington DC', 'Bethesda MD',
+  'Atlanta GA', 'Charlotte NC', 'Miami FL', 'Palm Beach FL',
+  'Chicago IL', 'Naperville IL',
+  'Dallas TX', 'Houston TX', 'Austin TX',
+  'Denver CO', 'Boulder CO',
+  'Phoenix AZ', 'Scottsdale AZ',
+  'Seattle WA', 'Bellevue WA',
+  'San Francisco CA', 'Palo Alto CA', 'Los Angeles CA', 'Newport Beach CA',
+  'Minneapolis MN', 'Nashville TN',
 ];
 
-// Narrowed to 3 industries that match existing case studies and have the
-// strongest product-market fit. Depth > breadth for personalization quality.
+// Wealth-mgmt pivot 2026-04-29: trimmed from cpa/dental/financial → wealth_management
+// only. Three reasons: (1) only real case study is Team Financial Strategies, a
+// wealth firm — every other vertical was sending fabricated social proof;
+// (2) brand dilution from mixed-vertical sends would kill the wealth-mgmt
+// positioning; (3) per-vertical depth > breadth for personalization quality.
+//
+// Search queries target small/mid RIAs and independent advisor firms specifically.
+// SEC-registered firms ($100M+ AUM) are NOT the ICP — they have heavier
+// compliance/vendor-questionnaire processes. State-registered RIAs in the
+// $25M-$100M AUM range with 2-10 advisors are the productized-offer fit.
 const FIRM_TYPES = [
-  { type: 'cpa', queries: ['"CPA firm" "contact us" -yelp -yellowpages', '"accounting firm" "meet our team" -bbb -avvo', 'small CPA firm'] },
-  { type: 'dental', queries: ['"family dentistry" "contact us" -yelp -yellowpages', '"dental practice" "meet our team" -healthgrades', 'dental office small practice'] },
-  { type: 'financial', queries: ['"financial advisor" "contact us" -yelp -yellowpages', '"wealth management" "our team" -investopedia', 'financial advisor independent'] },
+  {
+    type: 'wealth_management',
+    queries: [
+      '"financial advisor" "contact us" -yelp -yellowpages -investopedia',
+      '"wealth management" "our team" -investopedia -bbb',
+      '"registered investment advisor" "contact"',
+      '"fee-only fiduciary" "schedule"',
+      '"independent advisor" "Redtail OR Wealthbox"',
+      '"RIA" "small firm" "contact"',
+    ],
+  },
 ];
 
 const BOOKING_PLATFORMS = [
@@ -415,6 +437,32 @@ async function searchSerpAPI(queryStr) {
 
 // ── Website Diagnosis ───────────────────────────────
 
+// Wealth-mgmt detection signals — populated when an RIA's website mentions
+// any of these CRMs / planning tools / custodian portals. Helps the v4
+// outreach prompt make a "I see you're on Wealthbox..." style observation
+// that reads radically more credible than generic "your intake is manual."
+const WEALTH_TOOLS = [
+  // CRMs (most-detected primary signal)
+  { key: 'redtail',           patterns: ['redtail', 'redtailtechnology.com'] },
+  { key: 'wealthbox',         patterns: ['wealthbox', 'wealthbox.com'] },
+  { key: 'salesforce_fsc',    patterns: ['salesforce financial services', 'financial services cloud'] },
+  { key: 'practifi',          patterns: ['practifi', 'practifi.com'] },
+  { key: 'advisorengine',     patterns: ['advisorengine', 'advisorengine.com'] },
+  // Financial planning tools
+  { key: 'emoney',            patterns: ['emoney advisor', 'emoneyadvisor.com'] },
+  { key: 'rightcapital',      patterns: ['rightcapital', 'rightcapital.com'] },
+  { key: 'moneyguidepro',     patterns: ['moneyguidepro', 'moneyguidepro.com'] },
+  // Portfolio reporting
+  { key: 'black_diamond',     patterns: ['black diamond', 'blackdiamond.advent.com'] },
+  { key: 'orion',             patterns: ['orion advisor', 'orionadvisor.com'] },
+  { key: 'tamarac',           patterns: ['tamarac', 'envestnet tamarac'] },
+  // Custodian portals (signals firm size / sophistication)
+  { key: 'schwab_advisor',    patterns: ['schwab advisor center', 'schwab institutional'] },
+  { key: 'fidelity_advisor',  patterns: ['fidelity advisorchannel', 'fidelity wealthscape'] },
+  { key: 'td_veo',            patterns: ['td ameritrade veo', 'td veo'] },
+  { key: 'pershing',          patterns: ['pershing netx360', 'pershing advisor solutions'] },
+];
+
 async function diagnoseWebsite(url) {
   const diagnosis = {
     has_ssl: url.startsWith('https'),
@@ -422,6 +470,7 @@ async function diagnoseWebsite(url) {
     booking_software_name: null,
     has_client_portal: false,
     has_intake_forms: false,
+    wealth_tools_detected: [],
     design_age_estimate: 'unknown',
     emails: [],
     issues: [],
@@ -464,6 +513,14 @@ async function diagnoseWebsite(url) {
     const formIndicators = ['intake form', 'new client form', 'get started form', 'onboarding form',
       'client questionnaire', 'lawmatics', 'intakeq', 'jotform', 'typeform'];
     diagnosis.has_intake_forms = formIndicators.some(k => html.includes(k));
+
+    // Check wealth-mgmt tools (CRM, planning, custodian portal). Records every
+    // hit so the outreach prompt can reference them naturally.
+    for (const tool of WEALTH_TOOLS) {
+      if (tool.patterns.some(p => html.includes(p))) {
+        diagnosis.wealth_tools_detected.push(tool.key);
+      }
+    }
 
     // Design age estimate
     if (html.includes('tailwind') || html.includes('next/static') || html.includes('__next')) {
@@ -529,17 +586,13 @@ async function diagnoseWebsite(url) {
  * sent the Dallas financial services case study).
  */
 function selectCaseStudy(businessType) {
-  const t = (businessType || '').toLowerCase();
-  if (/dent/.test(t)) return CASE_STUDIES.find(c => /dental/i.test(c.industry));
-  if (/chiro/.test(t)) return CASE_STUDIES.find(c => /chiropractic/i.test(c.industry));
-  if (/financial|wealth|advisor|cpa|accounting|tax|ria/.test(t)) {
-    return CASE_STUDIES.find(c => /wealth|financial/i.test(c.industry));
-  }
-  if (/ecommerce|e-commerce|retail|shopify|shop|store/.test(t)) {
-    return CASE_STUDIES.find(c => /e-commerce|retail/i.test(c.industry));
-  }
-  // Generic fallback — e-commerce case study is the most broadly applicable
-  return CASE_STUDIES.find(c => /e-commerce/i.test(c.industry)) || CASE_STUDIES[0];
+  // Wealth-mgmt pivot 2026-04-29: CASE_STUDIES holds only TFS. See comment
+  // in selectCaseStudyForFollowup() (outreach-ai.service.js) for full context.
+  // The branched logic was removed because three of the four target cases
+  // (dental/chiro/e-commerce) were fabricated and have been deleted — the
+  // dead branches returned `undefined`. Always return the wealth case.
+  void businessType; // referenced to keep signature stable for callers
+  return CASE_STUDIES.find(c => /wealth|financial/i.test(c.industry)) || CASE_STUDIES[0];
 }
 
 /**
@@ -584,14 +637,14 @@ async function generateOutreachEmail(lead, diagnosis, onRetry, variant) {
   const firstName = getFirstName(lead.contact_person, lead.email);
   const hasRealName = firstName && firstName !== 'there';
   const caseStudy = selectCaseStudy(lead.business_type);
-  // Short industry label for the signature line
+  // Short industry label. Wealth-mgmt pivot 2026-04-29: only wealth-mgmt
+  // leads should reach this code path now that FIRM_TYPES is trimmed, but
+  // the helper falls back to a wealth label if a stale dental/chiro lead
+  // sneaks through, rather than emitting "small businesses" generically.
   const shortIndustry = (() => {
     const t = (lead.business_type || '').toLowerCase();
-    if (/dent/.test(t)) return 'dental practices';
-    if (/chiro/.test(t)) return 'chiropractic offices';
-    if (/financial|wealth|advisor|cpa|accounting|tax/.test(t)) return 'financial advisors';
-    if (/ecommerce|e-commerce|retail|shopify/.test(t)) return 'e-commerce brands';
-    return 'small businesses';
+    if (/financial|wealth|advisor|ria|fiduciary/.test(t)) return 'independent advisor firms';
+    return 'independent advisor firms';
   })();
 
   const bookingUrl = env.bookingUrl;
@@ -601,9 +654,9 @@ async function generateOutreachEmail(lead, diagnosis, onRetry, variant) {
   // this is a second line of defense for dev/staging / partial config drift.
   const includePs = !env.bookingUrlIsPlaceholder();
 
-  const prompt = `You are writing a cold email for Nathan, founder of MonkFlow — a solo dev agency building custom automation, client portals, and workflow tools for small businesses.
+  const prompt = `You are writing a cold email for Nathan Linder, founder of MonkFlow — a focused dev shop that builds digital intake forms + CRM auto-sync (Redtail / Wealthbox / Salesforce FSC) for independent advisor firms (RIAs).
 
-GOAL: ONE REPLY. The offer is a named deliverable — a 1-page map of the 3 highest-ROI automations for this prospect's practice type. They reply "send it" and receive the PDF. No call required. They keep it regardless.
+GOAL: ONE REPLY. The offer is a named deliverable — a 1-page map of the 3 highest-ROI automations for an independent advisor firm. They reply "send it" and receive the PDF. No call required. They keep it regardless.
 
 BUSINESS INFO:
 - Company: ${company}
@@ -616,7 +669,18 @@ WEBSITE DIAGNOSIS (infer PAIN, do not describe the website):
 - Online booking: ${diagnosis.has_booking_software ? 'Yes' : 'No'}
 - Client portal: ${diagnosis.has_client_portal ? 'Yes' : 'No'}
 - Intake forms: ${diagnosis.has_intake_forms ? 'Yes' : 'No'}
+- Wealth-mgmt tools detected on site: ${(diagnosis.wealth_tools_detected || []).length > 0 ? diagnosis.wealth_tools_detected.join(', ') : 'none detected'}
 - Gaps: ${diagnosis.issues.join(', ') || 'none major'}
+
+If wealth-mgmt tools were detected (Redtail, Wealthbox, eMoney, RightCapital,
+MoneyGuidePro, Black Diamond, Orion, Salesforce FSC, Schwab Advisor Center,
+Fidelity AdvisorChannel, etc.): YOU MUST reference the specific tool by name
+in the observation. Examples:
+  GOOD: "Most Wealthbox firms still capture client info on paper before
+  re-keying into the CRM — costs your team about 30 minutes per onboarding."
+  GOOD: "If you're on Redtail and intake is still manual, the auto-populate
+  to contact + financial profile is the highest-leverage win."
+This signals you understand their actual stack, not generic SMB pitch.
 
 THE CASE STUDY TO USE (use THIS one exactly, do not invent others):
 - Client descriptor: ${caseStudy.name}
@@ -630,9 +694,11 @@ STRUCTURE — follow exactly in this order:
      ? `Write exactly: "Hey ${firstName},"`
      : `DO NOT write any greeting. Open the email directly with the observation in step 2. NEVER write "Hey there", "Hey team", or "Hi" — these read as mass-sent.`}
 
-2. ONE specific operational observation (18–25 words). Infer the BUSINESS PAIN, not the website symptom.
-   GOOD: "If ${company} is still handling new-patient intake by phone, your front desk is probably spending 8–12 hours a week on it."
-   BAD: "I noticed your site doesn't have online booking."
+2. ONE specific operational observation (18–25 words). Infer the BUSINESS PAIN, not the website symptom. Make it wealth-mgmt-native.
+   GOOD: "If ${company} is still capturing new-client info on paper or PDFs that get re-typed into Redtail, that's typically 30–45 minutes per onboarding plus partial-field compliance risk."
+   GOOD: "If your team is e-signing custodian forms one at a time after each new account opens, an ops manager is losing 6–10 hours a week on a workflow that can run on rails."
+   BAD: "I noticed your site doesn't have online booking." (booking isn't the wealth-mgmt pain — intake + CRM sync is)
+   BAD: "If your front desk is handling new-patient intake by phone..." (wealth firms don't have a front desk and don't onboard patients)
 
 3. ONE sentence of proof using THE case study above (reference it naturally):
    "For ${caseStudy.name}, we ${caseStudy.what} — ${caseStudy.result}."
@@ -668,12 +734,14 @@ SUBJECT LINE:
   single subject template (spam filters flag near-duplicate subject corpora).
 - Preferred patterns, in order of preference:
   ${hasRealName ? `1. "${firstName}, a question about ${company}"
-  2. "Saw something at ${company}"
-  3. "${company} intake question"
-  4. "3 automations for ${company}"` : `1. "A question about ${company}"
-  2. "Saw something at ${company}"
-  3. "${company} intake question"
-  4. "3 automations for ${company}"`}
+  2. "Intake at ${company}?"
+  3. "Redtail / Wealthbox sync question"
+  4. "${company} new-client onboarding"
+  5. "3 onboarding automations for ${company}"` : `1. "A question about ${company}"
+  2. "Intake at ${company}?"
+  3. "Redtail / Wealthbox sync question"
+  4. "${company} new-client onboarding"
+  5. "3 onboarding automations for ${company}"`}
 - AVOID overused patterns (all used >200× recently — will hit spam filters):
   "Quick question", "Re: Quick question", "Question about {company}", "{city} {industry} + intake".
 
@@ -770,13 +838,23 @@ function scoreLead(diagnosis) {
   if (!diagnosis || !('has_ssl' in diagnosis || 'has_booking_software' in diagnosis)) return 0;
   let score = 50; // base score
 
-  // Website gap signals (positive = more opportunity)
+  // Website gap signals (positive = more opportunity).
+  // Wealth-mgmt pivot 2026-04-29: weighting reordered so missing intake
+  // forms is the highest gap signal — it's our productized offer. Booking
+  // software dropped to +5 (wealth firms don't book like dental practices,
+  // and an RIA without online booking is barely a signal).
   if (!diagnosis.has_ssl) score += 5;
-  if (!diagnosis.has_booking_software) score += 12;  // big win — highest value service
+  if (!diagnosis.has_intake_forms) score += 12;  // PRIMARY signal — productized offer
   if (!diagnosis.has_client_portal) score += 10;
-  if (!diagnosis.has_intake_forms) score += 8;
+  if (!diagnosis.has_booking_software) score += 5; // de-prioritized for wealth-mgmt
   if (diagnosis.design_age_estimate === 'outdated') score += 8;
   if (diagnosis.design_age_estimate === 'unknown') score += 3;
+
+  // Wealth-mgmt-tools detection bonus: a firm running Redtail/Wealthbox/etc
+  // that ALSO lacks intake forms is the perfect ICP — the CRM is in place,
+  // the productized intake-form-with-CRM-sync is plug-and-play.
+  const tools = diagnosis.wealth_tools_detected || [];
+  if (tools.length > 0 && !diagnosis.has_intake_forms) score += 8;
 
   // Compound bonus: multiple gaps = better prospect
   const gapCount = [!diagnosis.has_ssl, !diagnosis.has_booking_software, !diagnosis.has_client_portal, !diagnosis.has_intake_forms].filter(Boolean).length;
