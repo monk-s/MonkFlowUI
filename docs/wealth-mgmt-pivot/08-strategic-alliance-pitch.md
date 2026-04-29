@@ -39,7 +39,7 @@
 >
 > **Result: 45 min → under 5 min per new-client onboarding.**
 >
-> *Tom Linder, founding partner: "[testimonial pending permission]"*
+> *Jody Team, founding partner: [testimonial wording pending — will be inserted as soon as Jody's exact quote lands]*
 
 ### BOTTOM HALF: What I do for your clients (plus what you get)
 
@@ -123,7 +123,7 @@ days of going live.
 
 Recent build: Team Financial Strategies, 4-advisor RIA in Dallas.
 Custom intake + Redtail auto-sync + signed-PDF gen. 2 weeks. 45 min →
-under 5 per onboarding. Tom's available for a reference call.
+under 5 per onboarding. Jody Team (founding partner) available for a reference call.
 
 You're great at the CRM setup. I'm the integration layer downstream.
 Different scopes, complementary, never overlapping.

@@ -634,6 +634,9 @@ function handleHashRoute() {
   if (hash === '#schedule') {
     // Auto-open scheduling modal when visiting monkflow.io/#schedule
     setTimeout(() => showSchedulingModal(), 300);
+  } else if (hash === '#case-study-tfs') {
+    // Replace landing page with the dedicated TFS case study page
+    renderTfsCaseStudyPage();
   }
 }
 window.addEventListener('hashchange', handleHashRoute);
@@ -643,8 +646,14 @@ function showLanding() {
   document.getElementById('auth-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
   document.getElementById('landing-container').classList.remove('hidden');
-  renderLandingPage();
-  // Check for hash routes after landing page renders
+  // Dispatch on hash so a direct visit to monkflow.io/#case-study-tfs
+  // renders the case study page instead of the standard landing.
+  if (window.location.hash === '#case-study-tfs') {
+    renderTfsCaseStudyPage();
+  } else {
+    renderLandingPage();
+  }
+  // Check for hash routes (e.g. #schedule auto-opens scheduling modal)
   handleHashRoute();
 }
 
@@ -965,6 +974,9 @@ function renderLandingPage() {
               <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">CRM auto-sync + signed PDFs</div>
             </div>
           </div>
+          <div style="margin-top:24px;">
+            <a href="#case-study-tfs" onclick="event.preventDefault();window.location.hash='#case-study-tfs';" style="font-size:14px;color:var(--accent);text-decoration:underline;">Read the full case study →</a>
+          </div>
         </div>
       </div>
     </section>
@@ -1127,6 +1139,108 @@ function renderLandingPage() {
             <a href="#" onclick="event.preventDefault();showLegalPage('privacy')" style="font-size:12px;color:var(--text-tertiary);">Privacy Policy</a>
             <a href="#" onclick="event.preventDefault();showLegalPage('terms')" style="font-size:12px;color:var(--text-tertiary);">Terms of Service</a>
           </div>
+        </div>
+      </div>
+    </footer>
+  `;
+}
+
+// ============================================================
+// PUBLISHED CASE STUDY — Team Financial Strategies
+// ============================================================
+// Reachable at monkflow.io/#case-study-tfs. Permission to publish
+// granted by Jody Team (founding partner) on 2026-04-29 — full case
+// study draft is in docs/wealth-mgmt-pivot/02-tfs-case-study.md and
+// must be kept in sync with this page. The "What Jody said"
+// blockquote is intentionally placeholder text until Jody's exact
+// testimonial wording lands; do NOT AI-generate or paraphrase.
+function renderTfsCaseStudyPage() {
+  const container = document.getElementById('landing-container');
+  container.innerHTML = `
+    <nav class="landing-nav">
+      <div class="landing-nav-inner">
+        <div class="landing-nav-logo" onclick="window.location.hash='';showLanding()" style="cursor:pointer;">
+          <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
+          <div class="logo-text">Monk<span>Flow</span></div>
+        </div>
+        <div class="landing-nav-actions">
+          <button class="btn btn-ghost" onclick="window.location.hash='';showLanding()">← Back to MonkFlow</button>
+          <button class="btn btn-primary btn-sm" onclick="showSchedulingModal()">Schedule a Call</button>
+        </div>
+      </div>
+    </nav>
+
+    <article style="max-width:740px;margin:60px auto 80px;padding:0 24px;line-height:1.7;color:var(--text-primary);font-family:Georgia,serif;">
+      <div style="font-size:13px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Case Study</div>
+      <h1 style="font-size:36px;line-height:1.2;margin:0 0 24px;font-family:-apple-system,sans-serif;">How Team Financial Strategies cut new-client onboarding from 45 minutes to under 5</h1>
+
+      <div style="background:var(--bg-secondary);padding:20px 24px;border-radius:8px;margin:24px 0 32px;font-size:14px;color:var(--text-secondary);">
+        <div style="display:grid;grid-template-columns:140px 1fr;gap:6px 16px;">
+          <div><strong>Firm:</strong></div><div>Team Financial Strategies</div>
+          <div><strong>Size:</strong></div><div>4 advisors, Dallas, TX</div>
+          <div><strong>Contact:</strong></div><div>Jody Team, founding partner</div>
+          <div><strong>CRM:</strong></div><div>Redtail</div>
+          <div><strong>Project length:</strong></div><div>2 weeks</div>
+          <div><strong>Outcome:</strong></div><div style="color:var(--accent);font-weight:600;">45 minutes → under 5 minutes per new-client onboarding</div>
+        </div>
+      </div>
+
+      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">The problem</h2>
+      <p>Team Financial Strategies, like most independent RIAs in their size bracket, ran new-client onboarding on a hybrid paper/PDF/CRM workflow. A new prospect coming on board meant:</p>
+      <ul style="margin:16px 0 16px 20px;font-family:-apple-system,sans-serif;">
+        <li style="margin-bottom:8px;">Paper or PDF intake forms — about 7 pages of personal, financial, beneficiary, and risk-tolerance data</li>
+        <li style="margin-bottom:8px;">An ops manager re-typing the data into Redtail one field at a time (≈25 min per client)</li>
+        <li style="margin-bottom:8px;">Schwab custodian-of-record forms signed one-by-one in DocuSign</li>
+        <li style="margin-bottom:8px;">Risk-tolerance questionnaire scored on a calculator</li>
+        <li style="margin-bottom:8px;">IPS drafted from a Word template by hand</li>
+      </ul>
+      <p>The total: roughly <strong>45 minutes per new-client onboarding</strong> — and the firm is the kind of place where the founding partner ends up doing the last leg of it personally.</p>
+      <p>The pain wasn't that this workflow was broken. The pain was that the firm couldn't scale it. Each new advisor added meant another set of clients meant another bottleneck on the ops manager's afternoon.</p>
+
+      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">What we built</h2>
+      <p>In 2 weeks, MonkFlow built:</p>
+      <ol style="margin:16px 0 16px 20px;font-family:-apple-system,sans-serif;">
+        <li style="margin-bottom:12px;"><strong>Custom intake form</strong> — branded to TFS, hosted on a TFS-controlled subdomain. 28 fields with conditional logic (joint vs individual, employed vs retired, beneficiary tree). Document upload (driver's license, trust docs). E-signature on submission.</li>
+        <li style="margin-bottom:12px;"><strong>Redtail auto-sync</strong> — on form submission, MonkFlow's webhook creates the Contact record in Redtail with all 28 fields populated. Household relationships built automatically. Custom fields the firm uses for client segmentation populated from form answers.</li>
+        <li style="margin-bottom:12px;"><strong>Signed-PDF generation</strong> — Schwab account application, beneficiary designation, IPS, and the firm's own engagement letter pre-filled from the intake data. Bundled into a single signing flow. Signed PDFs auto-archived to the Redtail client folder.</li>
+        <li style="margin-bottom:12px;"><strong>Compliance trail</strong> — every form submission, sync, and signature logged with timestamp and IP. Partial-field detection blocks incomplete intakes from reaching the CIO's inbox.</li>
+      </ol>
+
+      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">The result</h2>
+      <p style="font-size:22px;font-weight:600;color:var(--accent);font-family:-apple-system,sans-serif;margin:24px 0;">Onboarding time: 45 minutes → under 5 minutes.</p>
+      <p>That's 5 minutes for the ops manager to <em>review</em> the auto-populated record, not to do the work. The form does the work.</p>
+      <p>Other downstream wins:</p>
+      <ul style="margin:16px 0 16px 20px;font-family:-apple-system,sans-serif;">
+        <li style="margin-bottom:8px;"><strong>Funding speed:</strong> new accounts now fund within 2 business days of signing, vs 5–7 days under the old NIGO-prone workflow.</li>
+        <li style="margin-bottom:8px;"><strong>Compliance:</strong> Jody can pull a complete audit trail for any new client in under 30 seconds.</li>
+        <li style="margin-bottom:8px;"><strong>New-client experience:</strong> clients fill the intake on their own schedule (often before the kickoff meeting), so the meeting itself becomes about strategy, not paperwork.</li>
+      </ul>
+
+      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">What we'd do differently</h2>
+      <p>The intake-form conditional logic was over-engineered in v1. We shipped 9 conditional branches when 4 would have covered 95% of client types. Jody's ops manager flagged it during week 1 of go-live; we collapsed branches the following week.</p>
+      <p><em>Lesson: ship fewer branches, add only when clients actually hit edge cases.</em></p>
+
+      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">What Jody said</h2>
+      <blockquote style="border-left:4px solid var(--accent);padding:8px 24px;margin:24px 0;color:var(--text-secondary);font-style:italic;">
+        <em style="color:var(--text-tertiary);">— Awaiting Jody's verbatim testimonial wording. Will be inserted before the Day-1 LinkedIn link drop.</em>
+      </blockquote>
+
+      <div style="margin-top:48px;padding:32px;background:var(--bg-secondary);border-radius:12px;text-align:center;">
+        <h3 style="font-family:-apple-system,sans-serif;font-size:22px;margin:0 0 12px;">Want this for your firm?</h3>
+        <p style="margin:0 0 20px;color:var(--text-secondary);">We took the same scope MonkFlow built for TFS and packaged it into three productized tiers. Public pricing. Fixed delivery windows. Refundable audit anchor.</p>
+        <button class="btn btn-primary btn-lg" onclick="window.location.hash='';showLanding();setTimeout(()=>document.getElementById('wealth-intake').scrollIntoView({behavior:'smooth'}),100);">View the offer ladder →</button>
+        <button class="btn btn-secondary btn-lg" style="margin-left:12px;" onclick="showSchedulingModal()">Or book a 15-min call</button>
+      </div>
+
+      <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border-color);font-size:13px;color:var(--text-tertiary);text-align:center;">
+        Jody Team, Founding Partner · Team Financial Strategies · Dallas, TX
+      </div>
+    </article>
+
+    <footer class="landing-footer">
+      <div class="landing-footer-inner">
+        <div class="landing-footer-bottom">
+          <span>&copy; 2026 MonkFlow. All rights reserved.</span>
         </div>
       </div>
     </footer>

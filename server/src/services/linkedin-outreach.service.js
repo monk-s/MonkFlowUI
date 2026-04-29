@@ -396,9 +396,11 @@ PROSPECT
 
 REAL CASE STUDY (use truthfully, never embellish):
 - Client: Team Financial Strategies, a 4-advisor RIA in Dallas
+- Founding partner (named-permission case study contact): Jody Team
 - What we built: digital intake form + Redtail CRM auto-sync + signed-PDF generation
 - Outcome: cut new-client setup from 45 minutes to under 5
 - Built in: 2 weeks
+- Published case study URL: https://monkflow.io/#case-study-tfs (you may include this URL in the FIRST DM but NEVER in the connect note — LinkedIn flags URLs in connect notes as spam)
 
 ${hookHint}
 

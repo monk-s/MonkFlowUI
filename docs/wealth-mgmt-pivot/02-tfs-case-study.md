@@ -1,22 +1,24 @@
 # Case Study — Team Financial Strategies
 
-> **Status:** DRAFT pending TFS written permission for: firm name use,
-> Tom's name, the 45→5 minute result, the "Redtail" mention, and a
-> sentence-or-two testimonial. **Do NOT publish until permission is
-> documented in writing** (see Plan §0.5).
+> **Status:** Permission granted by Jody Team (founding partner) on
+> 2026-04-29. Cleared for: firm name, Jody's name, the 45 → 5 minute
+> result, Redtail mention, reference-call permission. **Testimonial
+> wording still pending** — Jody's exact 1-2 sentence quote to be
+> inserted in the "What Jody said" section before publishing.
 >
-> If TFS declines named permission: replace "Team Financial Strategies"
-> with "a 4-advisor RIA in Dallas" throughout. The metrics survive
-> anonymization; the named credibility doesn't.
+> Once Jody's quote lands, this draft is publish-ready at
+> monkflow.io/case-studies/team-financial-strategies (route added to
+> app.js as part of the same change).
 
 ---
 
-## How a 4-advisor RIA in Dallas cut new-client onboarding from 45 minutes to under 5
+## How Team Financial Strategies cut new-client onboarding from 45 minutes to under 5
 
-**Firm:** Team Financial Strategies *(pending permission)*
+**Firm:** Team Financial Strategies
 **Size:** 4 advisors, Dallas, TX
+**Founding partner (case-study contact):** Jody Team
 **CRM:** Redtail
-**Custodian:** Schwab Advisor Services *(pending confirmation)*
+**Custodian:** Schwab Advisor Services *(pending confirmation from Jody)*
 **Project length:** 2 weeks
 **Outcome:** New-client onboarding time cut from **45 minutes → under 5 minutes**
 
@@ -81,7 +83,7 @@ Other downstream wins:
 
 - **Funding speed:** new accounts now fund within 2 business days
   of signing, vs 5–7 days under the old NIGO-prone workflow.
-- **Compliance:** Tom can pull a complete audit trail for any new
+- **Compliance:** Jody can pull a complete audit trail for any new
   client in under 30 seconds.
 - **New-client experience:** clients fill the intake on their own
   schedule (often before the kickoff meeting), so the meeting itself
@@ -95,18 +97,19 @@ Other downstream wins:
 
 The intake-form conditional logic was over-engineered in v1. We
 shipped 9 conditional branches when 4 would have covered 95% of
-client types. Tom's ops manager flagged it during week 1 of go-live;
+client types. Jody's ops manager flagged it during week 1 of go-live;
 we collapsed branches the following week. Lesson: ship fewer branches,
 add only when clients actually hit edge cases.
 
 ---
 
-### What Tom said
+### What Jody said
 
-> *Insert verbatim quote from Tom here, with permission. Target: 1-2
-> sentences, specific, references the 45→5 result and the partnership
+> *Awaiting Jody's testimonial wording. Target: 1-2 sentences,
+> specific, references the 45→5 result and the partnership
 > experience. Example structure: "[Specific outcome]. [Specific
-> partnership experience.]"*
+> partnership experience.]" Insert verbatim before publishing — do
+> not paraphrase or AI-generate.*
 
 ---
 
@@ -121,4 +124,4 @@ call, no pitch deck).
 
 ---
 
-*Logo block here · Tom Linder · Team Financial Strategies · Dallas, TX*
+*Logo block here · Jody Team, Founding Partner · Team Financial Strategies · Dallas, TX*

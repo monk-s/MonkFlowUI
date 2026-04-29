@@ -172,7 +172,7 @@ form + Redtail auto-sync + signed-PDF generation.
 The honest section at the bottom — what we'd do differently — is the
 part I'm proudest of. The intake-form conditional logic was
 over-engineered in v1. We shipped 9 conditional branches when 4
-would have covered 95% of client types. Tom's ops manager flagged
+would have covered 95% of client types. Jody's ops manager flagged
 it during week 1; we collapsed branches the following week.
 
 The lesson: ship fewer branches, add only when clients actually hit
@@ -185,9 +185,10 @@ the productized tiers are public on monkflow.io/#wealth-intake. Or
 just DM me.
 ```
 
-*Note: don't post this until TFS publishes case study lands. If TFS
-declines named permission, rewrite as "a 4-advisor RIA in Dallas"
-and remove the firm-name specifics.*
+*Note: TFS permission was granted by Jody Team on 2026-04-29. Post is
+ready to publish once (a) Jody's testimonial wording lands, and (b) the
+published case study page is live at
+monkflow.io/case-studies/team-financial-strategies.*
 
 ---
 
@@ -231,7 +232,7 @@ no slides.*
 | 2 | Post 2 — 4 minutes | Tuesday 8am CT | Time-based observation, light data |
 | 3 | Post 3 — Redtail vs Wealthbox | Wednesday 8am CT | Comparative content gets shares |
 | 4 | Post 4 — Paper intake | Tuesday 8am CT | Slight contrarian — drives comments |
-| 5 | Post 5 — TFS case study | Thursday 8am CT (gates on TFS permission) | Link drop |
+| 5 | Post 5 — TFS case study | Thursday 8am CT | Link drop. **Permission granted by Jody Team 2026-04-29.** Post once Jody's testimonial wording lands and the published case study page is live. |
 | 6 | Post 6 — Loom walkthrough | Wednesday 8am CT | Video; longest dwell time |
 
 After week 6: cadence becomes "1 wealth-mgmt-automation observation

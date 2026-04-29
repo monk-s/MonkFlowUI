@@ -29,6 +29,15 @@ const CASE_STUDIES = [
     what: 'automated client onboarding + Redtail CRM sync',
     result: 'cut new-client setup from 45 minutes to under 5',
     detail: 'custom contract form that auto-populates Redtail CRM, generates signed agreements as PDFs, and syncs client financial profiles. Built in 2 weeks.',
+    // Permission-locked metadata. Granted by Jody Team (founding partner)
+    // 2026-04-29 for use in cold outreach + the published case study at
+    // monkflow.io/#case-study-tfs. Do NOT cite reference_contact in
+    // public marketing without an explicit secondary check — the
+    // reference-call permission is for prospect-call use, not "DM Jody."
+    contact_name: 'Jody Team',
+    contact_role: 'founding partner',
+    case_study_url: 'https://monkflow.io/#case-study-tfs',
+    permission_granted_at: '2026-04-29',
   },
 ];
 

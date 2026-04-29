@@ -24,7 +24,7 @@ a workflow that can run on rails.
 **Real result (Team Financial Strategies, 4-advisor RIA, Dallas):**
 **45 minutes → under 5 minutes** per new-client onboarding. Built in 2
 weeks. Custom intake form + Redtail CRM auto-sync + signed-PDF
-generation. Tom Linder, founding partner, available for reference.
+generation. Jody Team, founding partner, available for reference.
 
 ---
 
