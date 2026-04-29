@@ -1164,14 +1164,27 @@ async function runDailyLeadGeneration() {
   await logExec('info', `Search phase complete`, { rawResultCount: rawLeads.length, searched: stats.searched });
 
   // 3. Diagnose each website, extract emails, dedup
+  //
+  // PARALLELIZED 2026-04-29: was 500 sequential crawls × ~20s each = 175 min
+  // worst case, the single biggest contributor to the 45-min cron timeout.
+  // Now caps at 80 candidates and processes 5 concurrent diagnoses with 2s
+  // sleep between batches → ~5.5 min worst case. The 80-cap is intentional:
+  // current pipeline can only USE ~30/day at warm-1 (15) plus
+  // resume/recovery backlog, so 80 high-quality candidates is plenty to
+  // refill the funnel without blowing the budget.
+  const ROLE_PREFIXES = /^(info|support|contact|admin|office|sales|help|billing|legal|hr|marketing|hello|general|team|directory|reception|inquiries|enquiries|careers|jobs|media|press|service|feedback|accounts|mail|staff)@/i;
+  const DIAGNOSE_CAP = 80;
+  const DIAGNOSE_CONCURRENCY = 5;
+  const candidates = rawLeads.slice(0, DIAGNOSE_CAP);
   const qualifiedLeads = [];
-  for (const raw of rawLeads.slice(0, 500)) { // diagnose up to 500 to find ~250 with emails
+
+  async function diagnoseAndPersistOne(raw) {
     try {
       const websiteUrl = raw.link;
       let diagnosis;
       try {
         diagnosis = await diagnoseWebsite(websiteUrl);
-      } catch (diagErr) {
+      } catch (_diagErr) {
         // Website unreachable — still use snippet emails if available
         diagnosis = {
           has_ssl: websiteUrl.startsWith('https'),
@@ -1181,59 +1194,39 @@ async function runDailyLeadGeneration() {
         };
       }
 
-      // Merge snippet emails (from Google results) with website emails
       if (raw.snippetEmails && raw.snippetEmails.length > 0) {
         diagnosis.emails = [...new Set([...diagnosis.emails, ...raw.snippetEmails])];
       }
 
-      // Need at least one email — prefer personal emails over generic role addresses
-      const ROLE_PREFIXES = /^(info|support|contact|admin|office|sales|help|billing|legal|hr|marketing|hello|general|team|directory|reception|inquiries|enquiries|careers|jobs|media|press|service|feedback|accounts|mail|staff)@/i;
       const sortedEmails = [...diagnosis.emails].sort((a, b) => {
         const aIsRole = ROLE_PREFIXES.test(a);
         const bIsRole = ROLE_PREFIXES.test(b);
-        if (aIsRole && !bIsRole) return 1;   // personal emails first
+        if (aIsRole && !bIsRole) return 1;
         if (!aIsRole && bIsRole) return -1;
-        return 0;                             // preserve original order otherwise
+        return 0;
       });
       const bestEmail = sortedEmails[0];
-      if (!bestEmail) continue;
+      if (!bestEmail) return { skipped: 'no-email' };
+      if (ROLE_PREFIXES.test(bestEmail)) return { skipped: 'role-only' };
 
-      // Skip leads where the only email is a role-based address (info@, contact@, etc.)
-      // These mailboxes are rarely monitored by decision-makers.
-      if (ROLE_PREFIXES.test(bestEmail)) {
-        console.log(`[LEADGEN] Skipping ${raw.link}: only role-based email ${bestEmail}`);
-        continue;
-      }
-
-      // Verify email before adding (pattern + MX check + domain suppression)
       const { verifyEmail } = require('./outreach-ai.service');
       const verification = await verifyEmail(bestEmail);
-      if (!verification.valid) {
-        console.log(`[LEADGEN] Skipping invalid email ${bestEmail}: ${verification.reason}`);
-        continue;
-      }
-      // Use normalized (lowercased) email from verification
+      if (!verification.valid) return { skipped: `invalid-${verification.reason}` };
       const cleanEmail = verification.normalizedEmail || bestEmail;
 
-      // Check dedup
-      if (await leadModel.emailExists(cleanEmail)) continue;
+      if (await leadModel.emailExists(cleanEmail)) return { skipped: 'duplicate' };
 
-      // Parse city/state
       const [cityName, stateCode] = raw.city.split(/\s+(?=[A-Z]{2}$)/);
-
-      // Try to extract a real person name from the page HTML (for personalized outreach)
       const businessName = raw.title.replace(/\s*[\|–—].*$/, '').trim();
       const personName = diagnosis._rawHtml
         ? extractPersonName(diagnosis._rawHtml, diagnosis._pageTitle || raw.title)
         : null;
-
-      // Clean up internal fields before persisting
       delete diagnosis._rawHtml;
       delete diagnosis._pageTitle;
 
       const lead = {
         business_name: businessName,
-        contact_person: personName, // actual person name (may be null)
+        contact_person: personName,
         business_type: raw.firmType,
         city: cityName,
         state: stateCode,
@@ -1251,33 +1244,46 @@ async function runDailyLeadGeneration() {
       };
 
       const inserted = await leadModel.insert(lead);
-      if (inserted) {
-        qualifiedLeads.push(inserted);
-        stats.discovered++;
-      }
+      return inserted ? { discovered: inserted } : { skipped: 'insert-failed' };
     } catch (err) {
-      stats.errors++;
-      console.error(`[LEADGEN] Error processing ${raw.link}:`, err.message);
-      await logExec('error', `Error processing lead: ${err.message}`, { url: raw.link, error: err.message });
+      return { error: err.message, link: raw.link };
     }
+  }
 
-    // Progress log every 50 sites
-    const idx = rawLeads.indexOf(raw);
-    if (idx > 0 && idx % 50 === 0) {
-      console.log(`[LEADGEN] Progress: ${idx}/${Math.min(rawLeads.length, 500)} processed, ${qualifiedLeads.length} discovered, ${stats.errors} errors`);
+  console.log(`[LEADGEN] Diagnosis phase: ${candidates.length} candidates, batches of ${DIAGNOSE_CONCURRENCY}`);
+  for (let i = 0; i < candidates.length; i += DIAGNOSE_CONCURRENCY) {
+    const batch = candidates.slice(i, i + DIAGNOSE_CONCURRENCY);
+    const results = await Promise.allSettled(batch.map(diagnoseAndPersistOne));
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        stats.errors++;
+        console.error('[LEADGEN] Diagnosis batch entry rejected:', r.reason?.message || r.reason);
+        continue;
+      }
+      const v = r.value;
+      if (v.discovered) {
+        qualifiedLeads.push(v.discovered);
+        stats.discovered++;
+      } else if (v.error) {
+        stats.errors++;
+        console.error(`[LEADGEN] Error processing ${v.link || ''}:`, v.error);
+      }
+      // skipped values are silent — counted implicitly by `candidates.length - qualifiedLeads.length - errors`
     }
-
-    // Execution log every 100 leads
-    if (idx > 0 && idx % 100 === 0) {
-      await logExec('info', `Processing progress: ${idx}/${Math.min(rawLeads.length, 500)}`, {
-        processed: idx,
-        total: Math.min(rawLeads.length, 500),
+    const batchNo = Math.floor(i / DIAGNOSE_CONCURRENCY) + 1;
+    const batchTotal = Math.ceil(candidates.length / DIAGNOSE_CONCURRENCY);
+    console.log(`[LEADGEN] Diagnosis batch ${batchNo}/${batchTotal} done — ${qualifiedLeads.length} qualified, ${stats.errors} errors`);
+    if (batchNo % 4 === 0) {
+      await logExec('info', `Diagnosis progress: ${batchNo}/${batchTotal} batches`, {
+        processed: Math.min((batchNo) * DIAGNOSE_CONCURRENCY, candidates.length),
+        total: candidates.length,
         discovered: qualifiedLeads.length,
         errors: stats.errors,
       });
     }
-
-    await sleep(1000); // polite crawling
+    if (i + DIAGNOSE_CONCURRENCY < candidates.length) {
+      await sleep(2000); // polite crawling: 2s between concurrent batches
+    }
   }
 
   console.log(`[LEADGEN] Qualified leads: ${qualifiedLeads.length}`);
