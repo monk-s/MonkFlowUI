@@ -1167,38 +1167,69 @@ async function runDailyLeadGeneration() {
   });
 
   // 2. Search for leads — cycle through firm types and cities
+  //
+  // PARALLELIZED 2026-04-29: was sequential (firmTypes × cities = ~220
+  // queries with 1.5s sleep between every call = ~60 min worst case).
+  // Now flatten to a single list and process 3 concurrent SerpAPI calls
+  // per batch with 1.5s between batches → ~110s worst case.
+  const SEARCH_CONCURRENCY = 3;
+  const SEARCH_BATCH_SLEEP_MS = 1500;
+  const DIRECTORY_BLOCKLIST = /yelp|yellowpages|bbb\.org|findlaw|avvo|justia|facebook\.com|linkedin|mapquest|manta\.com|chamberofcommerce/i;
+  const queryList = firmTypes.flatMap(firmType => {
+    const query = shuffle(firmType.queries)[0];
+    return cities.map(city => ({ firmType: firmType.type, city, searchQuery: `${query} ${city} email` }));
+  });
   const rawLeads = [];
   let serpApiAborted = false;
-  for (const firmType of firmTypes) {
-    if (serpApiAborted) break;
-    const query = shuffle(firmType.queries)[0];
-    for (const city of cities) {
-      if (serpApiAborted) break;
-      const searchQuery = `${query} ${city} email`;
-      try {
-        const results = await searchSerpAPI(searchQuery);
-        stats.searched += results.length;
 
-        for (const r of results) {
-          // Skip directories, yelp, facebook itself, etc.
-          if (/yelp|yellowpages|bbb\.org|findlaw|avvo|justia|facebook\.com|linkedin|mapquest|manta\.com|chamberofcommerce/i.test(r.link)) continue;
-          // Extract email from snippet if present (Google often shows it)
-          const snippetEmails = extractEmails(r.snippet || '');
-          rawLeads.push({ ...r, snippetEmails, city, searchQuery, firmType: firmType.type });
-        }
-      } catch (err) {
-        if (err.message.startsWith('SEARCHAPI_AUTH_FAILURE')) {
-          console.error('[LEADGEN] ❌ SearchAPI authentication failed — aborting all searches. Check your SEARCHAPI_KEY.');
-          await logExec('error', 'SearchAPI authentication failed — aborting searches', { error: err.message });
-          stats.errors++;
-          serpApiAborted = true;
-          break;
-        }
-        console.error(`[LEADGEN] Search error for "${searchQuery}":`, err.message);
-        await logExec('error', `Search error: ${err.message}`, { searchQuery, error: err.message });
-        stats.errors++;
+  async function runOneSearch({ firmType, city, searchQuery }) {
+    try {
+      const results = await searchSerpAPI(searchQuery);
+      stats.searched += results.length;
+      const filtered = [];
+      for (const r of results) {
+        if (DIRECTORY_BLOCKLIST.test(r.link)) continue;
+        const snippetEmails = extractEmails(r.snippet || '');
+        filtered.push({ ...r, snippetEmails, city, searchQuery, firmType });
       }
-      await sleep(1500); // rate limit
+      return { added: filtered };
+    } catch (err) {
+      if (err.message.startsWith('SEARCHAPI_AUTH_FAILURE')) {
+        return { authFailure: true, error: err.message };
+      }
+      return { error: err.message, searchQuery };
+    }
+  }
+
+  for (let i = 0; i < queryList.length; i += SEARCH_CONCURRENCY) {
+    if (serpApiAborted) break;
+    if (bailIfPhaseOverBudget(PHASE_BUDGETS.search)) break;
+    const batch = queryList.slice(i, i + SEARCH_CONCURRENCY);
+    const results = await Promise.allSettled(batch.map(runOneSearch));
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        stats.errors++;
+        console.error('[LEADGEN] Search batch entry rejected:', r.reason?.message || r.reason);
+        continue;
+      }
+      const v = r.value;
+      if (v.authFailure) {
+        console.error('[LEADGEN] ❌ SearchAPI authentication failed — aborting all searches. Check your SEARCHAPI_KEY.');
+        await logExec('error', 'SearchAPI authentication failed — aborting searches', { error: v.error });
+        stats.errors++;
+        serpApiAborted = true;
+        break;
+      }
+      if (v.error) {
+        console.error(`[LEADGEN] Search error for "${v.searchQuery}":`, v.error);
+        await logExec('error', `Search error: ${v.error}`, { searchQuery: v.searchQuery, error: v.error });
+        stats.errors++;
+        continue;
+      }
+      if (v.added) rawLeads.push(...v.added);
+    }
+    if (i + SEARCH_CONCURRENCY < queryList.length && !serpApiAborted) {
+      await sleep(SEARCH_BATCH_SLEEP_MS);
     }
   }
 
