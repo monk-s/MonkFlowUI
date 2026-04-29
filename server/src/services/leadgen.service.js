@@ -1340,38 +1340,67 @@ async function runDailyLeadGeneration() {
       }
     } catch (_) {}
   }
-  // Slice the NAMED leads to the daily cap (not the raw qualified list)
-  const toEmail = withName.slice(0, warming.daily);
+  // Slice the NAMED leads to the per-run generation cap.
+  //
+  // PER_RUN_GEN_CAP is decoupled from warming.daily so a single cron tick
+  // never blows the runtime budget. At full phase warming.daily=90; this cap
+  // says "still generate at most 30 per tick — the remaining 60 queue up on
+  // status='diagnosed' and get picked up by the next hourly outreach cron
+  // OR by tomorrow's leadgen run via the resume-unsent-leads phase." Keeps
+  // each leadgen run under the per-phase timeout in Tier B7.
+  const PER_RUN_GEN_CAP = 30;
+  const GEN_CONCURRENCY = 3;
+  const PER_LEAD_GEN_TIMEOUT_MS = 90 * 1000;
+  const toEmail = withName.slice(0, Math.min(warming.daily, PER_RUN_GEN_CAP));
 
-  // 5. Generate personalized outreach via Claude API (3-way framework rotation)
+  // 5. Generate personalized outreach via Claude API
+  //
+  // Pre-assign variants synchronously so parallel batches don't race on
+  // a shared cursor. Currently a single-variant cohort (v4) so the
+  // assignment is trivial, but stays robust if/when we A/B test again.
+  const TEST_VARIANTS = ['v4-named-deliverable'];
+  toEmail.forEach((lead, i) => {
+    lead.email_variant = TEST_VARIANTS[i % TEST_VARIANTS.length];
+  });
 
   await logExec('info', `Email generation starting for ${toEmail.length} leads`, { leadCount: toEmail.length });
-  // Distribute evenly across 3 frameworks: 1 (Specific Observation), 2 (Free Teardown), 3 (Peer Reference).
-  // Previous variants A/B and C/D/E/F are retired — historical data preserved.
-  // Round-robin ensures ~33% split per run.
-  // Single-variant cohort for A/B measurement vs. historical '1'/'2'/'3'.
-  // New named-deliverable framework — see plan phase 4.
-  const TEST_VARIANTS = ['v4-named-deliverable'];
-  let variantCursor = 0;
-  for (const lead of toEmail) {
-    try {
-      const variant = TEST_VARIANTS[variantCursor % TEST_VARIANTS.length];
-      variantCursor++;
-      lead.email_variant = variant;
 
-      const { subject, body } = await generateOutreachEmail(lead, lead.diagnosis_json, (attempt, maxRetries, errMsg) => {
-        logExec('warn', `Claude API retry attempt ${attempt}/${maxRetries}: ${errMsg}`, { attempt, maxRetries, email: lead.email, error: errMsg });
-      }, variant);
-      await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated', email_variant: variant });
+  async function generateOne(lead) {
+    try {
+      const { subject, body } = await Promise.race([
+        generateOutreachEmail(lead, lead.diagnosis_json, (attempt, maxRetries, errMsg) => {
+          logExec('warn', `Claude API retry attempt ${attempt}/${maxRetries}: ${errMsg}`, { attempt, maxRetries, email: lead.email, error: errMsg });
+        }, lead.email_variant),
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`per-lead generation timeout ${PER_LEAD_GEN_TIMEOUT_MS}ms`)), PER_LEAD_GEN_TIMEOUT_MS)),
+      ]);
+      await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated', email_variant: lead.email_variant });
       lead.outreach_subject = subject;
       lead.outreach_body = body;
-      stats.emailsGenerated++;
+      return { ok: true };
     } catch (err) {
-      console.error(`[LEADGEN] Email generation error for ${lead.email}:`, err.message);
-      await logExec('error', `Email generation failed for ${lead.email}: ${err.message}`, { email: lead.email, error: err.message });
-      stats.errors++;
+      return { error: err.message, email: lead.email };
     }
-    await sleep(500);
+  }
+
+  for (let i = 0; i < toEmail.length; i += GEN_CONCURRENCY) {
+    const batch = toEmail.slice(i, i + GEN_CONCURRENCY);
+    const results = await Promise.allSettled(batch.map(generateOne));
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        stats.errors++;
+        console.error('[LEADGEN] Generation batch entry rejected:', r.reason?.message || r.reason);
+        continue;
+      }
+      const v = r.value;
+      if (v.ok) {
+        stats.emailsGenerated++;
+      } else {
+        stats.errors++;
+        console.error(`[LEADGEN] Email generation error for ${v.email}:`, v.error);
+        await logExec('error', `Email generation failed for ${v.email}: ${v.error}`, { email: v.email, error: v.error });
+      }
+    }
+    if (i + GEN_CONCURRENCY < toEmail.length) await sleep(500);
   }
 
   // 6. Send emails — distribute round-robin across healthy senders (warming-aware per-sender limit)
