@@ -536,23 +536,24 @@ function selectCaseStudy(businessType) {
 async function subjectIsOverused(subject) {
   if (!subject || typeof subject !== 'string') return false;
   try {
+    // Uses the indexed `subject_shape` generated column from migration 045.
+    // The normalize_subject_shape() PG function is the single source of
+    // truth for the normalization rule — JS doesn't recompute the shape,
+    // it just passes the raw subject through and lets PG normalize on both
+    // sides via the same function. Keeps JS and the stored column in
+    // lockstep across future rule changes.
     const { rows } = await dbQuery(
       `SELECT COUNT(*)::int AS n
          FROM outreach_emails
         WHERE touch_number = 0
           AND sent_at > NOW() - INTERVAL '30 days'
-          AND lower(regexp_replace(
-                regexp_replace(subject, '[A-Z][a-z]+( [A-Z][a-z]+)*', '_X_', 'g'),
-                '\\s+', ' ', 'g'
-              )) = lower(regexp_replace(
-                regexp_replace($1, '[A-Z][a-z]+( [A-Z][a-z]+)*', '_X_', 'g'),
-                '\\s+', ' ', 'g'
-              ))`,
+          AND subject_shape = normalize_subject_shape($1)`,
       [subject]
     );
     return rows[0].n >= 5;
   } catch (err) {
-    // On DB error, don't block the send — just log and let it through
+    // On DB error, don't block the send — just log and let it through.
+    // Common cause if this fires post-deploy: migration 045 hasn't run yet.
     console.warn('[LEADGEN] subjectIsOverused query failed:', err.message);
     return false;
   }
