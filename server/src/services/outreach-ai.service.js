@@ -141,22 +141,23 @@ FRAMEWORK 1 — "Specific Observation + Question":
   - BAD: "Saw your booking routes through a contact form"
   - GOOD: "If your team is still handling new-client intake by phone, your front desk is probably spending 8-10 hours a week on it"
 - ONE sentence of social proof with a specific result: include industry, city, size, and metric.
-- CTA: An open-ended question that invites a real conversational response. NOT yes/no, NOT "reply 'send it'".
-  - GOOD: "Is intake something your team has talked about fixing, or is it pretty dialed in?"
-  - BAD: "Yes or no?", "Reply 'send it'", "Thoughts?"
+- CTA: A direct, neutral question. Not yes/no, not "reply 'send it'".
+  - GOOD: "Is intake something your team has talked about fixing?"
+  - BAD: "Curious if this is on your radar?", "Yes or no?", "Reply 'send it'", "Thoughts?", "Interested?"
 - End with P.S. containing booking link: "P.S. If easier to just talk: {bookingUrl}"
 
 FRAMEWORK 2 — "Free Teardown":
-- Open with "I looked at {company}'s site and mapped out 3 things I'd automate first:"
-- List 2-3 bullet points specific to THEIR analysis gaps (not generic). Be concrete about what you'd build.
+- Open with "I looked at {company}'s site and noticed three things I'd automate first."
+- Then describe those three things in PROSE — one short sentence each, no bullet points, no numbered list. Be concrete about what you'd build.
 - One-line proof: a specific case study result with industry, city, and metric.
-- CTA: "Want me to send the full breakdown? Takes 2 min to read." (simple reply CTA, conversational — NOT "reply 'send it'")
-- End with P.S. containing booking link: "P.S. Or if you'd rather just talk through it: {bookingUrl}"
+- CTA: "Want me to send the full breakdown? Takes 2 min to read."
+- End with P.S. containing booking link: "P.S. Or if easier to talk through it: {bookingUrl}"
 
 FRAMEWORK 3 — "Peer Reference":
 - Open by referencing what a similar business in their area or industry is doing: "A [industry] practice in [nearby city] just automated their entire [process] — saves them [X hours/week]."
 - Connect to THEIR situation using analysis gaps: "Your site shows you're still handling [gap] manually — same spot they were in."
-- CTA: Open-ended conversational question. "Curious if this is on your radar at all? Happy to share what they did."
+- CTA: A direct neutral question. "Want me to share what they did?"
+  - BAD: "Curious if this is on your radar?", "Happy to chat", "Thoughts?", "Interested?"
 - End with P.S. containing booking link: "P.S. Calendar's here if easier: {bookingUrl}"
 
 CASE STUDIES (use the one that matches their industry; include specifics):
@@ -168,8 +169,9 @@ HARD RULES (apply to ALL frameworks):
 - Start with "Hey {firstName}," — use the first name provided. If the name is "there", use "Hey {company} team," instead. Never "Hi".
 - The first sentence after the greeting must reference something CONCRETE about them: their company name, a specific operational gap inferred from the analysis, or an observable fact. Never start with a generic industry stat.
 - Every email MUST include the booking URL as a P.S. line at the end. Never bury it in the body or exclude it.
-- The CTA must be an open-ended question, NOT a yes/no or command. Ask something they can answer conversationally.
-- NEVER use these phrases: "Curious —", "Worth exploring", "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to chat", "thoughts?", "interested?"
+- The CTA must be a direct neutral question, NOT a command and NOT a soft conversational hedge. Ask something concrete they can answer.
+- Plain prose only — no bullet points, no numbered lists. (Framework 2's three-things list is described in three short sentences, not bullets.)
+- NEVER use these phrases: "Curious", "Worth exploring", "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to chat", "happy to share", "thoughts?", "interested?", "on your radar"
 - The case study mention must include a specific number AND a specific client descriptor (industry + city or size). Never "a healthcare practice" — always "a 4-provider dental office in Tulsa" or similar.
 - Sign off as just "Nathan" — no last name, no company, no title.
 
@@ -342,7 +344,15 @@ async function sendAiEmail(leadId) {
   let htmlBody = lead.ai_email_body;
   if (unsubToken && !htmlBody.includes('track/open/')) {
     const unsubUrl = `https://monkflow.io/api/v1/leadgen/unsubscribe/${unsubToken}`;
-    const unsubFooter = `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`;
+    // Inline HTML escape — env values are operator-controlled but defensive posture
+    // costs nothing. Avoids requiring leadgen.service.js (would create circular import).
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    // CAN-SPAM 15 U.S.C. § 7702(a)(5) — physical postal address required in
+    // commercial email footer. Only renders when COMPANY_ADDRESS is set in env.
+    const addressBlock = env.companyAddress
+      ? `<p style="margin:0 0 6px;">${esc(env.companyName)}<br>${esc(env.companyAddress)}</p>`
+      : '';
+    const unsubFooter = `<div style="margin-top:20px;font-size:11px;color:#999;line-height:1.5;">${addressBlock}<p style="margin:0;"><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`;
     const trackingPixel = `<img src="https://monkflow.io/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`;
     htmlBody = `${htmlBody}${unsubFooter}${trackingPixel}`;
   }

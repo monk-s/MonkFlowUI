@@ -38,10 +38,12 @@ function getWarmingLimits() {
     // Days 21-27: near full — 25 per sender × 3 = 75/day
     return { daily: 75, perSender: 25, phase: 'warm-4' };
   } else {
-    // Day 28+: full capacity — 30 per sender × 3 = 90/day
+    // Day 28+: full capacity. Both ceilings come from env.js (single source of
+    // truth — was previously a second `process.env.*` parse here that
+    // disagreed with env.js defaults). Override via Railway env vars.
     return {
-      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 90,
-      perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 30,
+      daily: env.leadgenDailyLimit,
+      perSender: env.leadgenPerSenderLimit,
       phase: 'full',
     };
   }
@@ -141,13 +143,28 @@ const UNSUBSCRIBE_BASE = SENDING_DOMAIN_BASE;
 // Role-based addresses (outreach@, hello@, team@, etc.) intentionally excluded —
 // they're a spam signal and the system's own BAD_PATTERNS would reject them on receive.
 const SENDER_DOMAIN = process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com';
+
+// REPUTATION REBUILD WINDOW (started 2026-04-29):
+//
+// Three of the original six senders are sunset during the rebuild. Spreading
+// volume across 6 means each sender does ~5/day at warm-1, which is below
+// the threshold for Gmail's per-address reputation system to register a
+// reliable signal. Concentrating on 3 senders means each does ~10/day —
+// 210 sends per sender over a 21-day rebuild, enough to actually move the
+// needle.
+//
+// The 3 most-natural-looking local-parts stay active. Re-enable the
+// commented three (`n.linder`, `nathanl`, `nlinder`) at Day 28+ if Gmail
+// human-open rate is sustained ≥10% — at that point the senders need to
+// re-warm naturally, which is fine because their historical reputation
+// is essentially neutral (low volume, no recent complaints).
 const SENDERS = [
   { email: `nathan@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
   { email: `nate@${SENDER_DOMAIN}`, name: 'Nate Linder' },
   { email: `nathan.linder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
-  { email: `n.linder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
-  { email: `nathanl@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
-  { email: `nlinder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
+  // { email: `n.linder@${SENDER_DOMAIN}`,  name: 'Nathan Linder' }, // REBUILD: re-enable Day 28+ if Gmail open-rate ≥10%
+  // { email: `nathanl@${SENDER_DOMAIN}`,   name: 'Nathan Linder' }, // REBUILD: re-enable Day 28+ if Gmail open-rate ≥10%
+  // { email: `nlinder@${SENDER_DOMAIN}`,   name: 'Nathan Linder' }, // REBUILD: re-enable Day 28+ if Gmail open-rate ≥10%
 ];
 
 const US_CITIES = [
@@ -534,23 +551,24 @@ function selectCaseStudy(businessType) {
 async function subjectIsOverused(subject) {
   if (!subject || typeof subject !== 'string') return false;
   try {
+    // Uses the indexed `subject_shape` generated column from migration 045.
+    // The normalize_subject_shape() PG function is the single source of
+    // truth for the normalization rule — JS doesn't recompute the shape,
+    // it just passes the raw subject through and lets PG normalize on both
+    // sides via the same function. Keeps JS and the stored column in
+    // lockstep across future rule changes.
     const { rows } = await dbQuery(
       `SELECT COUNT(*)::int AS n
          FROM outreach_emails
         WHERE touch_number = 0
           AND sent_at > NOW() - INTERVAL '30 days'
-          AND lower(regexp_replace(
-                regexp_replace(subject, '[A-Z][a-z]+( [A-Z][a-z]+)*', '_X_', 'g'),
-                '\\s+', ' ', 'g'
-              )) = lower(regexp_replace(
-                regexp_replace($1, '[A-Z][a-z]+( [A-Z][a-z]+)*', '_X_', 'g'),
-                '\\s+', ' ', 'g'
-              ))`,
+          AND subject_shape = normalize_subject_shape($1)`,
       [subject]
     );
     return rows[0].n >= 5;
   } catch (err) {
-    // On DB error, don't block the send — just log and let it through
+    // On DB error, don't block the send — just log and let it through.
+    // Common cause if this fires post-deploy: migration 045 hasn't run yet.
     console.warn('[LEADGEN] subjectIsOverused query failed:', err.message);
     return false;
   }
@@ -693,13 +711,20 @@ Return JSON only: {"subject": "...", "body": "..."}`;
 
         // Subject-line dedup: if the same template shape has been used 5+ times
         // in the last 30 days, force a regenerate with explicit guidance.
+        // Hard cap at MAX_DEDUP=3: after that we accept whatever Claude returned
+        // (logged loudly so the next regression is visible) — keeps the loop
+        // bounded at MAX_RETRIES + MAX_DEDUP = 8 iterations max even pathological.
         if (parsed.subject && dedupAttempts < MAX_DEDUP && await subjectIsOverused(parsed.subject)) {
-          console.warn(`[LEADGEN] Subject overused: "${parsed.subject}" — regenerating`);
+          console.warn(`[LEADGEN] Subject overused: "${parsed.subject}" — regenerating (${dedupAttempts + 1}/${MAX_DEDUP})`);
           dedupAttempts++;
           extraInstruction = `\n\nREJECTED: Subject "${parsed.subject}" is a template shape that has been used too many times recently. Generate a COMPLETELY different subject pattern. Do NOT use "Quick question", "Re:", "Question about", or "{city} {industry}" templates. Try an observation-style subject instead.`;
           // Don't count this against MAX_RETRIES — it's a content regenerate, not an API failure
           attempt--;
           continue;
+        }
+
+        if (dedupAttempts >= MAX_DEDUP) {
+          console.warn(`[LEADGEN] Subject dedup exhausted (${MAX_DEDUP} attempts) — accepting "${parsed.subject}". Investigate if this fires repeatedly.`);
         }
 
         return { ...parsed, variant: variant || 'v4-named-deliverable' };
@@ -785,8 +810,9 @@ async function sendColdEmail(lead, sender) {
         return `<p style="margin: 0 0 12px;">${linked}</p>`;
       }).join('')}
     </div>
-    <div style="margin-top: 20px; font-size: 11px; color: #999;">
-      <p><a href="${unsubUrl}" style="color: #999;">Unsubscribe</a></p>
+    <div style="margin-top: 20px; font-size: 11px; color: #999; line-height: 1.5;">
+      ${env.companyAddress ? `<p style="margin: 0 0 6px;">${escapeHtml(env.companyName)}<br>${escapeHtml(env.companyAddress)}</p>` : ''}
+      <p style="margin: 0;"><a href="${unsubUrl}" style="color: #999;">Unsubscribe</a></p>
     </div>
     <img src="${SENDING_DOMAIN_BASE}/api/v1/outreach/track/open/${lead.unsubscribe_token}" width="1" height="1" style="display:none" alt="" />
   `;
@@ -798,7 +824,8 @@ async function sendColdEmail(lead, sender) {
     const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@mail.getmonkflow.com';
 
     // Plain-text alternative (improves deliverability — HTML-only emails score higher on spam filters)
-    const plainText = `${lead.outreach_body}\n\nUnsubscribe: ${unsubUrl}`;
+    const addressLine = env.companyAddress ? `\n\n${env.companyName}\n${env.companyAddress}` : '';
+    const plainText = `${lead.outreach_body}${addressLine}\n\nUnsubscribe: ${unsubUrl}`;
 
     const result = await sendEmail({
       to: lead.email,
@@ -895,7 +922,53 @@ async function runDailyLeadGeneration() {
   console.log('[LEADGEN] === Starting daily lead generation ===');
   const pipelineStartTime = Date.now();
   const batchDate = new Date().toISOString().split('T')[0];
-  const stats = { searched: 0, discovered: 0, emailsGenerated: 0, emailed: 0, errors: 0 };
+  const stats = { searched: 0, discovered: 0, emailsGenerated: 0, emailed: 0, errors: 0, phaseHistory: [], bailedFromPhase: null };
+
+  // ── Phase tracking (Tier B7+B10) ─────────────────────────
+  // Lightweight per-phase elapsed-time tracking so failures show WHERE in
+  // the pipeline they died, not just "55 min hit." Persists to
+  // scheduler_heartbeats.last_phase (migration 046) on each phase start
+  // so even a hard crash leaves a breadcrumb in the DB. Best-effort —
+  // never break the pipeline for tracking.
+  let currentPhase = null;
+  let currentPhaseStart = 0;
+  function startPhase(name) {
+    if (currentPhase) {
+      const elapsedMs = Date.now() - currentPhaseStart;
+      stats.phaseHistory.push({ phase: currentPhase, ms: elapsedMs });
+      console.log(`[LEADGEN] ◀ Phase ${currentPhase} done in ${Math.round(elapsedMs / 1000)}s`);
+    }
+    currentPhase = name;
+    currentPhaseStart = Date.now();
+    console.log(`[LEADGEN] ▶ Phase ${name} starting`);
+    // Best-effort heartbeat update — never break pipeline for diagnostics
+    dbQuery(
+      `UPDATE scheduler_heartbeats SET last_phase = $1, last_phase_started_at = NOW() WHERE name = 'leadgen'`,
+      [name]
+    ).catch(() => { /* migration 046 not applied yet, or transient DB error */ });
+  }
+  function phaseElapsedMs() {
+    return Date.now() - currentPhaseStart;
+  }
+  function bailIfPhaseOverBudget(budgetMs) {
+    if (phaseElapsedMs() > budgetMs) {
+      console.warn(`[LEADGEN] Phase ${currentPhase} budget exceeded (${Math.round(phaseElapsedMs() / 1000)}s > ${budgetMs / 1000}s) — bailing to next phase`);
+      stats.bailedFromPhase = currentPhase;
+      return true;
+    }
+    return false;
+  }
+  // Per-phase budgets in ms — sum to ~52 min, slightly under the 55-min
+  // global cap in leadgen.scheduler.js. Tuned post-Tier-B5/B6 caps.
+  const PHASE_BUDGETS = {
+    resume: 5 * 60 * 1000,
+    recovery: 8 * 60 * 1000,
+    search: 8 * 60 * 1000,
+    diagnosis: 12 * 60 * 1000,
+    filter: 2 * 60 * 1000,
+    generation: 12 * 60 * 1000,
+    send: 5 * 60 * 1000,
+  };
 
   // ── Workflow execution tracking (graceful — never breaks the pipeline) ──
   let workflowId = null;
@@ -935,6 +1008,7 @@ async function runDailyLeadGeneration() {
   }
 
   try {
+  startPhase('resume');
   // 0. Resume any unsent leads from previous interrupted runs
   const resumeWarming = getWarmingLimits();
   try {
@@ -976,6 +1050,7 @@ async function runDailyLeadGeneration() {
     await logExec('error', `Resume unsent leads failed: ${resumeErr.message}`, { error: resumeErr.message });
   }
 
+  startPhase('recovery');
   // 0b. Recover leads stuck in 'diagnosed' status (personalization never
   // completed on a previous run — e.g. Claude API hang, or daily slice
   // capacity got spent on nameless leads that got filtered out). Recovery
@@ -1101,6 +1176,7 @@ async function runDailyLeadGeneration() {
     return stats;
   }
 
+  startPhase('search');
   // 1. Pick firm types and cities — budget ~140 searches/day to stay under remaining monthly limit
   // 10 firm types × 22 cities = 220 searches/day × 22 weekdays = 4,840/month (of 5,000 limit)
   const cities = shuffle(US_CITIES).slice(0, 22);
@@ -1114,53 +1190,98 @@ async function runDailyLeadGeneration() {
   });
 
   // 2. Search for leads — cycle through firm types and cities
+  //
+  // PARALLELIZED 2026-04-29: was sequential (firmTypes × cities = ~220
+  // queries with 1.5s sleep between every call = ~60 min worst case).
+  // Now flatten to a single list and process 3 concurrent SerpAPI calls
+  // per batch with 1.5s between batches → ~110s worst case.
+  const SEARCH_CONCURRENCY = 3;
+  const SEARCH_BATCH_SLEEP_MS = 1500;
+  const DIRECTORY_BLOCKLIST = /yelp|yellowpages|bbb\.org|findlaw|avvo|justia|facebook\.com|linkedin|mapquest|manta\.com|chamberofcommerce/i;
+  const queryList = firmTypes.flatMap(firmType => {
+    const query = shuffle(firmType.queries)[0];
+    return cities.map(city => ({ firmType: firmType.type, city, searchQuery: `${query} ${city} email` }));
+  });
   const rawLeads = [];
   let serpApiAborted = false;
-  for (const firmType of firmTypes) {
-    if (serpApiAborted) break;
-    const query = shuffle(firmType.queries)[0];
-    for (const city of cities) {
-      if (serpApiAborted) break;
-      const searchQuery = `${query} ${city} email`;
-      try {
-        const results = await searchSerpAPI(searchQuery);
-        stats.searched += results.length;
 
-        for (const r of results) {
-          // Skip directories, yelp, facebook itself, etc.
-          if (/yelp|yellowpages|bbb\.org|findlaw|avvo|justia|facebook\.com|linkedin|mapquest|manta\.com|chamberofcommerce/i.test(r.link)) continue;
-          // Extract email from snippet if present (Google often shows it)
-          const snippetEmails = extractEmails(r.snippet || '');
-          rawLeads.push({ ...r, snippetEmails, city, searchQuery, firmType: firmType.type });
-        }
-      } catch (err) {
-        if (err.message.startsWith('SEARCHAPI_AUTH_FAILURE')) {
-          console.error('[LEADGEN] ❌ SearchAPI authentication failed — aborting all searches. Check your SEARCHAPI_KEY.');
-          await logExec('error', 'SearchAPI authentication failed — aborting searches', { error: err.message });
-          stats.errors++;
-          serpApiAborted = true;
-          break;
-        }
-        console.error(`[LEADGEN] Search error for "${searchQuery}":`, err.message);
-        await logExec('error', `Search error: ${err.message}`, { searchQuery, error: err.message });
-        stats.errors++;
+  async function runOneSearch({ firmType, city, searchQuery }) {
+    try {
+      const results = await searchSerpAPI(searchQuery);
+      stats.searched += results.length;
+      const filtered = [];
+      for (const r of results) {
+        if (DIRECTORY_BLOCKLIST.test(r.link)) continue;
+        const snippetEmails = extractEmails(r.snippet || '');
+        filtered.push({ ...r, snippetEmails, city, searchQuery, firmType });
       }
-      await sleep(1500); // rate limit
+      return { added: filtered };
+    } catch (err) {
+      if (err.message.startsWith('SEARCHAPI_AUTH_FAILURE')) {
+        return { authFailure: true, error: err.message };
+      }
+      return { error: err.message, searchQuery };
+    }
+  }
+
+  for (let i = 0; i < queryList.length; i += SEARCH_CONCURRENCY) {
+    if (serpApiAborted) break;
+    if (bailIfPhaseOverBudget(PHASE_BUDGETS.search)) break;
+    const batch = queryList.slice(i, i + SEARCH_CONCURRENCY);
+    const results = await Promise.allSettled(batch.map(runOneSearch));
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        stats.errors++;
+        console.error('[LEADGEN] Search batch entry rejected:', r.reason?.message || r.reason);
+        continue;
+      }
+      const v = r.value;
+      if (v.authFailure) {
+        console.error('[LEADGEN] ❌ SearchAPI authentication failed — aborting all searches. Check your SEARCHAPI_KEY.');
+        await logExec('error', 'SearchAPI authentication failed — aborting searches', { error: v.error });
+        stats.errors++;
+        serpApiAborted = true;
+        break;
+      }
+      if (v.error) {
+        console.error(`[LEADGEN] Search error for "${v.searchQuery}":`, v.error);
+        await logExec('error', `Search error: ${v.error}`, { searchQuery: v.searchQuery, error: v.error });
+        stats.errors++;
+        continue;
+      }
+      if (v.added) rawLeads.push(...v.added);
+    }
+    if (i + SEARCH_CONCURRENCY < queryList.length && !serpApiAborted) {
+      await sleep(SEARCH_BATCH_SLEEP_MS);
     }
   }
 
   console.log(`[LEADGEN] Raw search results: ${rawLeads.length}`);
   await logExec('info', `Search phase complete`, { rawResultCount: rawLeads.length, searched: stats.searched });
 
+  startPhase('diagnosis');
   // 3. Diagnose each website, extract emails, dedup
+  //
+  // PARALLELIZED 2026-04-29: was 500 sequential crawls × ~20s each = 175 min
+  // worst case, the single biggest contributor to the 45-min cron timeout.
+  // Now caps at 80 candidates and processes 5 concurrent diagnoses with 2s
+  // sleep between batches → ~5.5 min worst case. The 80-cap is intentional:
+  // current pipeline can only USE ~30/day at warm-1 (15) plus
+  // resume/recovery backlog, so 80 high-quality candidates is plenty to
+  // refill the funnel without blowing the budget.
+  const ROLE_PREFIXES = /^(info|support|contact|admin|office|sales|help|billing|legal|hr|marketing|hello|general|team|directory|reception|inquiries|enquiries|careers|jobs|media|press|service|feedback|accounts|mail|staff)@/i;
+  const DIAGNOSE_CAP = 80;
+  const DIAGNOSE_CONCURRENCY = 5;
+  const candidates = rawLeads.slice(0, DIAGNOSE_CAP);
   const qualifiedLeads = [];
-  for (const raw of rawLeads.slice(0, 500)) { // diagnose up to 500 to find ~250 with emails
+
+  async function diagnoseAndPersistOne(raw) {
     try {
       const websiteUrl = raw.link;
       let diagnosis;
       try {
         diagnosis = await diagnoseWebsite(websiteUrl);
-      } catch (diagErr) {
+      } catch (_diagErr) {
         // Website unreachable — still use snippet emails if available
         diagnosis = {
           has_ssl: websiteUrl.startsWith('https'),
@@ -1170,59 +1291,39 @@ async function runDailyLeadGeneration() {
         };
       }
 
-      // Merge snippet emails (from Google results) with website emails
       if (raw.snippetEmails && raw.snippetEmails.length > 0) {
         diagnosis.emails = [...new Set([...diagnosis.emails, ...raw.snippetEmails])];
       }
 
-      // Need at least one email — prefer personal emails over generic role addresses
-      const ROLE_PREFIXES = /^(info|support|contact|admin|office|sales|help|billing|legal|hr|marketing|hello|general|team|directory|reception|inquiries|enquiries|careers|jobs|media|press|service|feedback|accounts|mail|staff)@/i;
       const sortedEmails = [...diagnosis.emails].sort((a, b) => {
         const aIsRole = ROLE_PREFIXES.test(a);
         const bIsRole = ROLE_PREFIXES.test(b);
-        if (aIsRole && !bIsRole) return 1;   // personal emails first
+        if (aIsRole && !bIsRole) return 1;
         if (!aIsRole && bIsRole) return -1;
-        return 0;                             // preserve original order otherwise
+        return 0;
       });
       const bestEmail = sortedEmails[0];
-      if (!bestEmail) continue;
+      if (!bestEmail) return { skipped: 'no-email' };
+      if (ROLE_PREFIXES.test(bestEmail)) return { skipped: 'role-only' };
 
-      // Skip leads where the only email is a role-based address (info@, contact@, etc.)
-      // These mailboxes are rarely monitored by decision-makers.
-      if (ROLE_PREFIXES.test(bestEmail)) {
-        console.log(`[LEADGEN] Skipping ${raw.link}: only role-based email ${bestEmail}`);
-        continue;
-      }
-
-      // Verify email before adding (pattern + MX check + domain suppression)
       const { verifyEmail } = require('./outreach-ai.service');
       const verification = await verifyEmail(bestEmail);
-      if (!verification.valid) {
-        console.log(`[LEADGEN] Skipping invalid email ${bestEmail}: ${verification.reason}`);
-        continue;
-      }
-      // Use normalized (lowercased) email from verification
+      if (!verification.valid) return { skipped: `invalid-${verification.reason}` };
       const cleanEmail = verification.normalizedEmail || bestEmail;
 
-      // Check dedup
-      if (await leadModel.emailExists(cleanEmail)) continue;
+      if (await leadModel.emailExists(cleanEmail)) return { skipped: 'duplicate' };
 
-      // Parse city/state
       const [cityName, stateCode] = raw.city.split(/\s+(?=[A-Z]{2}$)/);
-
-      // Try to extract a real person name from the page HTML (for personalized outreach)
       const businessName = raw.title.replace(/\s*[\|–—].*$/, '').trim();
       const personName = diagnosis._rawHtml
         ? extractPersonName(diagnosis._rawHtml, diagnosis._pageTitle || raw.title)
         : null;
-
-      // Clean up internal fields before persisting
       delete diagnosis._rawHtml;
       delete diagnosis._pageTitle;
 
       const lead = {
         business_name: businessName,
-        contact_person: personName, // actual person name (may be null)
+        contact_person: personName,
         business_type: raw.firmType,
         city: cityName,
         state: stateCode,
@@ -1240,37 +1341,52 @@ async function runDailyLeadGeneration() {
       };
 
       const inserted = await leadModel.insert(lead);
-      if (inserted) {
-        qualifiedLeads.push(inserted);
-        stats.discovered++;
-      }
+      return inserted ? { discovered: inserted } : { skipped: 'insert-failed' };
     } catch (err) {
-      stats.errors++;
-      console.error(`[LEADGEN] Error processing ${raw.link}:`, err.message);
-      await logExec('error', `Error processing lead: ${err.message}`, { url: raw.link, error: err.message });
+      return { error: err.message, link: raw.link };
     }
+  }
 
-    // Progress log every 50 sites
-    const idx = rawLeads.indexOf(raw);
-    if (idx > 0 && idx % 50 === 0) {
-      console.log(`[LEADGEN] Progress: ${idx}/${Math.min(rawLeads.length, 500)} processed, ${qualifiedLeads.length} discovered, ${stats.errors} errors`);
+  console.log(`[LEADGEN] Diagnosis phase: ${candidates.length} candidates, batches of ${DIAGNOSE_CONCURRENCY}`);
+  for (let i = 0; i < candidates.length; i += DIAGNOSE_CONCURRENCY) {
+    const batch = candidates.slice(i, i + DIAGNOSE_CONCURRENCY);
+    const results = await Promise.allSettled(batch.map(diagnoseAndPersistOne));
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        stats.errors++;
+        console.error('[LEADGEN] Diagnosis batch entry rejected:', r.reason?.message || r.reason);
+        continue;
+      }
+      const v = r.value;
+      if (v.discovered) {
+        qualifiedLeads.push(v.discovered);
+        stats.discovered++;
+      } else if (v.error) {
+        stats.errors++;
+        console.error(`[LEADGEN] Error processing ${v.link || ''}:`, v.error);
+      }
+      // skipped values are silent — counted implicitly by `candidates.length - qualifiedLeads.length - errors`
     }
-
-    // Execution log every 100 leads
-    if (idx > 0 && idx % 100 === 0) {
-      await logExec('info', `Processing progress: ${idx}/${Math.min(rawLeads.length, 500)}`, {
-        processed: idx,
-        total: Math.min(rawLeads.length, 500),
+    const batchNo = Math.floor(i / DIAGNOSE_CONCURRENCY) + 1;
+    const batchTotal = Math.ceil(candidates.length / DIAGNOSE_CONCURRENCY);
+    console.log(`[LEADGEN] Diagnosis batch ${batchNo}/${batchTotal} done — ${qualifiedLeads.length} qualified, ${stats.errors} errors`);
+    if (batchNo % 4 === 0) {
+      await logExec('info', `Diagnosis progress: ${batchNo}/${batchTotal} batches`, {
+        processed: Math.min((batchNo) * DIAGNOSE_CONCURRENCY, candidates.length),
+        total: candidates.length,
         discovered: qualifiedLeads.length,
         errors: stats.errors,
       });
     }
-
-    await sleep(1000); // polite crawling
+    if (bailIfPhaseOverBudget(PHASE_BUDGETS.diagnosis)) break;
+    if (i + DIAGNOSE_CONCURRENCY < candidates.length) {
+      await sleep(2000); // polite crawling: 2s between concurrent batches
+    }
   }
 
   console.log(`[LEADGEN] Qualified leads: ${qualifiedLeads.length}`);
 
+  startPhase('filter');
   // 4. Sort by score (most gaps first), take top leads (warming-aware limit)
   const warming = getWarmingLimits();
   console.log(`[LEADGEN] Domain warming phase: ${warming.phase} — daily limit: ${warming.daily}, per-sender: ${warming.perSender}`);
@@ -1323,40 +1439,72 @@ async function runDailyLeadGeneration() {
       }
     } catch (_) {}
   }
-  // Slice the NAMED leads to the daily cap (not the raw qualified list)
-  const toEmail = withName.slice(0, warming.daily);
+  // Slice the NAMED leads to the per-run generation cap.
+  //
+  // PER_RUN_GEN_CAP is decoupled from warming.daily so a single cron tick
+  // never blows the runtime budget. At full phase warming.daily=90; this cap
+  // says "still generate at most 30 per tick — the remaining 60 queue up on
+  // status='diagnosed' and get picked up by the next hourly outreach cron
+  // OR by tomorrow's leadgen run via the resume-unsent-leads phase." Keeps
+  // each leadgen run under the per-phase timeout in Tier B7.
+  const PER_RUN_GEN_CAP = 30;
+  const GEN_CONCURRENCY = 3;
+  const PER_LEAD_GEN_TIMEOUT_MS = 90 * 1000;
+  const toEmail = withName.slice(0, Math.min(warming.daily, PER_RUN_GEN_CAP));
 
-  // 5. Generate personalized outreach via Claude API (3-way framework rotation)
+  startPhase('generation');
+  // 5. Generate personalized outreach via Claude API
+  //
+  // Pre-assign variants synchronously so parallel batches don't race on
+  // a shared cursor. Currently a single-variant cohort (v4) so the
+  // assignment is trivial, but stays robust if/when we A/B test again.
+  const TEST_VARIANTS = ['v4-named-deliverable'];
+  toEmail.forEach((lead, i) => {
+    lead.email_variant = TEST_VARIANTS[i % TEST_VARIANTS.length];
+  });
 
   await logExec('info', `Email generation starting for ${toEmail.length} leads`, { leadCount: toEmail.length });
-  // Distribute evenly across 3 frameworks: 1 (Specific Observation), 2 (Free Teardown), 3 (Peer Reference).
-  // Previous variants A/B and C/D/E/F are retired — historical data preserved.
-  // Round-robin ensures ~33% split per run.
-  // Single-variant cohort for A/B measurement vs. historical '1'/'2'/'3'.
-  // New named-deliverable framework — see plan phase 4.
-  const TEST_VARIANTS = ['v4-named-deliverable'];
-  let variantCursor = 0;
-  for (const lead of toEmail) {
-    try {
-      const variant = TEST_VARIANTS[variantCursor % TEST_VARIANTS.length];
-      variantCursor++;
-      lead.email_variant = variant;
 
-      const { subject, body } = await generateOutreachEmail(lead, lead.diagnosis_json, (attempt, maxRetries, errMsg) => {
-        logExec('warn', `Claude API retry attempt ${attempt}/${maxRetries}: ${errMsg}`, { attempt, maxRetries, email: lead.email, error: errMsg });
-      }, variant);
-      await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated', email_variant: variant });
+  async function generateOne(lead) {
+    try {
+      const { subject, body } = await Promise.race([
+        generateOutreachEmail(lead, lead.diagnosis_json, (attempt, maxRetries, errMsg) => {
+          logExec('warn', `Claude API retry attempt ${attempt}/${maxRetries}: ${errMsg}`, { attempt, maxRetries, email: lead.email, error: errMsg });
+        }, lead.email_variant),
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`per-lead generation timeout ${PER_LEAD_GEN_TIMEOUT_MS}ms`)), PER_LEAD_GEN_TIMEOUT_MS)),
+      ]);
+      await leadModel.update(lead.id, { outreach_subject: subject, outreach_body: body, status: 'email_generated', email_variant: lead.email_variant });
       lead.outreach_subject = subject;
       lead.outreach_body = body;
-      stats.emailsGenerated++;
+      return { ok: true };
     } catch (err) {
-      console.error(`[LEADGEN] Email generation error for ${lead.email}:`, err.message);
-      await logExec('error', `Email generation failed for ${lead.email}: ${err.message}`, { email: lead.email, error: err.message });
-      stats.errors++;
+      return { error: err.message, email: lead.email };
     }
-    await sleep(500);
   }
 
+  for (let i = 0; i < toEmail.length; i += GEN_CONCURRENCY) {
+    const batch = toEmail.slice(i, i + GEN_CONCURRENCY);
+    const results = await Promise.allSettled(batch.map(generateOne));
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        stats.errors++;
+        console.error('[LEADGEN] Generation batch entry rejected:', r.reason?.message || r.reason);
+        continue;
+      }
+      const v = r.value;
+      if (v.ok) {
+        stats.emailsGenerated++;
+      } else {
+        stats.errors++;
+        console.error(`[LEADGEN] Email generation error for ${v.email}:`, v.error);
+        await logExec('error', `Email generation failed for ${v.email}: ${v.error}`, { email: v.email, error: v.error });
+      }
+    }
+    if (bailIfPhaseOverBudget(PHASE_BUDGETS.generation)) break;
+    if (i + GEN_CONCURRENCY < toEmail.length) await sleep(500);
+  }
+
+  startPhase('send');
   // 6. Send emails — distribute round-robin across healthy senders (warming-aware per-sender limit)
   const healthySenders = await getHealthySenders();
   console.log(`[LEADGEN] Using ${healthySenders.length}/${SENDERS.length} healthy senders`);
@@ -1390,6 +1538,7 @@ async function runDailyLeadGeneration() {
 
   console.log(`[LEADGEN] Sender distribution: ${[...senderCounts.entries()].map(([e,c]) => `${e}=${c}`).join(', ')}`);
 
+  startPhase('summary');
   // 7. Send summary to owner
   try {
     await sendOwnerSummary(batchDate, stats, toEmail);
@@ -1408,6 +1557,11 @@ async function runDailyLeadGeneration() {
     url: `${env.frontendUrl}/admin`,
   }).catch(() => {});
 
+  // Capture the final phase's elapsed time before printing the summary
+  if (currentPhase) {
+    stats.phaseHistory.push({ phase: currentPhase, ms: phaseElapsedMs() });
+    console.log(`[LEADGEN] ◀ Phase ${currentPhase} done in ${Math.round(phaseElapsedMs() / 1000)}s`);
+  }
   console.log(`[LEADGEN] === Complete: ${JSON.stringify(stats)} ===`);
 
   // ── Mark workflow execution as completed ──
