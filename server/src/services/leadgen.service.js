@@ -906,7 +906,46 @@ async function runDailyLeadGeneration() {
   console.log('[LEADGEN] === Starting daily lead generation ===');
   const pipelineStartTime = Date.now();
   const batchDate = new Date().toISOString().split('T')[0];
-  const stats = { searched: 0, discovered: 0, emailsGenerated: 0, emailed: 0, errors: 0 };
+  const stats = { searched: 0, discovered: 0, emailsGenerated: 0, emailed: 0, errors: 0, phaseHistory: [], bailedFromPhase: null };
+
+  // ── Phase tracking (Tier B7) ─────────────────────────────
+  // Lightweight per-phase elapsed-time tracking so failures show WHERE in
+  // the pipeline they died, not just "45 min hit." Persisted to
+  // scheduler_heartbeats.last_phase by the scheduler caller (Tier B10).
+  let currentPhase = null;
+  let currentPhaseStart = 0;
+  function startPhase(name) {
+    if (currentPhase) {
+      const elapsedMs = Date.now() - currentPhaseStart;
+      stats.phaseHistory.push({ phase: currentPhase, ms: elapsedMs });
+      console.log(`[LEADGEN] ◀ Phase ${currentPhase} done in ${Math.round(elapsedMs / 1000)}s`);
+    }
+    currentPhase = name;
+    currentPhaseStart = Date.now();
+    console.log(`[LEADGEN] ▶ Phase ${name} starting`);
+  }
+  function phaseElapsedMs() {
+    return Date.now() - currentPhaseStart;
+  }
+  function bailIfPhaseOverBudget(budgetMs) {
+    if (phaseElapsedMs() > budgetMs) {
+      console.warn(`[LEADGEN] Phase ${currentPhase} budget exceeded (${Math.round(phaseElapsedMs() / 1000)}s > ${budgetMs / 1000}s) — bailing to next phase`);
+      stats.bailedFromPhase = currentPhase;
+      return true;
+    }
+    return false;
+  }
+  // Per-phase budgets in ms — sum to ~52 min, slightly under the 55-min
+  // global cap in leadgen.scheduler.js. Tuned post-Tier-B5/B6 caps.
+  const PHASE_BUDGETS = {
+    resume: 5 * 60 * 1000,
+    recovery: 8 * 60 * 1000,
+    search: 8 * 60 * 1000,
+    diagnosis: 12 * 60 * 1000,
+    filter: 2 * 60 * 1000,
+    generation: 12 * 60 * 1000,
+    send: 5 * 60 * 1000,
+  };
 
   // ── Workflow execution tracking (graceful — never breaks the pipeline) ──
   let workflowId = null;
@@ -946,6 +985,7 @@ async function runDailyLeadGeneration() {
   }
 
   try {
+  startPhase('resume');
   // 0. Resume any unsent leads from previous interrupted runs
   const resumeWarming = getWarmingLimits();
   try {
@@ -987,6 +1027,7 @@ async function runDailyLeadGeneration() {
     await logExec('error', `Resume unsent leads failed: ${resumeErr.message}`, { error: resumeErr.message });
   }
 
+  startPhase('recovery');
   // 0b. Recover leads stuck in 'diagnosed' status (personalization never
   // completed on a previous run — e.g. Claude API hang, or daily slice
   // capacity got spent on nameless leads that got filtered out). Recovery
@@ -1112,6 +1153,7 @@ async function runDailyLeadGeneration() {
     return stats;
   }
 
+  startPhase('search');
   // 1. Pick firm types and cities — budget ~140 searches/day to stay under remaining monthly limit
   // 10 firm types × 22 cities = 220 searches/day × 22 weekdays = 4,840/month (of 5,000 limit)
   const cities = shuffle(US_CITIES).slice(0, 22);
@@ -1163,6 +1205,7 @@ async function runDailyLeadGeneration() {
   console.log(`[LEADGEN] Raw search results: ${rawLeads.length}`);
   await logExec('info', `Search phase complete`, { rawResultCount: rawLeads.length, searched: stats.searched });
 
+  startPhase('diagnosis');
   // 3. Diagnose each website, extract emails, dedup
   //
   // PARALLELIZED 2026-04-29: was 500 sequential crawls × ~20s each = 175 min
@@ -1281,6 +1324,7 @@ async function runDailyLeadGeneration() {
         errors: stats.errors,
       });
     }
+    if (bailIfPhaseOverBudget(PHASE_BUDGETS.diagnosis)) break;
     if (i + DIAGNOSE_CONCURRENCY < candidates.length) {
       await sleep(2000); // polite crawling: 2s between concurrent batches
     }
@@ -1288,6 +1332,7 @@ async function runDailyLeadGeneration() {
 
   console.log(`[LEADGEN] Qualified leads: ${qualifiedLeads.length}`);
 
+  startPhase('filter');
   // 4. Sort by score (most gaps first), take top leads (warming-aware limit)
   const warming = getWarmingLimits();
   console.log(`[LEADGEN] Domain warming phase: ${warming.phase} — daily limit: ${warming.daily}, per-sender: ${warming.perSender}`);
@@ -1353,6 +1398,7 @@ async function runDailyLeadGeneration() {
   const PER_LEAD_GEN_TIMEOUT_MS = 90 * 1000;
   const toEmail = withName.slice(0, Math.min(warming.daily, PER_RUN_GEN_CAP));
 
+  startPhase('generation');
   // 5. Generate personalized outreach via Claude API
   //
   // Pre-assign variants synchronously so parallel batches don't race on
@@ -1400,9 +1446,11 @@ async function runDailyLeadGeneration() {
         await logExec('error', `Email generation failed for ${v.email}: ${v.error}`, { email: v.email, error: v.error });
       }
     }
+    if (bailIfPhaseOverBudget(PHASE_BUDGETS.generation)) break;
     if (i + GEN_CONCURRENCY < toEmail.length) await sleep(500);
   }
 
+  startPhase('send');
   // 6. Send emails — distribute round-robin across healthy senders (warming-aware per-sender limit)
   const healthySenders = await getHealthySenders();
   console.log(`[LEADGEN] Using ${healthySenders.length}/${SENDERS.length} healthy senders`);
@@ -1436,6 +1484,7 @@ async function runDailyLeadGeneration() {
 
   console.log(`[LEADGEN] Sender distribution: ${[...senderCounts.entries()].map(([e,c]) => `${e}=${c}`).join(', ')}`);
 
+  startPhase('summary');
   // 7. Send summary to owner
   try {
     await sendOwnerSummary(batchDate, stats, toEmail);
@@ -1454,6 +1503,11 @@ async function runDailyLeadGeneration() {
     url: `${env.frontendUrl}/admin`,
   }).catch(() => {});
 
+  // Capture the final phase's elapsed time before printing the summary
+  if (currentPhase) {
+    stats.phaseHistory.push({ phase: currentPhase, ms: phaseElapsedMs() });
+    console.log(`[LEADGEN] ◀ Phase ${currentPhase} done in ${Math.round(phaseElapsedMs() / 1000)}s`);
+  }
   console.log(`[LEADGEN] === Complete: ${JSON.stringify(stats)} ===`);
 
   // ── Mark workflow execution as completed ──

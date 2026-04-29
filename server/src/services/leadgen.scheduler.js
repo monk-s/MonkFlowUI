@@ -23,11 +23,15 @@ function start() {
       );
     } catch (_) {}
     try {
-      // Global 45-min watchdog — if anything hangs silently, this forces failure
+      // Global 55-min watchdog — if anything hangs silently, this forces failure
       // so the heartbeat flips to 'failed' instead of stuck on 'started' forever.
+      // Bumped from 45 → 55 in 2026-04-29 PR: per-phase budgets in leadgen.service.js
+      // sum to ~52 min worst case (resume:5+recovery:8+search:8+diagnosis:12+filter:2+
+      // generation:12+send:5), so 55 gives 3-min headroom for orchestration overhead.
+      const GLOBAL_TIMEOUT_MS = 55 * 60 * 1000;
       const stats = await Promise.race([
         runDailyLeadGeneration(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('runDailyLeadGeneration timeout after 45min')), 45 * 60 * 1000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('runDailyLeadGeneration timeout after 55min')), GLOBAL_TIMEOUT_MS)),
       ]);
       console.log('[LEADGEN] Daily run complete:', stats);
 
