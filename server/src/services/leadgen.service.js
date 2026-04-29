@@ -909,10 +909,12 @@ async function runDailyLeadGeneration() {
   const batchDate = new Date().toISOString().split('T')[0];
   const stats = { searched: 0, discovered: 0, emailsGenerated: 0, emailed: 0, errors: 0, phaseHistory: [], bailedFromPhase: null };
 
-  // ── Phase tracking (Tier B7) ─────────────────────────────
+  // ── Phase tracking (Tier B7+B10) ─────────────────────────
   // Lightweight per-phase elapsed-time tracking so failures show WHERE in
-  // the pipeline they died, not just "45 min hit." Persisted to
-  // scheduler_heartbeats.last_phase by the scheduler caller (Tier B10).
+  // the pipeline they died, not just "55 min hit." Persists to
+  // scheduler_heartbeats.last_phase (migration 046) on each phase start
+  // so even a hard crash leaves a breadcrumb in the DB. Best-effort —
+  // never break the pipeline for tracking.
   let currentPhase = null;
   let currentPhaseStart = 0;
   function startPhase(name) {
@@ -924,6 +926,11 @@ async function runDailyLeadGeneration() {
     currentPhase = name;
     currentPhaseStart = Date.now();
     console.log(`[LEADGEN] ▶ Phase ${name} starting`);
+    // Best-effort heartbeat update — never break pipeline for diagnostics
+    dbQuery(
+      `UPDATE scheduler_heartbeats SET last_phase = $1, last_phase_started_at = NOW() WHERE name = 'leadgen'`,
+      [name]
+    ).catch(() => { /* migration 046 not applied yet, or transient DB error */ });
   }
   function phaseElapsedMs() {
     return Date.now() - currentPhaseStart;
