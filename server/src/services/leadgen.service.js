@@ -143,13 +143,28 @@ const UNSUBSCRIBE_BASE = SENDING_DOMAIN_BASE;
 // Role-based addresses (outreach@, hello@, team@, etc.) intentionally excluded —
 // they're a spam signal and the system's own BAD_PATTERNS would reject them on receive.
 const SENDER_DOMAIN = process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com';
+
+// REPUTATION REBUILD WINDOW (started 2026-04-29):
+//
+// Three of the original six senders are sunset during the rebuild. Spreading
+// volume across 6 means each sender does ~5/day at warm-1, which is below
+// the threshold for Gmail's per-address reputation system to register a
+// reliable signal. Concentrating on 3 senders means each does ~10/day —
+// 210 sends per sender over a 21-day rebuild, enough to actually move the
+// needle.
+//
+// The 3 most-natural-looking local-parts stay active. Re-enable the
+// commented three (`n.linder`, `nathanl`, `nlinder`) at Day 28+ if Gmail
+// human-open rate is sustained ≥10% — at that point the senders need to
+// re-warm naturally, which is fine because their historical reputation
+// is essentially neutral (low volume, no recent complaints).
 const SENDERS = [
   { email: `nathan@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
   { email: `nate@${SENDER_DOMAIN}`, name: 'Nate Linder' },
   { email: `nathan.linder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
-  { email: `n.linder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
-  { email: `nathanl@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
-  { email: `nlinder@${SENDER_DOMAIN}`, name: 'Nathan Linder' },
+  // { email: `n.linder@${SENDER_DOMAIN}`,  name: 'Nathan Linder' }, // REBUILD: re-enable Day 28+ if Gmail open-rate ≥10%
+  // { email: `nathanl@${SENDER_DOMAIN}`,   name: 'Nathan Linder' }, // REBUILD: re-enable Day 28+ if Gmail open-rate ≥10%
+  // { email: `nlinder@${SENDER_DOMAIN}`,   name: 'Nathan Linder' }, // REBUILD: re-enable Day 28+ if Gmail open-rate ≥10%
 ];
 
 const US_CITIES = [
