@@ -985,7 +985,13 @@ const handleResendWebhook = catchAsync(async (req, res) => {
   // Resend webhook events: email.bounced, email.complained, email.delivered
   if (type === 'email.bounced' || type === 'email.complained') {
     const toEmail = data?.to?.[0] || data?.email_id;
-    const fromEmail = data?.from;
+    // Resend's payload field name has shifted across SDK versions: `from` is
+    // current, `from_email` was legacy, `email.from` appears in some inbound
+    // events. Try all so attribution to sender_health doesn't silently fail
+    // on a future Resend payload tweak. The `sender_health.bounce_count = 0`
+    // mystery (despite real bounces processing) is consistent with this
+    // path having missed a field rename.
+    const fromEmail = data?.from || data?.from_email || data?.email?.from;
 
     if (toEmail) {
       // Find the lead and remove from active sequence
