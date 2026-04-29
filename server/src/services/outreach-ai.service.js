@@ -342,7 +342,15 @@ async function sendAiEmail(leadId) {
   let htmlBody = lead.ai_email_body;
   if (unsubToken && !htmlBody.includes('track/open/')) {
     const unsubUrl = `https://monkflow.io/api/v1/leadgen/unsubscribe/${unsubToken}`;
-    const unsubFooter = `<div style="margin-top:20px;font-size:11px;color:#999;"><p><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`;
+    // Inline HTML escape — env values are operator-controlled but defensive posture
+    // costs nothing. Avoids requiring leadgen.service.js (would create circular import).
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    // CAN-SPAM 15 U.S.C. § 7702(a)(5) — physical postal address required in
+    // commercial email footer. Only renders when COMPANY_ADDRESS is set in env.
+    const addressBlock = env.companyAddress
+      ? `<p style="margin:0 0 6px;">${esc(env.companyName)}<br>${esc(env.companyAddress)}</p>`
+      : '';
+    const unsubFooter = `<div style="margin-top:20px;font-size:11px;color:#999;line-height:1.5;">${addressBlock}<p style="margin:0;"><a href="${unsubUrl}" style="color:#999;">Unsubscribe</a></p></div>`;
     const trackingPixel = `<img src="https://monkflow.io/api/v1/outreach/track/open/${unsubToken}" width="1" height="1" style="display:none" alt="" />`;
     htmlBody = `${htmlBody}${unsubFooter}${trackingPixel}`;
   }

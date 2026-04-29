@@ -20,6 +20,12 @@ const env = {
   leadgenEnabled: process.env.LEADGEN_ENABLED === 'true',
   leadgenDailyLimit: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 20,
   leadgenPerSenderLimit: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 30,
+  // CAN-SPAM 15 U.S.C. § 7702(a)(5) requires a physical postal address in the
+  // footer of every commercial email. Set COMPANY_ADDRESS in Railway. Empty
+  // string disables the footer line — avoids rendering an awkward "MonkFlow"
+  // with no address. Set COMPANY_NAME if it differs from MonkFlow.
+  companyName: process.env.COMPANY_NAME || 'MonkFlow',
+  companyAddress: process.env.COMPANY_ADDRESS || '',
   outreachSendingDomain: process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com',
   leadgenFromEmail: process.env.LEADGEN_FROM_EMAIL || `nathan@${process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com'}`,
   outreachFromEmail: process.env.OUTREACH_FROM_EMAIL || `Nathan Linder <nathan@${process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com'}>`,

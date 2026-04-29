@@ -794,8 +794,9 @@ async function sendColdEmail(lead, sender) {
         return `<p style="margin: 0 0 12px;">${linked}</p>`;
       }).join('')}
     </div>
-    <div style="margin-top: 20px; font-size: 11px; color: #999;">
-      <p><a href="${unsubUrl}" style="color: #999;">Unsubscribe</a></p>
+    <div style="margin-top: 20px; font-size: 11px; color: #999; line-height: 1.5;">
+      ${env.companyAddress ? `<p style="margin: 0 0 6px;">${escapeHtml(env.companyName)}<br>${escapeHtml(env.companyAddress)}</p>` : ''}
+      <p style="margin: 0;"><a href="${unsubUrl}" style="color: #999;">Unsubscribe</a></p>
     </div>
     <img src="${SENDING_DOMAIN_BASE}/api/v1/outreach/track/open/${lead.unsubscribe_token}" width="1" height="1" style="display:none" alt="" />
   `;
@@ -807,7 +808,8 @@ async function sendColdEmail(lead, sender) {
     const replyTo = process.env.LEADGEN_REPLY_TO || 'nathan@mail.getmonkflow.com';
 
     // Plain-text alternative (improves deliverability — HTML-only emails score higher on spam filters)
-    const plainText = `${lead.outreach_body}\n\nUnsubscribe: ${unsubUrl}`;
+    const addressLine = env.companyAddress ? `\n\n${env.companyName}\n${env.companyAddress}` : '';
+    const plainText = `${lead.outreach_body}${addressLine}\n\nUnsubscribe: ${unsubUrl}`;
 
     const result = await sendEmail({
       to: lead.email,
