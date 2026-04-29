@@ -10,7 +10,18 @@ const { URL } = require('url');
 
 const resolveMx = promisify(dns.resolveMx);
 
-// ── Case study references (AI picks the most relevant) ────
+// ── Case study references ─────────────────────────────────
+// CRITICAL: This array must contain ONLY real, named, permission-granted clients.
+// As of 2026-04-29 the only real client is Team Financial Strategies (TFS).
+// Three previous entries (Tulsa dental, Columbus chiropractic, Austin Shopify)
+// were FABRICATED — they were used in ~2,000 cold-outreach emails before
+// removal. Original content archived to ~/Desktop/monkflow-archive/
+// case-studies-pre-trim-2026-04-29.txt as remediation-timeline evidence.
+//
+// See CLAUDE.md: "Never fabricate social proof." Adding new entries requires
+// the named firm's written permission to use their name + result numbers
+// in cold outreach. Anonymized entries are acceptable ONLY if the underlying
+// engagement is real and the firm declined named permission.
 const CASE_STUDIES = [
   {
     name: 'Team Financial Strategies (4-advisor wealth management firm, Dallas)',
@@ -18,27 +29,6 @@ const CASE_STUDIES = [
     what: 'automated client onboarding + Redtail CRM sync',
     result: 'cut new-client setup from 45 minutes to under 5',
     detail: 'custom contract form that auto-populates Redtail CRM, generates signed agreements as PDFs, and syncs client financial profiles. Built in 2 weeks.',
-  },
-  {
-    name: 'a 4-provider dental practice in Tulsa (6 front-desk staff)',
-    industry: 'dental / healthcare / medical',
-    what: 'online scheduling + digital intake forms + patient portal',
-    result: 'went from 18 hrs/week on scheduling to under 2',
-    detail: 'self-service booking, digital intake forms that pre-fill into their EHR, automated SMS/email reminders. Built in 3 weeks.',
-  },
-  {
-    name: 'a 3-provider chiropractic office in Columbus',
-    industry: 'chiropractic / healthcare / medical',
-    what: 'digital intake + automated scheduling',
-    result: 'saved 11 hrs/week of front-desk time',
-    detail: 'fully digital new-patient intake flow, automated appointment scheduling, and reminder sequences. Built in 9 business days.',
-  },
-  {
-    name: 'a Shopify e-commerce brand in Austin',
-    industry: 'retail / e-commerce / general business',
-    what: 'order-to-fulfillment automation connecting store, inventory, and shipping',
-    result: 'eliminated 15 hrs/week of manual order processing, shipping errors near zero',
-    detail: 'automated pipeline from order placement to label printing, real-time inventory sync, and exception alerts.',
   },
 ];
 
@@ -130,57 +120,58 @@ async function analyzeWebsite(domain) {
 
 // ── AI email generator ─────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are writing a cold email for Nathan, who runs MonkFlow — a dev agency that builds custom automation, client portals, and workflow tools for small businesses.
+const SYSTEM_PROMPT = `You are writing a cold email for Nathan Linder, founder of MonkFlow — a focused dev shop that builds digital intake forms + CRM auto-sync (Redtail / Wealthbox / Salesforce FSC) for independent advisor firms (RIAs).
 
-GOAL: Write an email that stands out in a crowded inbox. This person gets dozens of cold emails a week. Yours needs to feel different from every "I noticed your website..." template.
+GOAL: Write an email that stands out in a crowded inbox. The recipient is a wealth advisor or ops manager at a small RIA who gets dozens of cold emails a week — most pitching marketing, SEO, or generic "automation." Yours needs to feel like it came from someone who actually understands their workflow.
 
 STRUCTURE — use the framework specified in the user prompt (1, 2, or 3). Each has a distinct approach. Follow it exactly.
 
 FRAMEWORK 1 — "Specific Observation + Question":
-- Open with ONE hyper-specific observation about their BUSINESS OPERATIONS (not their website). Use the website analysis to INFER the operational pain, don't describe the website symptom.
-  - BAD: "Saw your booking routes through a contact form"
-  - GOOD: "If your team is still handling new-client intake by phone, your front desk is probably spending 8-10 hours a week on it"
-- ONE sentence of social proof with a specific result: include industry, city, size, and metric.
+- Open with ONE hyper-specific observation about their CLIENT-ONBOARDING WORKFLOW (not their website). Use the website analysis to INFER the operational pain, don't describe the website symptom.
+  - BAD: "Saw your contact form is just an email link"
+  - GOOD: "If your ops manager or junior advisor is still re-typing new-client info from PDFs into Redtail, that's typically 30–45 minutes per onboarding plus partial-field compliance risk"
+- ONE sentence of social proof with a specific result: include industry, city, firm size, and metric.
 - CTA: A direct, neutral question. Not yes/no, not "reply 'send it'".
-  - GOOD: "Is intake something your team has talked about fixing?"
+  - GOOD: "Is new-client onboarding something your firm has talked about tightening up?"
   - BAD: "Curious if this is on your radar?", "Yes or no?", "Reply 'send it'", "Thoughts?", "Interested?"
 - End with P.S. containing booking link: "P.S. If easier to just talk: {bookingUrl}"
 
 FRAMEWORK 2 — "Free Teardown":
-- Open with "I looked at {company}'s site and noticed three things I'd automate first."
-- Then describe those three things in PROSE — one short sentence each, no bullet points, no numbered list. Be concrete about what you'd build.
-- One-line proof: a specific case study result with industry, city, and metric.
+- Open with "I looked at {company}'s site and noticed three things I'd automate first in your client-onboarding flow."
+- Then describe those three things in PROSE — one short sentence each, no bullet points, no numbered list. Be concrete about what you'd build (e.g., "the new-client intake form + Redtail auto-sync, the custodian-of-record bulk e-sign, and the risk-tolerance + IPS draft generation").
+- One-line proof: a specific case study result with firm-type, city, and metric.
 - CTA: "Want me to send the full breakdown? Takes 2 min to read."
 - End with P.S. containing booking link: "P.S. Or if easier to talk through it: {bookingUrl}"
 
 FRAMEWORK 3 — "Peer Reference":
-- Open by referencing what a similar business in their area or industry is doing: "A [industry] practice in [nearby city] just automated their entire [process] — saves them [X hours/week]."
-- Connect to THEIR situation using analysis gaps: "Your site shows you're still handling [gap] manually — same spot they were in."
+- Open by referencing what a similar firm has done: "A 4-advisor RIA in Dallas rebuilt their new-client onboarding around Redtail auto-sync — cut intake from 45 minutes to under 5."
+- Connect to THEIR situation using analysis gaps: "Your site shows you're still capturing client info on paper or PDFs — same spot they were in."
 - CTA: A direct neutral question. "Want me to share what they did?"
   - BAD: "Curious if this is on your radar?", "Happy to chat", "Thoughts?", "Interested?"
 - End with P.S. containing booking link: "P.S. Calendar's here if easier: {bookingUrl}"
 
-CASE STUDIES (use the one that matches their industry; include specifics):
+CASE STUDIES (the only real client — use truthfully, never embellish):
 ${CASE_STUDIES.map((cs, i) => `${i + 1}. ${cs.name}: ${cs.what}. Result: ${cs.result}.`).join('\n')}
-If none match well, use the result numbers without naming the client — but always include a concrete client descriptor (industry + city or size).
+If you must reference the client anonymously (not by name), describe as "a 4-advisor RIA in Dallas" — keep the metrics intact.
 
 HARD RULES (apply to ALL frameworks):
 - 100-130 words total. The email must be skimmable in under 15 seconds.
 - Start with "Hey {firstName}," — use the first name provided. If the name is "there", use "Hey {company} team," instead. Never "Hi".
-- The first sentence after the greeting must reference something CONCRETE about them: their company name, a specific operational gap inferred from the analysis, or an observable fact. Never start with a generic industry stat.
+- The first sentence after the greeting must reference something CONCRETE about them: their firm name, a specific operational gap inferred from the analysis, or an observable fact. Never start with a generic industry stat.
 - Every email MUST include the booking URL as a P.S. line at the end. Never bury it in the body or exclude it.
 - The CTA must be a direct neutral question, NOT a command and NOT a soft conversational hedge. Ask something concrete they can answer.
 - Plain prose only — no bullet points, no numbered lists. (Framework 2's three-things list is described in three short sentences, not bullets.)
-- NEVER use these phrases: "Curious", "Worth exploring", "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to chat", "happy to share", "thoughts?", "interested?", "on your radar"
-- The case study mention must include a specific number AND a specific client descriptor (industry + city or size). Never "a healthcare practice" — always "a 4-provider dental office in Tulsa" or similar.
+- NEVER fabricate case studies. ONLY reference the real client above (or anonymized version). Never invent a "dental practice" or "chiropractic office" — those were fabricated examples and have been removed.
+- NEVER use these phrases: "Curious", "Worth exploring", "I noticed", "I came across", "reaching out", "touching base", "hope this finds you well", "I'd love to", "quick chat", "quick question", "just wanted to", "let me know if", "happy to chat", "happy to share", "thoughts?", "interested?", "on your radar", "front desk", "your practice", "patient" (these read wrong for wealth-mgmt audience).
+- Use "firm" not "practice"; "advisor" / "ops manager" not "front desk"; "client" not "patient".
 - Sign off as just "Nathan" — no last name, no company, no title.
 
 Subject line rules:
 - 2-6 words, sentence case (capitalize first word only, rest lowercase unless proper noun), no emoji.
-- Must create curiosity or feel like it came from a colleague.
+- Must create curiosity or feel like it came from a peer.
 - Include a "?" in roughly half of subjects (questions have higher open rates).
-- GOOD patterns: "Question about {company}", "{firstName} — quick thought", "Intake at {company}?", "Saw something on your site"
-- BAD patterns: "{company} + intake" (looks automated), all-lowercase everything (looks mass-sent), generic keywords ("scheduling headaches")
+- GOOD patterns: "Intake at {company}?", "{firstName} — Redtail sync question", "{company} new-client onboarding", "Question about {company}"
+- BAD patterns: "{company} + intake" (looks automated), all-lowercase everything (looks mass-sent), generic keywords ("scheduling headaches"), anything mentioning "patient" or "practice"
 
 OUTPUT FORMAT: Return valid JSON only, no markdown:
 {"subject": "...", "body": "..."}
@@ -403,16 +394,19 @@ async function sendAiEmail(leadId) {
  * module). Keep the logic in sync across the two copies.
  */
 function selectCaseStudyForFollowup(industryOrType) {
+  // Wealth-mgmt pivot 2026-04-29: CASE_STUDIES holds only TFS. Old branches
+  // matched dental/chiro/e-commerce — those entries no longer exist, so the
+  // matches returned `undefined` and crashed downstream prompt rendering.
+  // Now: always return the wealth case (or CASE_STUDIES[0] as a defensive
+  // fallback if the array structure ever changes). Lingering dental/chiro
+  // rows in outreach_leads from the pre-pivot era are still served TFS,
+  // which reads slightly off-vertical but doesn't crash and is honest about
+  // what we actually built.
   const t = (industryOrType || '').toLowerCase();
-  if (/dent/.test(t)) return CASE_STUDIES.find(c => /dental/i.test(c.industry));
-  if (/chiro/.test(t)) return CASE_STUDIES.find(c => /chiropractic/i.test(c.industry));
-  if (/financial|wealth|advisor|cpa|accounting|tax|ria/.test(t)) {
-    return CASE_STUDIES.find(c => /wealth|financial/i.test(c.industry));
-  }
-  if (/ecommerce|e-commerce|retail|shopify|shop|store/.test(t)) {
-    return CASE_STUDIES.find(c => /e-commerce|retail/i.test(c.industry));
-  }
-  return CASE_STUDIES.find(c => /e-commerce/i.test(c.industry)) || CASE_STUDIES[0];
+  const wealth = CASE_STUDIES.find(c => /wealth|financial/i.test(c.industry));
+  if (wealth) return wealth;
+  // Defensive — should never hit while TFS is the sole entry.
+  return CASE_STUDIES[0];
 }
 
 const FOLLOWUP_SYSTEM_PROMPT = `You are writing a follow-up email for Nathan, founder of MonkFlow — a solo dev agency that builds custom automation, client portals, and workflow tools for small businesses.
