@@ -842,13 +842,17 @@ function closeModal() {
 function renderLandingPage() {
   const container = document.getElementById('landing-container');
 
+  // Wealth-mgmt pivot 2026-04-29: services rewritten to lead with the
+  // productized offer (digital intake forms + CRM sync). Generic
+  // "automation/chatbots/analytics" descriptions are gone — they were
+  // diluting the wealth-mgmt positioning.
   const services = [
-    { icon: icons.users, title: 'Onboarding Tools', desc: 'Automated client & employee onboarding flows with document collection and progress tracking.' },
-    { icon: icons.clock, title: 'Scheduling Software', desc: 'Smart booking systems with AI-powered optimization, reminders, and multi-provider sync.' },
-    { icon: icons.agents, title: 'Custom Chatbots', desc: 'AI chatbots trained on your business data — not generic bots, intelligent assistants.' },
-    { icon: icons.workflow, title: 'Workflow Automation', desc: 'End-to-end process automation connecting your existing tools, eliminating manual bottlenecks.' },
-    { icon: icons.analytics, title: 'Data & Analytics', desc: 'Custom data pipelines, real-time dashboards, and automated reporting built around your KPIs.' },
-    { icon: icons.help, title: 'Support Systems', desc: 'AI-powered ticket classification, knowledge bases, and escalation workflows.' },
+    { icon: icons.users, title: 'Digital Intake Forms', desc: 'New-client intake with conditional logic, document upload, and e-signature. Pre-fills directly into your CRM. Eliminates the 30–45 min paper-to-Redtail re-key per onboarding.' },
+    { icon: icons.workflow, title: 'CRM Auto-Sync', desc: 'Redtail, Wealthbox, Salesforce Financial Services Cloud. Contact + financial profile + custodian-of-record forms populate automatically — no manual entry.' },
+    { icon: icons.clock, title: 'Signed-PDF Generation', desc: 'Custodian forms, ADV delivery, IPS, beneficiary designations. Pre-filled, e-signed, archived in your CRM. Compliance-friendly out of the box.' },
+    { icon: icons.agents, title: 'Risk-Tolerance + IPS Drafting', desc: 'Scored questionnaire feeds an investment policy statement draft your CIO can review and ship in minutes — not 90.' },
+    { icon: icons.analytics, title: 'Onboarding Analytics', desc: 'Real-time dashboard: time-per-onboarding, drop-off points, partial-field rates. Quantifies the gain so you can defend the line item.' },
+    { icon: icons.help, title: 'Ongoing Care', desc: 'Direct line to the founder for bug fixes, custom-field additions, and CRM workflow tweaks. No ticket queues, no offshore teams.' },
   ];
 
   container.innerHTML = `
@@ -877,18 +881,18 @@ function renderLandingPage() {
     <!-- Hero -->
     <section class="landing-hero">
       <div class="landing-hero-content">
-        <div class="hero-badge">Curated Software for Your Business</div>
-        <h1 class="landing-hero-title">We Build the Tools<br/>Your Business <span class="text-accent">Actually Needs</span></h1>
-        <p class="landing-hero-subtitle">MonkFlow crafts custom onboarding tools, scheduling software, chatbots, and intelligent workflows — built around your business, not the other way around. We don't just use AI. We implement it where it matters most.</p>
+        <div class="hero-badge">For Independent Advisor Firms</div>
+        <h1 class="landing-hero-title">Digital Intake Forms +<br/>Redtail / Wealthbox <span class="text-accent">Auto-Sync</span></h1>
+        <p class="landing-hero-subtitle">MonkFlow builds the new-client onboarding stack for independent RIAs. Cut intake from 45 minutes to under 5. CRM populates automatically. Compliance-friendly signed PDFs out of the box.</p>
         <div class="hero-actions">
-          <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Schedule a Free Consultation</button>
-          <button class="btn btn-secondary btn-lg" onclick="document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">${icons.eye} Explore Our Services</button>
+          <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Book a 15-min Intro Call</button>
+          <button class="btn btn-secondary btn-lg" onclick="event.preventDefault();window.location.hash='#wealth-intake';">${icons.eye} View the $1,500 Audit →</button>
         </div>
         <div class="landing-hero-stats">
-          <div class="landing-stat"><div class="landing-stat-val">ACU</div><div class="landing-stat-label">Student-Founded</div></div>
-          <div class="landing-stat"><div class="landing-stat-val">100%</div><div class="landing-stat-label">Custom-Built</div></div>
-          <div class="landing-stat"><div class="landing-stat-val">Fixed</div><div class="landing-stat-label">Fee Projects</div></div>
-          <div class="landing-stat"><div class="landing-stat-val">Local</div><div class="landing-stat-label">West Texas Focus</div></div>
+          <div class="landing-stat"><div class="landing-stat-val">45→5 min</div><div class="landing-stat-label">Onboarding time (TFS, real client)</div></div>
+          <div class="landing-stat"><div class="landing-stat-val">2 weeks</div><div class="landing-stat-label">Typical build time</div></div>
+          <div class="landing-stat"><div class="landing-stat-val">Fixed-fee</div><div class="landing-stat-label">No hourly surprises</div></div>
+          <div class="landing-stat"><div class="landing-stat-val">Founder-led</div><div class="landing-stat-label">Direct line to the builder</div></div>
         </div>
       </div>
       <div class="hero-glow"></div>
@@ -928,7 +932,7 @@ function renderLandingPage() {
         <div class="section-header">
           <div class="hero-badge">Why MonkFlow</div>
           <h2 class="section-title">Built Different</h2>
-          <p class="section-subtitle">We're not a big agency. We're a student-led software studio that builds tools businesses actually use.</p>
+          <p class="section-subtitle">We're not a big agency. We're a focused founder-led shop that builds new-client onboarding for RIAs — and only that.</p>
         </div>
         <div class="landing-testimonials-grid">
           <div class="landing-testimonial-card">
@@ -944,21 +948,21 @@ function renderLandingPage() {
             <div style="color:var(--text-secondary);margin-top:8px;">We don't disappear after launch. You get a direct line to the person who built your tool — not a support ticket queue.</div>
           </div>
         </div>
-        <!-- Client Results -->
+        <!-- Client Results — TFS only (the one real, named client) -->
         <div style="margin-top:40px;text-align:center;">
-          <p style="font-size:14px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;">Results We've Delivered</p>
+          <p style="font-size:14px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;">Real Result — Team Financial Strategies (4-advisor RIA, Dallas)</p>
           <div style="display:flex;justify-content:center;gap:32px;flex-wrap:wrap;">
             <div style="text-align:center;">
               <div style="font-size:28px;font-weight:700;color:var(--accent);">45 min → 5 min</div>
-              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">Client onboarding time</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">New-client setup time</div>
             </div>
             <div style="text-align:center;">
-              <div style="font-size:28px;font-weight:700;color:var(--accent);">12 hrs/week</div>
-              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">Saved on manual tasks</div>
+              <div style="font-size:28px;font-weight:700;color:var(--accent);">2 weeks</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">From kickoff to live</div>
             </div>
             <div style="text-align:center;">
-              <div style="font-size:28px;font-weight:700;color:var(--accent);">35% fewer</div>
-              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">No-shows with auto-reminders</div>
+              <div style="font-size:28px;font-weight:700;color:var(--accent);">Redtail</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">CRM auto-sync + signed PDFs</div>
             </div>
           </div>
         </div>
@@ -1002,42 +1006,80 @@ function renderLandingPage() {
       </div>
     </section>
 
-    <!-- How It Works / Pricing -->
-    <section id="landing-pricing" class="landing-section">
+    <!-- Productized Offer Ladder — Wealth-Mgmt Intake Forms -->
+    <section id="wealth-intake" class="landing-section">
       <div class="landing-section-inner">
         <div class="section-header">
-          <div class="hero-badge">How It Works</div>
-          <h2 class="section-title">Custom-Built. Fixed Fee. Ongoing Support.</h2>
-          <p class="section-subtitle">No monthly subscriptions for tools you don't use. We build exactly what your business needs and bill based on the work.</p>
+          <div class="hero-badge">Productized Offers · Public Pricing</div>
+          <h2 class="section-title">Fixed-Fee Tiers — Pick the Scope That Fits</h2>
+          <p class="section-subtitle">No discovery dance. No "let's hop on a call to scope it." Public pricing, fixed delivery windows, refundable audit anchor.</p>
         </div>
-        <div class="grid-3" style="max-width:960px;margin:0 auto;">
-          <div class="card" style="padding:28px;text-align:center;">
-            <div style="font-size:32px;margin-bottom:12px;">&#128221;</div>
-            <h3 style="margin:0 0 8px;font-size:18px;">Fixed-Fee Build</h3>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.8;">
-              We scope your project, quote a fixed price, and build it. No hourly billing, no surprise invoices. You know the cost before we write a line of code.
+        <div class="grid-3" style="max-width:1100px;margin:0 auto;gap:16px;">
+          <!-- Tier 1: Audit -->
+          <div class="card" style="padding:28px;">
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 1 · Entry</div>
+            <h3 style="margin:8px 0 6px;font-size:22px;">Onboarding Audit</h3>
+            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$1,500</div>
+            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">7-day delivery</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
+              90-min Loom walkthrough of your current new-client onboarding flow + written report on the 3 highest-ROI fixes for your firm's stack.<br/><br/>
+              <strong style="color:var(--text-primary);">Refundable</strong> against any project tier booked within 30 days.
             </div>
+            <button class="btn btn-secondary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book audit call</button>
           </div>
-          <div class="card" style="padding:28px;text-align:center;border:1px solid var(--accent);">
-            <div style="font-size:32px;margin-bottom:12px;">&#9889;</div>
-            <h3 style="margin:0 0 8px;font-size:18px;">Usage-Based Billing</h3>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.8;">
-              After deployment, you only pay for what your tools actually use — workflow runs, AI tasks, and integrations. We invoice you directly based on real usage.
+          <!-- Tier 2: Intake Pro (highlighted) -->
+          <div class="card" style="padding:28px;border:1px solid var(--accent);position:relative;">
+            <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;padding:4px 12px;border-radius:12px;font-size:11px;font-weight:700;">MOST POPULAR</div>
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 2 · Core</div>
+            <h3 style="margin:8px 0 6px;font-size:22px;">Intake Pro</h3>
+            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$7,500</div>
+            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">14-day delivery</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
+              Digital intake form + one CRM sync (Redtail, Wealthbox, or Salesforce FSC).<br/><br/>
+              Includes document upload, e-signature, conditional logic, automated CRM record creation, custodian-of-record form pre-fill.
             </div>
+            <button class="btn btn-primary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book intro call</button>
           </div>
-          <div class="card" style="padding:28px;text-align:center;">
-            <div style="font-size:32px;margin-bottom:12px;">&#129309;</div>
-            <h3 style="margin:0 0 8px;font-size:18px;">Ongoing Partnership</h3>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.8;">
-              We don't disappear after launch. Your tools get a dedicated client portal where you can monitor everything — plus a direct line to us for changes.
+          <!-- Tier 3: Onboarding System -->
+          <div class="card" style="padding:28px;">
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 3 · Full</div>
+            <h3 style="margin:8px 0 6px;font-size:22px;">Onboarding System</h3>
+            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$14,500</div>
+            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">28-day delivery</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
+              The full TFS scope: intake + CRM sync + contract auto-population + signed-PDF generation + reminder sequences + financial-profile sync.<br/><br/>
+              The same system that took TFS from 45 min to under 5 per onboarding.
             </div>
+            <button class="btn btn-secondary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book intro call</button>
           </div>
+        </div>
+        <!-- Optional retainer -->
+        <div style="max-width:1100px;margin:24px auto 0;padding:20px 28px;background:var(--bg-secondary);border-radius:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+          <div>
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Optional add-on</div>
+            <div style="font-size:18px;font-weight:600;margin-top:4px;">Care Retainer · $750/mo</div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">Bug fixes, minor changes (≤4 hrs/mo), CRM custom-field additions. Cancel anytime.</div>
+          </div>
+        </div>
+        <!-- Founding Partner tier -->
+        <div style="max-width:1100px;margin:24px auto 0;padding:24px 28px;border:2px dashed var(--accent);border-radius:12px;background:rgba(0,204,106,0.05);">
+          <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;font-weight:700;">Founding Partner Tier · May 2026 Only</div>
+          <h3 style="margin:8px 0 6px;font-size:20px;">Onboarding System at $5,000 (vs $14,500 list)</h3>
+          <div style="font-size:14px;color:var(--text-secondary);line-height:1.7;">
+            First 2 RIA firms to engage in May 2026 get the full Tier 3 build at <strong style="color:var(--text-primary);">$5,000</strong> in exchange for: written case study with logo + advisor name, 30-min joint video testimonial, and 2–4 reference calls per quarter to future MonkFlow prospects.
+            <br/><br/>
+            <em>Not a discount — a partnership. We build the case-study evidence base together.</em>
+          </div>
+          <button class="btn btn-primary" style="margin-top:16px;" onclick="showSchedulingModal()">Apply for Founding Partner</button>
         </div>
         <div style="text-align:center;margin-top:32px;">
-          <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Schedule a Free Consultation</button>
+          <button class="btn btn-secondary btn-lg" onclick="showSchedulingModal()">${icons.clock} Schedule a 15-min intro call</button>
         </div>
       </div>
     </section>
+
+    <!-- Legacy id alias so #landing-pricing nav anchor still works -->
+    <span id="landing-pricing"></span>
 
     <!-- Schedule CTA -->
     <section id="landing-schedule" class="landing-section landing-section-alt">
@@ -1065,11 +1107,11 @@ function renderLandingPage() {
         </div>
         <div class="landing-footer-links">
           <div>
-            <h4>Solutions</h4>
-            <a href="#" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">Onboarding Tools</a>
-            <a href="#" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">Scheduling Software</a>
-            <a href="#" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">AI Chatbots</a>
-            <a href="#" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">Workflow Automation</a>
+            <h4>Offers</h4>
+            <a href="#" onclick="event.preventDefault();document.getElementById('wealth-intake').scrollIntoView({behavior:'smooth'})">Onboarding Audit · $1,500</a>
+            <a href="#" onclick="event.preventDefault();document.getElementById('wealth-intake').scrollIntoView({behavior:'smooth'})">Intake Pro · $7,500</a>
+            <a href="#" onclick="event.preventDefault();document.getElementById('wealth-intake').scrollIntoView({behavior:'smooth'})">Onboarding System · $14,500</a>
+            <a href="#" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">All services</a>
           </div>
           <div>
             <h4>Company</h4>
@@ -1147,11 +1189,11 @@ function renderAuthLogin() {
             </div>
             <div class="auth-feature">
               <div class="feature-check">${icons.check}</div>
-              Student-founded at ACU, Abilene TX
+              Founder-led — direct line to the builder
             </div>
             <div class="auth-feature">
               <div class="feature-check">${icons.check}</div>
-              Dedicated team & ongoing support
+              Focused on independent advisor firms (RIAs)
             </div>
           </div>
         </div>
