@@ -38,10 +38,12 @@ function getWarmingLimits() {
     // Days 21-27: near full — 25 per sender × 3 = 75/day
     return { daily: 75, perSender: 25, phase: 'warm-4' };
   } else {
-    // Day 28+: full capacity — 30 per sender × 3 = 90/day
+    // Day 28+: full capacity. Both ceilings come from env.js (single source of
+    // truth — was previously a second `process.env.*` parse here that
+    // disagreed with env.js defaults). Override via Railway env vars.
     return {
-      daily: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 90,
-      perSender: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 30,
+      daily: env.leadgenDailyLimit,
+      perSender: env.leadgenPerSenderLimit,
       phase: 'full',
     };
   }

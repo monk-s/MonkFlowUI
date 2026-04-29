@@ -19,6 +19,7 @@ const env = {
   serpApiKey: process.env.SERPAPI_KEY || '',
   leadgenEnabled: process.env.LEADGEN_ENABLED === 'true',
   leadgenDailyLimit: parseInt(process.env.LEADGEN_DAILY_LIMIT, 10) || 20,
+  leadgenPerSenderLimit: parseInt(process.env.LEADGEN_PER_SENDER_LIMIT, 10) || 30,
   outreachSendingDomain: process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com',
   leadgenFromEmail: process.env.LEADGEN_FROM_EMAIL || `nathan@${process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com'}`,
   outreachFromEmail: process.env.OUTREACH_FROM_EMAIL || `Nathan Linder <nathan@${process.env.OUTREACH_SENDING_DOMAIN || 'mail.getmonkflow.com'}>`,
