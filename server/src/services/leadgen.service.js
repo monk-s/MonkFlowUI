@@ -695,13 +695,20 @@ Return JSON only: {"subject": "...", "body": "..."}`;
 
         // Subject-line dedup: if the same template shape has been used 5+ times
         // in the last 30 days, force a regenerate with explicit guidance.
+        // Hard cap at MAX_DEDUP=3: after that we accept whatever Claude returned
+        // (logged loudly so the next regression is visible) — keeps the loop
+        // bounded at MAX_RETRIES + MAX_DEDUP = 8 iterations max even pathological.
         if (parsed.subject && dedupAttempts < MAX_DEDUP && await subjectIsOverused(parsed.subject)) {
-          console.warn(`[LEADGEN] Subject overused: "${parsed.subject}" — regenerating`);
+          console.warn(`[LEADGEN] Subject overused: "${parsed.subject}" — regenerating (${dedupAttempts + 1}/${MAX_DEDUP})`);
           dedupAttempts++;
           extraInstruction = `\n\nREJECTED: Subject "${parsed.subject}" is a template shape that has been used too many times recently. Generate a COMPLETELY different subject pattern. Do NOT use "Quick question", "Re:", "Question about", or "{city} {industry}" templates. Try an observation-style subject instead.`;
           // Don't count this against MAX_RETRIES — it's a content regenerate, not an API failure
           attempt--;
           continue;
+        }
+
+        if (dedupAttempts >= MAX_DEDUP) {
+          console.warn(`[LEADGEN] Subject dedup exhausted (${MAX_DEDUP} attempts) — accepting "${parsed.subject}". Investigate if this fires repeatedly.`);
         }
 
         return { ...parsed, variant: variant || 'v4-named-deliverable' };
