@@ -67,7 +67,7 @@ Happy to. Two quick things:
 
 1. The 1-pager I mentioned — attached. Walks through the 3
    automations in 2 minutes.
-2. The TFS case study (4-advisor RIA in Dallas, real client) is at
+2. The TFS case study (4-advisor RIA in Abilene TX, real client) is at
    monkflow.io/team-financial-strategies — same workflow you'd see
    if we built for {firmName}.
 

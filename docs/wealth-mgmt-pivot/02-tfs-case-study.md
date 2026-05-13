@@ -15,7 +15,7 @@
 ## How Team Financial Strategies cut new-client onboarding from 45 minutes to under 5
 
 **Firm:** Team Financial Strategies
-**Size:** 4 advisors, Dallas, TX
+**Size:** 4 advisors, Abilene, TX
 **Founding partner (case-study contact):** Jody Team
 **CRM:** Redtail
 **Custodian:** Schwab Advisor Services *(pending confirmation from Jody)*
@@ -124,4 +124,4 @@ call, no pitch deck).
 
 ---
 
-*Logo block here · Jody Team, Founding Partner · Team Financial Strategies · Dallas, TX*
+*Logo block here · Jody Team, Founding Partner · Team Financial Strategies · Abilene, TX*

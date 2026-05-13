@@ -20,9 +20,10 @@
 I rebuilt MonkFlow this month around one thing: digital intake forms
 for independent advisor firms.
 
-Backstory: my one paying client when I started was a 4-advisor RIA in
-Dallas. Their pain was specific — new-client onboarding was a 45-minute
-paper-to-Redtail re-key for the ops manager, every single client.
+Backstory: my one paying client when I started was a 4-advisor RIA
+right here in Abilene. Their pain was specific — new-client
+onboarding was a 45-minute paper-to-Redtail re-key for the ops
+manager, every single client.
 
 We built the intake form, the Redtail auto-sync, the signed-PDF
 generation. 2 weeks. 45 min → under 5.
@@ -164,7 +165,7 @@ permission landing — see Plan §0.5).
 
 ```
 Just published the case study for Team Financial Strategies — the
-4-advisor RIA in Dallas where MonkFlow rebuilt new-client onboarding.
+4-advisor RIA in Abilene where MonkFlow rebuilt new-client onboarding.
 
 The numbers: 45 minutes → under 5. Built in 2 weeks. Custom intake
 form + Redtail auto-sync + signed-PDF generation.

@@ -959,7 +959,7 @@ function renderLandingPage() {
         </div>
         <!-- Client Results — TFS only (the one real, named client) -->
         <div style="margin-top:40px;text-align:center;">
-          <p style="font-size:14px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;">Real Result — Team Financial Strategies (4-advisor RIA, Dallas)</p>
+          <p style="font-size:14px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;">Real Result — Team Financial Strategies (4-advisor RIA, Abilene TX)</p>
           <div style="display:flex;justify-content:center;gap:32px;flex-wrap:wrap;">
             <div style="text-align:center;">
               <div style="font-size:28px;font-weight:700;color:var(--accent);">45 min → 5 min</div>
@@ -1177,7 +1177,7 @@ function renderTfsCaseStudyPage() {
       <div style="background:var(--bg-secondary);padding:20px 24px;border-radius:8px;margin:24px 0 32px;font-size:14px;color:var(--text-secondary);">
         <div style="display:grid;grid-template-columns:140px 1fr;gap:6px 16px;">
           <div><strong>Firm:</strong></div><div>Team Financial Strategies</div>
-          <div><strong>Size:</strong></div><div>4 advisors, Dallas, TX</div>
+          <div><strong>Size:</strong></div><div>4 advisors, Abilene, TX</div>
           <div><strong>Contact:</strong></div><div>Jody Team, founding partner</div>
           <div><strong>CRM:</strong></div><div>Redtail</div>
           <div><strong>Project length:</strong></div><div>2 weeks</div>
@@ -1233,7 +1233,7 @@ function renderTfsCaseStudyPage() {
       </div>
 
       <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border-color);font-size:13px;color:var(--text-tertiary);text-align:center;">
-        Jody Team, Founding Partner · Team Financial Strategies · Dallas, TX
+        Jody Team, Founding Partner · Team Financial Strategies · Abilene, TX
       </div>
     </article>
 

@@ -32,7 +32,7 @@
 ### TOP HALF: The TFS case study
 
 > **MonkFlow rebuilt onboarding for Team Financial Strategies**
-> *(4-advisor RIA, Dallas — real client, named with permission)*
+> *(4-advisor RIA, Abilene TX — real client, named with permission)*
 >
 > Custom digital intake form + Redtail CRM auto-sync + signed-PDF
 > generation. Built in 2 weeks.
@@ -92,7 +92,7 @@ Hey {firstName},
 
 I run MonkFlow — productized digital intake forms + CRM sync for
 independent advisor firms. Real result: 45 min → under 5 for a 4-advisor
-RIA in Dallas (Team Financial Strategies, named with permission).
+RIA in Abilene TX (Team Financial Strategies, named with permission).
 
 Quick partnership pitch: your RIA clients have a new-client onboarding
 bottleneck that's downstream of their website (where you do great
@@ -121,7 +121,7 @@ I build the form-to-Redtail (or form-to-Wealthbox) integration layer
 that most of your CRM-implementation clients will ask about within 90
 days of going live.
 
-Recent build: Team Financial Strategies, 4-advisor RIA in Dallas.
+Recent build: Team Financial Strategies, 4-advisor RIA in Abilene TX.
 Custom intake + Redtail auto-sync + signed-PDF gen. 2 weeks. 45 min →
 under 5 per onboarding. Jody Team (founding partner) available for a reference call.
 
@@ -145,7 +145,7 @@ Hey {firstName},
 
 Pivoting MonkFlow into a focused vertical: digital intake forms for
 independent advisor firms. Already have one named case study (a 4-advisor
-RIA in Dallas, real result: cut onboarding from 45 min to under 5).
+RIA in Abilene TX, real result: cut onboarding from 45 min to under 5).
 
 Two questions: (1) any RIAs in your network where new-client
 onboarding paperwork is the bottleneck? Even a "you should talk to

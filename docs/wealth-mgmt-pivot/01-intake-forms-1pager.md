@@ -21,7 +21,7 @@ That workflow is the single highest-leverage operational fix in a
 "it's not broken." It is broken. You're paying $40-80/hr ops time for
 a workflow that can run on rails.
 
-**Real result (Team Financial Strategies, 4-advisor RIA, Dallas):**
+**Real result (Team Financial Strategies, 4-advisor RIA, Abilene TX):**
 **45 minutes → under 5 minutes** per new-client onboarding. Built in 2
 weeks. Custom intake form + Redtail CRM auto-sync + signed-PDF
 generation. Jody Team, founding partner, available for reference.

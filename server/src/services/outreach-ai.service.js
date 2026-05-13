@@ -24,7 +24,7 @@ const resolveMx = promisify(dns.resolveMx);
 // engagement is real and the firm declined named permission.
 const CASE_STUDIES = [
   {
-    name: 'Team Financial Strategies (4-advisor wealth management firm, Dallas)',
+    name: 'Team Financial Strategies (4-advisor wealth management firm, Abilene TX)',
     industry: 'wealth management / financial services',
     what: 'automated client onboarding + Redtail CRM sync',
     result: 'cut new-client setup from 45 minutes to under 5',
@@ -153,7 +153,7 @@ FRAMEWORK 2 — "Free Teardown":
 - End with P.S. containing booking link: "P.S. Or if easier to talk through it: {bookingUrl}"
 
 FRAMEWORK 3 — "Peer Reference":
-- Open by referencing what a similar firm has done: "A 4-advisor RIA in Dallas rebuilt their new-client onboarding around Redtail auto-sync — cut intake from 45 minutes to under 5."
+- Open by referencing what a similar firm has done: "A 4-advisor RIA in Abilene rebuilt their new-client onboarding around Redtail auto-sync — cut intake from 45 minutes to under 5."
 - Connect to THEIR situation using analysis gaps: "Your site shows you're still capturing client info on paper or PDFs — same spot they were in."
 - CTA: A direct neutral question. "Want me to share what they did?"
   - BAD: "Curious if this is on your radar?", "Happy to chat", "Thoughts?", "Interested?"
@@ -161,7 +161,7 @@ FRAMEWORK 3 — "Peer Reference":
 
 CASE STUDIES (the only real client — use truthfully, never embellish):
 ${CASE_STUDIES.map((cs, i) => `${i + 1}. ${cs.name}: ${cs.what}. Result: ${cs.result}.`).join('\n')}
-If you must reference the client anonymously (not by name), describe as "a 4-advisor RIA in Dallas" — keep the metrics intact.
+If you must reference the client anonymously (not by name), describe as "a 4-advisor RIA in Abilene TX" — keep the metrics intact.
 
 HARD RULES (apply to ALL frameworks):
 - 100-130 words total. The email must be skimmable in under 15 seconds.
