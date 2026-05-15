@@ -15,7 +15,12 @@ class Settings(BaseSettings):
     CB_API_KEY: str = ""
     CB_API_SECRET: str = ""
     CB_API_PASSPHRASE: str = ""
-    CB_SANDBOX: bool = True
+    # CB_SANDBOX defaults to False because Coinbase Sandbox does not host
+    # BTC-PERP-INTX (returns 404). Paper trading still uses production market
+    # data endpoints (read-only, no auth required) but never places real orders.
+    # Only set CB_SANDBOX=true if you have a sandbox account configured for
+    # a product the sandbox actually supports (e.g. BTC-USD spot).
+    CB_SANDBOX: bool = False
     CB_REST_URL: str = "https://api.coinbase.com"
     CB_SANDBOX_REST_URL: str = "https://api-sandbox.coinbase.com"
     CB_WS_URL: str = "wss://advanced-trade-ws.coinbase.com"

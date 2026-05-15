@@ -23,6 +23,20 @@ function fmt(n, decimals = 2) {
 function pnlClass(n) { return n >= 0 ? 'green' : 'red'; }
 function pnlSign(n) { return n >= 0 ? '+' : ''; }
 
+// Defensive HTML escape for any string that may originate from external sources
+// (Coinbase API error messages, exchange-side reject reasons, indicator snapshots).
+// Bot-generated strings are normally safe, but error paths can include arbitrary
+// upstream content -- escape everything that goes into innerHTML.
+function escapeHtml(value) {
+  if (value == null) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Fetch helpers
 async function api(path) {
   try { return await (await fetch(path)).json(); }
@@ -97,8 +111,8 @@ async function refreshPositions() {
   el.innerHTML = `<table><thead><tr>
     <th>Dir</th><th>Strategy</th><th>Entry</th><th>Current</th><th>Stop</th><th>Target</th><th>Size</th><th>P&L</th><th>R</th>
   </tr></thead><tbody>${d.positions.map(p => `<tr>
-    <td style="color:${p.direction === 'long' ? 'var(--green)' : 'var(--red)'}; font-weight:700">${p.direction.toUpperCase()}</td>
-    <td>${p.strategy}</td>
+    <td style="color:${p.direction === 'long' ? 'var(--green)' : 'var(--red)'}; font-weight:700">${escapeHtml(p.direction.toUpperCase())}</td>
+    <td>${escapeHtml(p.strategy)}</td>
     <td>$${fmt(p.entry_price)}</td>
     <td>$${fmt(p.current_price)}</td>
     <td>$${fmt(p.stop_price)}</td>
@@ -137,10 +151,10 @@ async function refreshHistory() {
     const date = t.signal_at ? new Date(t.signal_at).toLocaleDateString() : '--';
     const pnl = t.net_pnl;
     return `<tr>
-      <td>${date}</td>
-      <td>${t.strategy || '--'}</td>
-      <td style="color:${t.direction === 'long' ? 'var(--green)' : 'var(--red)'}; font-weight:700">${(t.direction || '--').toUpperCase()}</td>
-      <td>${t.status}</td>
+      <td>${escapeHtml(date)}</td>
+      <td>${escapeHtml(t.strategy || '--')}</td>
+      <td style="color:${t.direction === 'long' ? 'var(--green)' : 'var(--red)'}; font-weight:700">${escapeHtml((t.direction || '--').toUpperCase())}</td>
+      <td>${escapeHtml(t.status)}</td>
       <td>${t.entry_price ? '$' + fmt(t.entry_price) : '--'}</td>
       <td>${t.exit_price ? '$' + fmt(t.exit_price) : '--'}</td>
       <td style="color:${pnlClass(pnl || 0)}">${pnl != null ? pnlSign(pnl) + '$' + fmt(Math.abs(pnl)) : '--'}</td>
@@ -187,11 +201,14 @@ async function refreshLogs() {
 
   el.innerHTML = (d.logs || []).map(l => {
     const time = new Date(l.created_at).toLocaleTimeString();
+    // Escape level/component/message: these may include upstream error text
+    // (e.g. Coinbase API error bodies) that could contain HTML or scripts.
+    const level = escapeHtml(l.level || 'info');
     return `<div class="log-entry">
-      <span class="time">${time}</span>
-      <span class="level-${l.level}">[${l.level.toUpperCase()}]</span>
-      <span class="comp">${l.component}</span>
-      ${l.message}
+      <span class="time">${escapeHtml(time)}</span>
+      <span class="level-${level}">[${level.toUpperCase()}]</span>
+      <span class="comp">${escapeHtml(l.component)}</span>
+      ${escapeHtml(l.message)}
     </div>`;
   }).join('');
 }
@@ -203,9 +220,9 @@ async function refreshConfig() {
   const el = document.getElementById('config-content');
   const rows = Object.entries(d).map(([k, v]) => {
     if (typeof v === 'object') {
-      return Object.entries(v).map(([sk, sv]) => `<div class="config-row"><span class="config-key">${k}.${sk}</span><span class="config-val">${sv}</span></div>`).join('');
+      return Object.entries(v).map(([sk, sv]) => `<div class="config-row"><span class="config-key">${escapeHtml(k + '.' + sk)}</span><span class="config-val">${escapeHtml(sv)}</span></div>`).join('');
     }
-    return `<div class="config-row"><span class="config-key">${k}</span><span class="config-val">${v}</span></div>`;
+    return `<div class="config-row"><span class="config-key">${escapeHtml(k)}</span><span class="config-val">${escapeHtml(v)}</span></div>`;
   }).join('');
   el.innerHTML = '<div class="config-grid">' + rows + '</div>';
 }
