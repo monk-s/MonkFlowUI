@@ -88,8 +88,8 @@ async function refreshOverview() {
   const brkEl = document.getElementById('breakers');
   brkEl.innerHTML = (d.circuit_breakers || []).map(cb => `
     <div class="breaker ${cb.tripped ? 'tripped' : ''}">
-      <div class="breaker-label">${cb.period}</div>
-      <div class="breaker-value" style="color:var(--red)">${cb.threshold}%</div>
+      <div class="breaker-label">${escapeHtml(cb.period)}</div>
+      <div class="breaker-value" style="color:var(--red)">${escapeHtml(cb.threshold)}%</div>
       <div class="breaker-status" style="color:${cb.tripped ? 'var(--red)' : 'var(--green)'}">
         ${cb.tripped ? 'TRIPPED' : 'OK (' + fmt(cb.current, 1) + '%)'}
       </div>
