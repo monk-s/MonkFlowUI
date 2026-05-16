@@ -1,0 +1,32 @@
+# Web framework + server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+jinja2==3.1.5
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.1
+greenlet==3.1.1                 # required by sqlalchemy[asyncio] runtime
+
+# HTTP client
+httpx==0.28.1
+
+# WebSocket (for future live data)
+websockets==14.1
+
+# Scheduler
+apscheduler==3.10.4
+
+# Settings management
+pydantic-settings==2.7.1
+pydantic==2.10.5
+
+# Numeric computation
+numpy==2.2.1
+
+# Structured logging
+structlog==24.4.0
+
+# Date/time
+python-dateutil==2.9.0

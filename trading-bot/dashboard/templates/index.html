@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTC Trading Bot</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>BTC Trading Bot</h1>
+    <div class="header-badges">
+      <span class="badge" id="mode-badge">PAPER</span>
+      <span class="badge" id="regime-badge">--</span>
+      <span class="status-dot" id="status-dot"></span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="positions">Positions</button>
+    <button class="tab" data-tab="history">History</button>
+    <button class="tab" data-tab="equity">Equity</button>
+    <button class="tab" data-tab="logs">Logs</button>
+    <button class="tab" data-tab="config">Config</button>
+  </nav>
+
+  <!-- Overview Tab -->
+  <div class="tab-content active" id="tab-overview">
+    <div class="stats-grid">
+      <div class="stat"><div class="stat-label">Equity</div><div class="stat-value" id="s-equity">--</div></div>
+      <div class="stat"><div class="stat-label">Daily P&L</div><div class="stat-value" id="s-daily">--</div></div>
+      <div class="stat"><div class="stat-label">Total P&L</div><div class="stat-value" id="s-total">--</div></div>
+      <div class="stat"><div class="stat-label">Open Positions</div><div class="stat-value" id="s-open">0</div></div>
+      <div class="stat"><div class="stat-label">Win Rate</div><div class="stat-value" id="s-winrate">--</div></div>
+      <div class="stat"><div class="stat-label">Drawdown</div><div class="stat-value" id="s-dd">--</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Portfolio Heat</h2>
+      <div class="heat-bar"><div class="heat-fill" id="heat-fill"></div></div>
+      <div class="heat-labels"><span>0% Safe</span><span>3%</span><span>5% Max</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Circuit Breakers</h2>
+      <div class="breakers" id="breakers"></div>
+    </div>
+  </div>
+
+  <!-- Positions Tab -->
+  <div class="tab-content" id="tab-positions">
+    <div class="card">
+      <h2>Open Positions</h2>
+      <div id="positions-content">
+        <p class="empty">No open positions</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- History Tab -->
+  <div class="tab-content" id="tab-history">
+    <div class="card">
+      <div class="history-stats" id="history-stats"></div>
+      <h2>Trade History</h2>
+      <div id="history-content">
+        <p class="empty">No trades yet</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Equity Tab -->
+  <div class="tab-content" id="tab-equity">
+    <div class="card">
+      <h2>Equity Curve</h2>
+      <canvas id="equity-chart" height="300"></canvas>
+    </div>
+    <div class="card">
+      <h2>Drawdown</h2>
+      <canvas id="drawdown-chart" height="150"></canvas>
+    </div>
+  </div>
+
+  <!-- Logs Tab -->
+  <div class="tab-content" id="tab-logs">
+    <div class="card">
+      <div class="log-filters">
+        <select id="log-level"><option value="">All Levels</option><option value="info">Info</option><option value="warn">Warn</option><option value="error">Error</option></select>
+        <select id="log-component"><option value="">All Components</option><option value="strategy">Strategy</option><option value="lifecycle">Lifecycle</option><option value="risk">Risk</option><option value="exchange">Exchange</option><option value="scheduler">Scheduler</option></select>
+      </div>
+      <div class="log-view" id="log-view"></div>
+    </div>
+  </div>
+
+  <!-- Config Tab -->
+  <div class="tab-content" id="tab-config">
+    <div class="card">
+      <h2>Configuration</h2>
+      <div id="config-content"></div>
+    </div>
+    <div class="card">
+      <h2>Controls</h2>
+      <div class="controls">
+        <button class="btn btn-warn" id="btn-halt" onclick="haltBot()">Halt Bot</button>
+        <button class="btn btn-ok" id="btn-resume" onclick="resumeBot()">Resume Bot</button>
+        <button class="btn btn-danger" id="btn-close-all" onclick="closeAll()">Close All Positions</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/dashboard.js"></script>
+</body>
+</html>
