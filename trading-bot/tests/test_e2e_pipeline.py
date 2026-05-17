@@ -100,8 +100,15 @@ async def test_engine() -> AsyncIterator[AsyncEngine]:
         },
     )
 
-    # Step 3: create all tables in the test schema
+    # Step 3: create all tables in the test schema.
+    # We must SET LOCAL search_path to ONLY the test schema during create_all,
+    # because metadata.create_all checks every schema in search_path for
+    # existence and skips creation if tables already exist anywhere on the path.
+    # Once production has been deployed, tb_* tables exist in `public` — without
+    # this override, create_all sees them and never instantiates them in
+    # tb_e2e_test, breaking every test with "relation does not exist".
     async with engine.begin() as conn:
+        await conn.execute(text(f"SET LOCAL search_path TO {TEST_SCHEMA}"))
         await conn.run_sync(Base.metadata.create_all)
 
     yield engine

@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 
 
-def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates):
+def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, scheduler=None):
     """Register all dashboard routes."""
 
     @app.get("/")
@@ -215,3 +215,42 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates):
 
         await repo.log("warn", "dashboard", f"Close-all executed: {closed} positions closed")
         return {"closed": closed}
+
+    # ------------------------------------------------------------------
+    # Admin endpoints — fire scheduled ticks on demand (useful for
+    # post-deploy smoke-tests and for compressing the paper-trading
+    # observation window). These do exactly what the cron triggers do,
+    # just without waiting for the clock.
+    # ------------------------------------------------------------------
+
+    @app.post("/api/admin/run-strategy-tick")
+    async def run_strategy_tick_now():
+        """Force the 4H strategy evaluation to run right now."""
+        if scheduler is None:
+            return {"ok": False, "error": "scheduler not wired into dashboard"}
+        await repo.log(
+            "info", "dashboard",
+            "Manual strategy tick triggered via /api/admin/run-strategy-tick",
+        )
+        try:
+            await scheduler.run_strategy_now()
+            return {"ok": True, "ran": "strategy_tick"}
+        except Exception as e:
+            await repo.log("error", "dashboard", f"Manual strategy tick failed: {e}")
+            return {"ok": False, "error": str(e)}
+
+    @app.post("/api/admin/run-position-tick")
+    async def run_position_tick_now():
+        """Force the 60-second position monitor to run right now."""
+        if scheduler is None:
+            return {"ok": False, "error": "scheduler not wired into dashboard"}
+        await repo.log(
+            "info", "dashboard",
+            "Manual position tick triggered via /api/admin/run-position-tick",
+        )
+        try:
+            await scheduler._position_tick()
+            return {"ok": True, "ran": "position_tick"}
+        except Exception as e:
+            await repo.log("error", "dashboard", f"Manual position tick failed: {e}")
+            return {"ok": False, "error": str(e)}

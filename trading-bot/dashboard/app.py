@@ -27,7 +27,7 @@ def init_dashboard(repository, exchange, scheduler=None):
     _scheduler = scheduler
 
     from dashboard.routes import register_routes
-    register_routes(app, repository, exchange, templates)
+    register_routes(app, repository, exchange, templates, scheduler)
 
 
 @app.get("/health")
