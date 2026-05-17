@@ -143,8 +143,13 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
                     "level": log.level,
                     "component": log.component,
                     "message": log.message,
-                    "metadata": log.metadata,
-                    "created_at": log.created_at.isoformat(),
+                    # NB: model uses metadata_ (trailing underscore) because plain
+                    # "metadata" collides with SQLAlchemy's DeclarativeBase.metadata
+                    # (the MetaData registry). Accessing log.metadata returns the
+                    # MetaData object → FastAPI's encoder recurses into every table
+                    # reference and OOMs the worker.
+                    "metadata": log.metadata_,
+                    "created_at": log.created_at.isoformat() if log.created_at else None,
                 }
                 for log in logs
             ]
