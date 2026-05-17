@@ -132,9 +132,28 @@ class PaperEngine(ExchangeInterface):
         return self.balance
 
     async def get_equity(self) -> Decimal:
+        """
+        Total account value = cash + margin locked in open positions + unrealized P&L.
+
+        IMPORTANT: ``self.balance`` is the cash available for NEW positions, NOT
+        the total account value. When ``place_order`` opens a position, it
+        debits the margin from ``self.balance`` (line 178). The margin is still
+        the trader's money — just locked. We must add it back when computing
+        equity, otherwise:
+
+          - dashboard shows a phantom drawdown of (margin / starting_equity)%
+          - risk manager's drawdown check trips the total circuit breaker
+            (~25% on a single 4x position at 1.5% risk) immediately after
+            entry, force-closing the trade and halting the bot
+
+        Live mode (CoinbaseClient.get_equity) gets correct equity from
+        Coinbase's API which already accounts for locked margin. This fix
+        makes PaperEngine match that behavior.
+        """
         current_price = await self.get_current_price()
+        total_margin = sum(p.margin for p in self.positions.values())
         unrealized = sum(p.unrealized_pnl(current_price) for p in self.positions.values())
-        return self.balance + unrealized
+        return self.balance + total_margin + unrealized
 
     async def place_order(
         self,

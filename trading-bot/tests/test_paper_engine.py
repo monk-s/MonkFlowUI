@@ -83,3 +83,45 @@ class TestPaperEngine:
     async def test_cancel_nonexistent_order(self, engine):
         result = await engine.cancel_order("nonexistent-id")
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_equity_includes_locked_margin(self, engine):
+        """
+        Regression test: opening a 4x leveraged position locks margin in
+        self.balance, but equity must still report total account value
+        (cash + margin + unrealized), not just (cash + unrealized).
+
+        Without this, opening a position causes a phantom (margin/equity)%
+        drawdown that trips the total circuit breaker and halts the bot
+        immediately after entry. Caught in production on 2026-05-17.
+        """
+        # Starting state: balance = $10,000, no positions
+        starting_balance = await engine.get_balance()
+        starting_equity = await engine.get_equity()
+        assert starting_balance == Decimal("10000")
+        assert starting_equity == Decimal("10000")  # no positions, equity == balance
+
+        # Open a small position at default 4x leverage
+        # 0.1 BTC at $85,000 = $8,500 notional / 4x = $2,125 margin
+        await engine.place_order(
+            side=OrderSide.BUY,
+            size=Decimal("0.1"),
+            order_type=OrderType.MARKET,
+            leverage=Decimal("4"),
+        )
+
+        balance_after = await engine.get_balance()
+        equity_after = await engine.get_equity()
+
+        # Balance dropped by margin + fees (margin debited from cash)
+        assert balance_after < starting_balance, "balance should drop after opening"
+
+        # CRITICAL: equity should be approximately preserved (~ starting - fees)
+        # because the margin is still in the account, just locked.
+        # If get_equity returns balance + unrealized only (the bug), equity
+        # would drop by the full $2,125 margin amount.
+        equity_drop = starting_equity - equity_after
+        assert equity_drop < Decimal("20"), (
+            f"equity dropped by ${equity_drop} (expected < $20 = just fees). "
+            f"If much larger, get_equity() is not adding back locked margin."
+        )
