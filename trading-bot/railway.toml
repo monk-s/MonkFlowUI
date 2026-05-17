@@ -4,6 +4,9 @@ builder = "NIXPACKS"
 [deploy]
 startCommand = "python -m bot.main"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+# Generous timeout as belt-and-suspenders. main.py now starts uvicorn before
+# candle warmup, so /health responds within seconds. This 120s covers worst-case
+# cold-start DB connection latency (Postgres provisioning, first SSL handshake).
+healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5

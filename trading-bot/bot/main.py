@@ -1,14 +1,17 @@
 """
 BTC Trading Bot — Main entrypoint.
 
-Boots all subsystems in order:
-  1. Database connection + table creation
-  2. Exchange client (paper or live)
-  3. Candle store warm-up
-  4. Strategy + risk + execution layers
-  5. Scheduler (strategy tick + position monitor)
-  6. Dashboard (FastAPI)
-  7. Orphaned trade recovery
+Boot order (rearranged for fast healthcheck):
+  1. Logging + database
+  2. Exchange client + dashboard wiring  (cheap)
+  3. **Start uvicorn**  → /health responds in seconds
+  4. Background task: candle warmup, circuit breaker seed, orphan recovery,
+     initial balance snapshot, scheduler.start()
+
+This separation matters because Railway's healthcheck times out (default 30s)
+long before candle warmup finishes (~50s cross-region for 400 candles). The
+dashboard `/health` endpoint must respond ASAP. The bot's trading machinery
+comes online a minute later; it doesn't need to gate the healthcheck.
 
 Serves the dashboard on the PORT assigned by Railway.
 """
@@ -55,7 +58,7 @@ async def boot() -> None:
         halted=state.is_halted,
     )
 
-    # ---- 2. Exchange client ----
+    # ---- 2. Exchange client (cheap) ----
     logger.info("initializing_exchange", mode=settings.TRADING_MODE)
     if settings.TRADING_MODE == "paper":
         from bot.exchange.paper_engine import PaperEngine
@@ -77,19 +80,7 @@ async def boot() -> None:
     except Exception as exc:
         logger.warning("leverage_set_failed", error=str(exc))
 
-    # ---- 3. Candle store warm-up ----
-    logger.info("warming_candle_store")
-    from bot.data.candle_store import CandleStore
-    candle_store = CandleStore(exchange=exchange, repository=repo)
-
-    try:
-        await candle_store.initialize()
-        logger.info("candle_store_warmed")
-    except Exception as exc:
-        logger.error("candle_warmup_failed", error=str(exc))
-        # Non-fatal: scheduler will retry on first tick
-
-    # ---- 4. Strategy + risk + execution layers ----
+    # ---- 3. Wire strategy + risk + execution layers (cheap, in-memory) ----
     from bot.strategy.regime_detector import RegimeDetector
     from bot.strategy.ema_trend import EMATrendStrategy
     from bot.strategy.bb_rsi_reversion import BBRSIReversionStrategy
@@ -98,6 +89,8 @@ async def boot() -> None:
     from bot.execution.order_manager import OrderManager
     from bot.execution.position_manager import PositionManager
     from bot.execution.trade_lifecycle import TradeLifecycle
+    from bot.data.candle_store import CandleStore
+    from bot.scheduler.tick_scheduler import TickScheduler
 
     regime_detector = RegimeDetector()
     ema_strategy = EMATrendStrategy(regime_detector)
@@ -121,16 +114,8 @@ async def boot() -> None:
         order_manager=order_manager,
     )
 
-    # ---- 5. Seed circuit breakers ----
-    try:
-        starting_eq = float(await exchange.get_equity())
-        await repo.init_circuit_breakers(starting_eq)
-        logger.info("circuit_breakers_initialized", equity=starting_eq)
-    except Exception as exc:
-        logger.warning("circuit_breaker_seed_failed", error=str(exc))
+    candle_store = CandleStore(exchange=exchange, repository=repo)
 
-    # ---- 6. Scheduler ----
-    from bot.scheduler.tick_scheduler import TickScheduler
     scheduler = TickScheduler(
         candle_store=candle_store,
         regime_detector=regime_detector,
@@ -142,48 +127,14 @@ async def boot() -> None:
         exchange=exchange,
     )
 
-    # ---- 7. Dashboard ----
+    # ---- 4. Wire dashboard (routes registered, ready to serve) ----
     from dashboard.app import app as dashboard_app, init_dashboard
     init_dashboard(repo, exchange, scheduler)
 
-    # ---- 8. Orphaned trade recovery ----
-    try:
-        recovered = await trade_lifecycle.recover_orphaned_trades()
-        if recovered:
-            logger.info("orphaned_trades_recovered", count=recovered)
-    except Exception as exc:
-        logger.error("recovery_failed", error=str(exc))
-
-    # ---- 9. Record initial balance snapshot ----
-    try:
-        equity = float(await exchange.get_equity())
-        await repo.record_balance(
-            equity=equity,
-            cash=equity,
-            unrealized_pnl=0.0,
-            open_positions=0,
-            heat=0.0,
-            drawdown=0.0,
-        )
-    except Exception as exc:
-        logger.warning("initial_balance_snapshot_failed", error=str(exc))
-
-    # ---- Start scheduler ----
-    scheduler.start()
-
-    await repo.log(
-        "info", "lifecycle",
-        f"Bot started in {settings.TRADING_MODE.upper()} mode | "
-        f"Symbol: {settings.SYMBOL} | Leverage: {settings.LEVERAGE}x",
-    )
-
-    logger.info(
-        "bot_ready",
-        mode=settings.TRADING_MODE,
-        dashboard_port=settings.PORT,
-    )
-
-    # ---- Serve dashboard ----
+    # ---- 5. Start uvicorn FIRST so /health responds during heavy init ----
+    # Railway's healthcheck fires immediately after deploy. The dashboard
+    # /health endpoint is a no-arg "ok" response and must respond within seconds.
+    # We start uvicorn here, then do the slow candle warmup in the background.
     config = uvicorn.Config(
         dashboard_app,
         host=settings.DASHBOARD_HOST,
@@ -193,7 +144,6 @@ async def boot() -> None:
     )
     server = uvicorn.Server(config)
 
-    # Graceful shutdown
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
 
@@ -204,19 +154,98 @@ async def boot() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _handle_signal, sig)
 
-    # Run the dashboard server
     serve_task = asyncio.create_task(server.serve())
+    logger.info(
+        "dashboard_listening",
+        host=settings.DASHBOARD_HOST,
+        port=settings.PORT,
+    )
 
-    # Wait for shutdown signal
+    # ---- 6. Background boot: slow operations that mustn't block healthcheck ----
+    async def _background_boot() -> None:
+        """
+        Run the slow / network-bound init in the background so the dashboard's
+        /health endpoint can respond to Railway's healthcheck during boot.
+        """
+        logger.info("background_boot_started")
+
+        # Candle warmup (slow on first boot — ~5-30s depending on DB latency)
+        try:
+            await candle_store.initialize()
+            logger.info("candle_store_warmed")
+        except Exception as exc:
+            logger.error("candle_warmup_failed", error=str(exc))
+            # Non-fatal: scheduler will retry on first tick
+
+        # Seed circuit breakers (one round-trip)
+        try:
+            starting_eq = float(await exchange.get_equity())
+            await repo.init_circuit_breakers(starting_eq)
+            logger.info("circuit_breakers_initialized", equity=starting_eq)
+        except Exception as exc:
+            logger.warning("circuit_breaker_seed_failed", error=str(exc))
+
+        # Recover any trades stuck in entry_pending from a previous crash
+        try:
+            recovered = await trade_lifecycle.recover_orphaned_trades()
+            if recovered:
+                logger.info("orphaned_trades_recovered", count=recovered)
+        except Exception as exc:
+            logger.error("recovery_failed", error=str(exc))
+
+        # Initial balance snapshot for the equity curve
+        try:
+            equity = float(await exchange.get_equity())
+            await repo.record_balance(
+                equity=equity,
+                cash=equity,
+                unrealized_pnl=0.0,
+                open_positions=0,
+                heat=0.0,
+                drawdown=0.0,
+            )
+        except Exception as exc:
+            logger.warning("initial_balance_snapshot_failed", error=str(exc))
+
+        # Now that data is loaded, start the trading scheduler
+        scheduler.start()
+
+        await repo.log(
+            "info", "lifecycle",
+            f"Bot started in {settings.TRADING_MODE.upper()} mode | "
+            f"Symbol: {settings.SYMBOL} | Leverage: {settings.LEVERAGE}x",
+        )
+        logger.info(
+            "bot_ready",
+            mode=settings.TRADING_MODE,
+            dashboard_port=settings.PORT,
+        )
+
+    boot_task = asyncio.create_task(_background_boot())
+
+    # ---- 7. Wait for shutdown signal ----
     await shutdown_event.wait()
 
-    # Graceful shutdown sequence
+    # ---- 8. Graceful shutdown ----
     logger.info("shutting_down")
-    scheduler.stop()
+
+    # Cancel the background boot if it's still running
+    if not boot_task.done():
+        boot_task.cancel()
+
+    # Stop the scheduler if it started
+    try:
+        scheduler.stop()
+    except Exception:
+        pass
+
     server.should_exit = True
     await serve_task
 
-    await repo.log("info", "lifecycle", "Bot shut down gracefully")
+    try:
+        await repo.log("info", "lifecycle", "Bot shut down gracefully")
+    except Exception:
+        pass
     logger.info("bot_stopped")
 
 
