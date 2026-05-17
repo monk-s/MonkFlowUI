@@ -1,5 +1,12 @@
 """
 Async SQLAlchemy engine, session factory, and DB lifecycle helpers.
+
+The DATABASE_URL env var typically comes from Railway's ``${{Postgres.DATABASE_URL}}``
+reference variable, which resolves to ``postgresql://...``. SQLAlchemy's
+``create_async_engine`` interprets that as wanting the sync ``psycopg2`` driver
+and crashes with ``No module named 'psycopg2'``. We auto-normalize the URL
+to ``postgresql+asyncpg://...`` here so callers can paste any standard
+PostgreSQL URL without worrying about driver suffix.
 """
 
 from contextlib import asynccontextmanager
@@ -12,8 +19,28 @@ from sqlalchemy.ext.asyncio import (
 
 from config.settings import settings
 
+
+def _normalize_async_db_url(url: str) -> str:
+    """
+    Force any Postgres URL to use the asyncpg driver.
+
+    Accepts:
+      - ``postgresql://user:pass@host:port/db``          (Railway reference var)
+      - ``postgres://user:pass@host:port/db``            (legacy Heroku style)
+      - ``postgresql+asyncpg://user:pass@host:port/db``  (already correct, pass-through)
+    Returns the asyncpg-flavored form in every case.
+    """
+    if url.startswith("postgresql+asyncpg://"):
+        return url
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    return url
+
+
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    _normalize_async_db_url(settings.DATABASE_URL),
     echo=False,
     pool_size=5,
     max_overflow=10,
