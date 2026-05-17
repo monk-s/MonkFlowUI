@@ -135,12 +135,34 @@ async def boot() -> None:
     # Railway's healthcheck fires immediately after deploy. The dashboard
     # /health endpoint is a no-arg "ok" response and must respond within seconds.
     # We start uvicorn here, then do the slow candle warmup in the background.
+
+    # Read PORT directly from env so we're not relying on Pydantic Settings
+    # to have parsed it. Railway sets $PORT to a random port at container start.
+    # Fall back to settings.PORT (8080) only if env is genuinely empty.
+    import os
+    env_port = os.environ.get("PORT", "").strip()
+    try:
+        bind_port = int(env_port) if env_port else settings.PORT
+    except ValueError:
+        logger.warning("invalid_port_env", value=env_port, fallback=settings.PORT)
+        bind_port = settings.PORT
+
+    bind_host = os.environ.get("DASHBOARD_HOST", settings.DASHBOARD_HOST)
+
+    logger.info(
+        "uvicorn_binding",
+        host=bind_host,
+        port=bind_port,
+        port_source="env" if env_port else "settings_default",
+        env_PORT_raw=env_port or "(unset)",
+    )
+
     config = uvicorn.Config(
         dashboard_app,
-        host=settings.DASHBOARD_HOST,
-        port=settings.PORT,
+        host=bind_host,
+        port=bind_port,
         log_level="info",
-        access_log=False,
+        access_log=True,  # show every healthcheck hit so we can confirm Railway reached us
     )
     server = uvicorn.Server(config)
 
@@ -155,10 +177,29 @@ async def boot() -> None:
         loop.add_signal_handler(sig, _handle_signal, sig)
 
     serve_task = asyncio.create_task(server.serve())
+
+    # Give uvicorn a tick to actually bind the socket before we log "listening"
+    # and before we kick off the slow background init. If binding fails (port
+    # already in use, permissions, etc.), the serve_task will error and we
+    # want to surface that loudly.
+    for _ in range(20):  # up to 2 seconds
+        if getattr(server, "started", False):
+            break
+        if serve_task.done():
+            # Server crashed before starting — surface the exception
+            try:
+                serve_task.result()
+            except Exception as exc:
+                logger.error("uvicorn_startup_failed", error=str(exc), exc_info=True)
+                raise
+            break
+        await asyncio.sleep(0.1)
+
     logger.info(
         "dashboard_listening",
-        host=settings.DASHBOARD_HOST,
-        port=settings.PORT,
+        host=bind_host,
+        port=bind_port,
+        started=getattr(server, "started", False),
     )
 
     # ---- 6. Background boot: slow operations that mustn't block healthcheck ----
