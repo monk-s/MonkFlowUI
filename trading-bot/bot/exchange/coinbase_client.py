@@ -200,10 +200,25 @@ class CoinbaseClient(ExchangeInterface):
                 "limit_price": str(price),
             }
         elif order_type == OrderType.STOP_MARKET:
+            # GAP PROTECTION: Coinbase only offers stop-LIMIT (no true stop-market).
+            # If we set limit_price == stop_price, the limit won't fill when price
+            # gaps past the stop (CPI prints, sudden whales). We set the limit
+            # STOP_LIMIT_SLIPPAGE_PCT worse than the trigger so reasonable gaps
+            # still get filled. Direction:
+            #   - SELL stop (closes a LONG): limit BELOW stop_price (accept worse sell)
+            #   - BUY stop  (closes a SHORT): limit ABOVE stop_price (accept worse buy)
+            slip = Decimal(str(settings.STOP_LIMIT_SLIPPAGE_PCT)) / Decimal("100")
+            sp = Decimal(str(stop_price))
+            if side == OrderSide.SELL:
+                limit_price_val = sp * (Decimal("1") - slip)
+            else:  # BUY
+                limit_price_val = sp * (Decimal("1") + slip)
+            # Round to Coinbase's quote_increment (0.1 for BTC-PERP-INTX)
+            limit_price_val = limit_price_val.quantize(Decimal("0.1"))
             order_config["stop_limit_stop_limit_gtc"] = {
                 "base_size": str(size),
                 "stop_price": str(stop_price),
-                "limit_price": str(stop_price),  # same as stop for stop-market behavior
+                "limit_price": str(limit_price_val),
             }
 
         body = {

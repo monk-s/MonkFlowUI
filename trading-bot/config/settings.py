@@ -90,6 +90,15 @@ class Settings(BaseSettings):
     PAPER_TAKER_FEE_PCT: float = 0.06
     PAPER_MAKER_FEE_PCT: float = 0.04
 
+    # --- Live order safety ---
+    # Stop-limit gap protection: Coinbase places stop-LIMIT orders, so if
+    # price gaps past the stop_price the limit at stop_price won't fill.
+    # We set the limit STOP_LIMIT_SLIPPAGE_PCT worse than the trigger so
+    # any reasonable gap still fills. Worst-case extra slippage on a
+    # 1.5% risk trade at $2,605 equity is ~$13 (= 0.5% * size * leverage).
+    # See order_manager.py + coinbase_client.py STOP_MARKET branch.
+    STOP_LIMIT_SLIPPAGE_PCT: float = 0.5  # percent
+
     # --- Dashboard ---
     DASHBOARD_PORT: int = 8080
     DASHBOARD_HOST: str = "0.0.0.0"
