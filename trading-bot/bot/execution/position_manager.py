@@ -57,10 +57,24 @@ class PositionManager:
             return
 
         try:
-            current_price = float(await self._exchange.get_equity())
+            # NB: do NOT also assign get_equity() to a current_price variable
+            # here — the actual price is fetched as market_price below via
+            # get_current_price(). An earlier version had a redundant
+            # `current_price = float(await self.get_equity())` here that was
+            # never read; removed to save one Coinbase API call per 60s tick
+            # (1,440 wasted calls/day) and avoid the confusion of having
+            # current_price actually hold an account-equity value.
             equity = await self._exchange.get_equity()
         except Exception as exc:
             logger.error("failed_to_get_equity", error=str(exc))
+            try:
+                await self._repo.log(
+                    "error", "position_manager",
+                    f"Failed to fetch equity in position tick: {exc} "
+                    f"(skipping this 60s cycle; will retry next tick)"
+                )
+            except Exception:
+                pass
             return
 
         try:
@@ -259,8 +273,29 @@ class PositionManager:
     ) -> None:
         """Close a trade: cancel orders, close position, update DB."""
         direction = str(trade.direction)
-        size = Decimal(str(trade.position_size))
-        entry = float(trade.entry_price)
+        size = Decimal(str(trade.position_size)) if trade.position_size else Decimal("0")
+        # None-guard for defensive consistency with _manage_trade (lines 99-101).
+        # Recovered-orphan trades or partially-written rows might have NULL
+        # entry/stop. Without the guard, float(None) raises TypeError mid-close,
+        # leaving the trade stuck in "open" with a real position closed on
+        # Coinbase but no DB record of it.
+        entry = float(trade.entry_price) if trade.entry_price else 0.0
+        if entry == 0.0 or size == 0:
+            logger.error(
+                "close_trade_invalid_data",
+                trade_id=str(trade.id),
+                entry_price=str(trade.entry_price),
+                position_size=str(trade.position_size),
+            )
+            try:
+                await self._repo.log(
+                    "error", "position_manager",
+                    f"Cannot close trade {trade.id}: missing entry_price or position_size. "
+                    f"Manual intervention required."
+                )
+            except Exception:
+                pass
+            return
 
         # Cancel all pending orders
         await self._orders.cancel_all_orders_for_trade(trade)
@@ -288,8 +323,9 @@ class PositionManager:
         fees_total = float(trade.fees_paid or 0) + fee
         net_pnl = realized_pnl - fees_total - float(trade.funding_paid or 0)
 
-        # R-multiple
-        risk_per_unit = abs(entry - float(trade.stop_price))
+        # R-multiple — same None-guard pattern as above
+        stop_for_r = float(trade.stop_price) if trade.stop_price else 0.0
+        risk_per_unit = abs(entry - stop_for_r) if stop_for_r > 0 else 0.0
         r_multiple = realized_pnl / (risk_per_unit * float(size)) if risk_per_unit > 0 and float(size) > 0 else 0.0
 
         # Determine final status
