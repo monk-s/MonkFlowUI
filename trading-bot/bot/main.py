@@ -233,10 +233,12 @@ async def boot() -> None:
                 )
                 await repo.log(
                     "info", "coinbase",
-                    f"AUTH TEST PASSED. Live USD balance: ${balance}, "
+                    f"AUTH TEST PASSED. Available collateral balance: ${balance} "
+                    f"(currency auto-detected — see balance_selected log for which one). "
                     f"{len(positions)} open positions on exchange. "
                     f"Key ID starts with: {key_hint}. "
-                    f"Safe to flip TRADING_MODE=live when ready."
+                    f"Safe to flip TRADING_MODE=live when ready, "
+                    f"provided this balance reflects your INTENDED trading capital."
                 )
                 await test_client.close()
             except Exception as exc:

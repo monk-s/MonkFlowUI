@@ -114,10 +114,61 @@ class CoinbaseClient(ExchangeInterface):
     # --- ExchangeInterface implementation ---
 
     async def get_balance(self) -> Decimal:
+        """
+        Return available collateral balance for the configured SYMBOL.
+
+        For BTC-PERP-INTX (Coinbase International Exchange perpetuals)
+        collateral is denominated in USDC. For CFM (Coinbase Financial Markets)
+        futures it's USD. The earlier implementation only looked for USD and
+        therefore returned $0 (or a leftover spot balance) for INTX traders.
+
+        Strategy:
+          1. Sum available balance across all USDC accounts (INTX collateral)
+          2. Sum available balance across all USD accounts (CFM / spot)
+          3. Prefer the currency with the larger non-zero balance, with a
+             tie-break toward USDC (matches the bot's BTC-PERP-INTX target).
+          4. Log which currency was selected for visibility.
+        """
         data = await self._request("GET", "/api/v3/brokerage/accounts")
-        for account in data.get("accounts", []):
-            if account.get("currency") == "USD":
-                return Decimal(account["available_balance"]["value"])
+        accounts = data.get("accounts", []) or []
+
+        usdc_total = Decimal("0")
+        usd_total = Decimal("0")
+
+        for account in accounts:
+            currency = (account.get("currency") or "").upper()
+            try:
+                val = (account.get("available_balance") or {}).get("value", "0")
+                avail = Decimal(str(val))
+            except (TypeError, ValueError, KeyError):
+                continue
+            if currency == "USDC":
+                usdc_total += avail
+            elif currency == "USD":
+                usd_total += avail
+
+        if usdc_total >= usd_total and usdc_total > 0:
+            logger.info(
+                "balance_selected",
+                currency="USDC",
+                balance=str(usdc_total),
+                usd_also_available=str(usd_total),
+            )
+            return usdc_total
+        if usd_total > 0:
+            logger.info(
+                "balance_selected",
+                currency="USD",
+                balance=str(usd_total),
+                usdc_also_available=str(usdc_total),
+            )
+            return usd_total
+
+        logger.warning(
+            "no_collateral_balance",
+            n_accounts=len(accounts),
+            note="Neither USDC nor USD balance found. Bot cannot size positions."
+        )
         return Decimal("0")
 
     async def get_equity(self) -> Decimal:
