@@ -193,8 +193,14 @@ class RiskManager:
                        f"(limit -{settings.CB_MONTHLY_MAX_DRAWDOWN_PCT}%)",
             )
 
-        # Total drawdown from peak
-        if abs(total_pnl_pct) >= settings.CB_TOTAL_MAX_DRAWDOWN_PCT:
+        # Total drawdown from peak. We ONLY trip on actual downside —
+        # total_pnl_pct is (current - peak) / peak * 100 which is positive
+        # when we're at a new high (e.g. just deposited capital → equity
+        # jumps above the recorded peak before the next balance snapshot
+        # bumps peak_equity to match). The earlier `abs()` here treated
+        # gains and losses symmetrically and would have false-tripped this
+        # breaker on a capital addition, rejecting valid signals.
+        if total_pnl_pct <= -float(settings.CB_TOTAL_MAX_DRAWDOWN_PCT):
             return RiskCheckResult(
                 allowed=False,
                 reason=f"Total circuit breaker tripped: {total_pnl_pct:.2f}% "
