@@ -190,15 +190,36 @@ class TickScheduler:
                     }
                 )
             else:
-                if regime not in ("choppy",):
-                    logger.info("no_signal_this_tick", regime=regime)
+                # No signal generated. For choppy regime the bot intentionally
+                # sits flat (and logged that above). For actionable regimes
+                # (trending_up/down/ranging) the bot evaluated the strategy
+                # and chose not to enter — log that explicitly so the dashboard
+                # shows the tick was acted upon, not silently skipped.
+                if regime in ("trending_up", "trending_down"):
+                    strat_name = "ema_trend"
+                elif regime == "ranging":
+                    strat_name = "bb_rsi_reversion"
+                else:
+                    strat_name = None  # choppy — already logged above
+
+                if strat_name is not None:
+                    logger.info("no_signal_this_tick", regime=regime, strategy=strat_name)
+                    await self.repo.log(
+                        "info", "strategy",
+                        f"Evaluated {strat_name} in {regime} regime — "
+                        f"no entry conditions met this tick (waiting for setup)",
+                        {"regime": regime, "strategy": strat_name},
+                    )
 
             elapsed = (datetime.now(timezone.utc) - tick_start).total_seconds()
             logger.info("strategy_tick_complete", elapsed_seconds=round(elapsed, 2))
 
         except Exception as e:
             logger.error("strategy_tick_error", error=str(e), exc_info=True)
-            await self.repo.log("error", "scheduler", f"Strategy tick failed: {e}")
+            try:
+                await self.repo.log("error", "scheduler", f"Strategy tick failed: {e}")
+            except Exception:
+                pass  # don't mask the original error if the DB itself is down
 
     async def _position_tick(self) -> None:
         """
@@ -214,6 +235,13 @@ class TickScheduler:
 
         except Exception as e:
             logger.error("position_tick_error", error=str(e), exc_info=True)
+            try:
+                await self.repo.log(
+                    "error", "scheduler",
+                    f"Position tick failed: {e} (position monitoring missed this 60s cycle)"
+                )
+            except Exception:
+                pass
 
     async def _heartbeat(self) -> None:
         """Update the heartbeat timestamp in bot_state."""
@@ -221,6 +249,13 @@ class TickScheduler:
             await self.repo.update_heartbeat()
         except Exception as e:
             logger.error("heartbeat_error", error=str(e))
+            try:
+                await self.repo.log(
+                    "error", "scheduler",
+                    f"Heartbeat failed: {e} (bot may appear stale on dashboard)"
+                )
+            except Exception:
+                pass
 
     async def _balance_snapshot(self) -> None:
         """Record balance snapshot for equity curve."""
@@ -250,7 +285,17 @@ class TickScheduler:
                 drawdown=round(float(drawdown), 2),
             )
         except Exception as e:
-            logger.error("balance_snapshot_error", error=str(e))
+            logger.error("balance_snapshot_error", error=str(e), exc_info=True)
+            # Surface to dashboard so sparse snapshots are diagnosable
+            try:
+                await self.repo.log(
+                    "error", "scheduler",
+                    f"Balance snapshot failed: {e} "
+                    f"(equity curve will have gaps; check exchange.get_equity / "
+                    f"exchange.get_positions for the underlying issue)"
+                )
+            except Exception:
+                pass
 
     async def run_strategy_now(self) -> None:
         """Force a strategy tick immediately (for testing)."""
