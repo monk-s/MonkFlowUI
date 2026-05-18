@@ -297,6 +297,15 @@ class TickScheduler:
                 heat=round(heat, 2),
                 drawdown=round(drawdown, 2),
             )
+
+            # H4: keep tb_bot_state.live_balance current in live mode. The column
+            # was permanently NULL otherwise (no code wrote to it). Dashboard and
+            # downstream code can now show "last known live balance" meaningfully.
+            if settings.TRADING_MODE == "live":
+                try:
+                    await self.repo.update_bot_state(live_balance=equity)
+                except Exception as exc:
+                    logger.warning("live_balance_update_failed", error=str(exc))
         except Exception as e:
             logger.error("balance_snapshot_error", error=str(e), exc_info=True)
             # Surface to dashboard so sparse snapshots are diagnosable

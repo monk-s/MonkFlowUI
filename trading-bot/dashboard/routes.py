@@ -202,24 +202,53 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
 
     @app.post("/api/close-all")
     async def close_all():
+        """
+        Attempt to close every open trade. H5: only mark a trade closed in DB
+        AFTER Coinbase confirms the close (result.filled == True). Otherwise
+        a queued-but-unfilled order would falsely show as closed on dashboard
+        while the position remains live on the exchange.
+        """
         open_trades = await repo.get_open_trades()
-        closed = 0
+        requested = len(open_trades)
+        confirmed_closed = 0
+        still_open: list[str] = []
+
         for trade in open_trades:
             try:
                 size = trade.position_size
-                if size and size > 0:
-                    await exchange.close_position(trade.direction, size)
+                if not size or size <= 0:
+                    still_open.append(str(trade.id))
+                    continue
+                result = await exchange.close_position(trade.direction, size)
+                if result and getattr(result, "filled", False):
                     await repo.update_trade(
                         str(trade.id),
                         status="closed",
                         exit_at=datetime.now(timezone.utc),
                     )
-                    closed += 1
+                    confirmed_closed += 1
+                else:
+                    still_open.append(str(trade.id))
+                    await repo.log(
+                        "warn", "dashboard",
+                        f"Close-all: trade {trade.id} close order accepted but NOT filled "
+                        f"(result={result}). Position may still be live on Coinbase. "
+                        f"Check the exchange UI."
+                    )
             except Exception as e:
+                still_open.append(str(trade.id))
                 await repo.log("error", "dashboard", f"Failed to close trade {trade.id}: {e}")
 
-        await repo.log("warn", "dashboard", f"Close-all executed: {closed} positions closed")
-        return {"closed": closed}
+        await repo.log(
+            "warn", "dashboard",
+            f"Close-all executed: requested={requested}, "
+            f"confirmed_closed={confirmed_closed}, still_open={len(still_open)}"
+        )
+        return {
+            "requested": requested,
+            "confirmed_closed": confirmed_closed,
+            "still_open": still_open,
+        }
 
     # ------------------------------------------------------------------
     # Admin endpoints — fire scheduled ticks on demand (useful for
