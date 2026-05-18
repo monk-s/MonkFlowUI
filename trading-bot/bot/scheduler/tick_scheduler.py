@@ -258,31 +258,44 @@ class TickScheduler:
                 pass
 
     async def _balance_snapshot(self) -> None:
-        """Record balance snapshot for equity curve."""
+        """Record balance snapshot for equity curve.
+
+        Type-safety note: ``exchange.get_equity`` and ``Position.unrealized_pnl``
+        return ``Decimal`` (correct for precise money math). ``repo.get_peak_equity``
+        returns ``float`` (it's a SQL MAX cast for display). Mixing the two
+        with arithmetic operators (``Decimal - float``) raises ``TypeError`` in
+        Python — exactly what was silently breaking every snapshot until the
+        scheduler error-visibility fix exposed it.
+
+        We coerce everything to float up front because the persistence layer
+        stores these as ``Numeric`` columns which SQLAlchemy happily accepts
+        as Python floats. Money precision past hundredths doesn't matter for
+        an equity-curve snapshot.
+        """
         try:
             state = await self.repo.get_bot_state()
-            equity = await self.exchange.get_equity()
+            equity = float(await self.exchange.get_equity())
             positions = await self.exchange.get_positions()
-            unrealized = sum(p.unrealized_pnl for p in positions)
+            unrealized = sum(float(p.unrealized_pnl) for p in positions)
             cash = equity - unrealized
 
-            peak = await self.repo.get_peak_equity()
-            drawdown = ((equity - peak) / peak * 100) if peak > 0 else 0
+            peak = float(await self.repo.get_peak_equity() or equity)
+            drawdown = ((equity - peak) / peak * 100) if peak > 0 else 0.0
 
             # Calculate portfolio heat
             open_trades = await self.repo.get_open_trades()
             total_risk = sum(
                 float(t.risk_amount or 0) for t in open_trades
             )
-            heat = (total_risk / float(equity) * 100) if equity > 0 else 0
+            heat = (total_risk / equity * 100) if equity > 0 else 0.0
 
             await self.repo.record_balance(
-                equity=float(equity),
-                cash=float(cash),
-                unrealized_pnl=float(unrealized),
+                equity=equity,
+                cash=cash,
+                unrealized_pnl=unrealized,
                 open_positions=len(positions),
                 heat=round(heat, 2),
-                drawdown=round(float(drawdown), 2),
+                drawdown=round(drawdown, 2),
             )
         except Exception as e:
             logger.error("balance_snapshot_error", error=str(e), exc_info=True)
