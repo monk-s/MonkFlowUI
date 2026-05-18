@@ -19,6 +19,7 @@ Serves the dashboard on the PORT assigned by Railway.
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 import sys
 from decimal import Decimal
@@ -209,6 +210,45 @@ async def boot() -> None:
         /health endpoint can respond to Railway's healthcheck during boot.
         """
         logger.info("background_boot_started")
+
+        # ---- One-time Coinbase auth test (set COINBASE_TEST_AUTH=true to run) ----
+        # Verifies that CB_API_KEY + CB_API_SECRET can hit the authenticated
+        # accounts endpoint. Read-only — no orders placed. Result is logged
+        # to BOTH structlog AND tb_bot_log so it shows in the dashboard.
+        # Remove the env var after a successful test.
+        if os.environ.get("COINBASE_TEST_AUTH", "").lower() in ("true", "1", "yes"):
+            try:
+                from bot.exchange.coinbase_client import CoinbaseClient
+                logger.info("coinbase_auth_test_starting")
+                test_client = CoinbaseClient()
+                balance = await test_client.get_balance()
+                positions = await test_client.get_positions()
+                # Mask the key ID — show only first 8 chars
+                key_hint = (settings.CB_API_KEY[:8] + "...") if settings.CB_API_KEY else "(unset)"
+                logger.info(
+                    "coinbase_auth_test_PASSED",
+                    balance_usd=str(balance),
+                    open_positions=len(positions),
+                    key_id_hint=key_hint,
+                )
+                await repo.log(
+                    "info", "coinbase",
+                    f"AUTH TEST PASSED. Live USD balance: ${balance}, "
+                    f"{len(positions)} open positions on exchange. "
+                    f"Key ID starts with: {key_hint}. "
+                    f"Safe to flip TRADING_MODE=live when ready."
+                )
+                await test_client.close()
+            except Exception as exc:
+                logger.error("coinbase_auth_test_FAILED", error=str(exc), exc_info=True)
+                await repo.log(
+                    "error", "coinbase",
+                    f"AUTH TEST FAILED: {exc}. "
+                    f"Do NOT flip TRADING_MODE=live until this is resolved. "
+                    f"Common causes: wrong key/secret, IP allowlist mismatch, "
+                    f"key uses Cloud Developer Platform format (need legacy HMAC key), "
+                    f"insufficient scopes (need View + Trade)."
+                )
 
         # Candle warmup (slow on first boot — ~5-30s depending on DB latency)
         try:
