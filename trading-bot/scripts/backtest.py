@@ -197,21 +197,32 @@ class ClosedTrade:
 
 
 class Backtester:
-    def __init__(self, candles_4h: list[Candle], candles_1h: list[Candle]):
-        self.candles_4h = candles_4h
+    def __init__(
+        self,
+        candles_4h: list[Candle],
+        candles_1h: list[Candle],
+        starting_equity: float = 10000.0,
+        start_idx: int = 0,
+        end_idx: Optional[int] = None,
+    ):
+        self.candles_4h = candles_4h if end_idx is None else candles_4h[:end_idx]
         self.candles_1h = candles_1h
+        self.start_idx = start_idx
 
-        # Bot machinery (real, not mocked)
+        # Bot machinery (real, not mocked) — instantiated AFTER any settings
+        # overrides have been applied by the caller. Strategies read settings.*
+        # at evaluate time, so global monkey-patches in tune.py take effect.
         self.regime = RegimeDetector()
         self.ema = EMATrendStrategy(self.regime)
         self.bb_rsi = BBRSIReversionStrategy(self.regime)
         self.risk = RiskManager()
         self.trailing = TrailingStopManager()
 
+        self.starting_equity = Decimal(str(starting_equity))
+
         # State
-        self.starting_equity = Decimal("10000")
-        self.cash = Decimal("10000")              # available cash (margin debited)
-        self.peak_equity = Decimal("10000")
+        self.cash = self.starting_equity          # available cash (margin debited)
+        self.peak_equity = self.starting_equity
         self.equity_curve: list[tuple[datetime, Decimal]] = []
         self.open_positions: list[OpenPosition] = []
         self.closed_trades: list[ClosedTrade] = []
@@ -445,7 +456,8 @@ class Backtester:
             self.open_positions.remove(p)
 
     async def run(self) -> None:
-        for i in range(len(self.candles_4h)):
+        start = max(self.start_idx, 50)  # always allow indicator warmup
+        for i in range(start, len(self.candles_4h)):
             await self.step(i)
         # Force-close any still-open at end of data
         if self.open_positions:
