@@ -59,6 +59,37 @@ async def boot() -> None:
         halted=state.is_halted,
     )
 
+    # ---- Mode-change detection ----
+    # If the env var TRADING_MODE has changed since last boot, the persisted
+    # equity-derived state (peak_equity, circuit_breaker starting_equity, balance
+    # history) is from a DIFFERENT money scale (e.g. $10K paper → $1K live) and
+    # will produce phantom drawdowns that immediately trip the total circuit
+    # breaker. Reset that state to match the new scale. The actual equity will
+    # be re-snapshotted by the background_boot once the exchange is ready.
+    mode_changed = state.trading_mode != settings.TRADING_MODE
+    if mode_changed:
+        logger.warning(
+            "trading_mode_changed",
+            db_says=state.trading_mode,
+            env_says=settings.TRADING_MODE,
+            note="resetting persisted equity state to avoid phantom drawdown",
+        )
+        await repo.update_bot_state(trading_mode=settings.TRADING_MODE)
+        # Wipe stale balance snapshots — they're at the OLD mode's scale
+        async with async_session_factory() as session:
+            from sqlalchemy import text
+            await session.execute(text("DELETE FROM tb_balance_history"))
+            # Mark existing circuit breakers as needing re-seed (we'll
+            # re-seed in background_boot once we have a live equity reading)
+            await session.execute(text("DELETE FROM tb_circuit_breakers"))
+            await session.commit()
+        await repo.log(
+            "warn", "lifecycle",
+            f"Trading mode flipped: {state.trading_mode} → {settings.TRADING_MODE}. "
+            f"Cleared stale tb_balance_history + tb_circuit_breakers — will "
+            f"re-seed from real equity in background_boot."
+        )
+
     # ---- 2. Exchange client (cheap) ----
     logger.info("initializing_exchange", mode=settings.TRADING_MODE)
     if settings.TRADING_MODE == "paper":
