@@ -51,7 +51,12 @@ class Settings(BaseSettings):
     EMA_SLOW_PERIOD: int = 26
     EMA_PULLBACK_TOLERANCE_PCT: float = 0.2  # price must be within 0.2% of EMA
     EMA_SLOPE_THRESHOLD: float = 0.002  # 0.2% slope over 5 bars
-    TREND_ADX_THRESHOLD: float = 25.0
+    # TREND_ADX_THRESHOLD raised from 25 → 35 on 2026-05-18 based on
+    # data/backtest/POC_ANALYSIS.md (365-day BTC-PERP-INTX). adx35 was the
+    # only config with positive profit factor on the full year (1.06), best
+    # full-year return (+0.40%), and lowest trade frequency (~2/month) —
+    # filters out regime-flicker entries during chop. See AUDIT_LOG.md.
+    TREND_ADX_THRESHOLD: float = 35.0
     EMA_BODY_RATIO_MIN: float = 0.5  # candle body >= 50% of range
 
     # --- Strategy: BB/RSI Mean Reversion ---
