@@ -150,3 +150,105 @@ class TestCancelAllOrdersForTrade:
         assert call_args[0] == "warn"
         assert call_args[1] == "order_manager"
         assert "phantom positions" in call_args[2]
+
+
+class TestEmergencyCloseHardening:
+    """C1 regression: emergency close after stop-fail must not leave position unprotected."""
+
+    @pytest.mark.asyncio
+    async def test_emergency_close_succeeds_on_first_try(self, om, exchange):
+        """Normal path: stop fails 3x, emergency close fills first try."""
+        from bot.strategy.base import Signal
+        signal = Signal(
+            direction="long", entry_price=85000, stop_price=83000,
+            target_price=89000, strategy="ema_trend", regime="trending_up", rr_ratio=2.0,
+        )
+        entry_result = _ok_result("entry-id", filled=True)
+        # Stop fails 3x, then emergency close succeeds with filled=True
+        exchange.place_order.side_effect = [
+            RuntimeError("stop fail 1"),
+            RuntimeError("stop fail 2"),
+            RuntimeError("stop fail 3"),
+            _ok_result("emergency-close-id", filled=True),
+        ]
+        repo = AsyncMock()
+
+        result = await om._place_stop_with_retry(
+            stop_side=OrderSide.SELL,
+            size=Decimal("0.01"),
+            stop_price=Decimal("83000"),
+            entry_result=entry_result,
+            signal=signal,
+            repo=repo,
+        )
+        # Should return synthetic stop-failed result (close succeeded)
+        assert result.order_id.startswith("stop-failed-")
+        assert not result.order_id.startswith("stop-failed-EMERGENCY-CLOSE-FAILED")
+        assert not result.filled
+
+    @pytest.mark.asyncio
+    async def test_emergency_close_failure_halts_bot(self, om, exchange):
+        """CRITICAL: if stop fails AND emergency close fails 3x, bot halts."""
+        from bot.strategy.base import Signal
+        signal = Signal(
+            direction="long", entry_price=85000, stop_price=83000,
+            target_price=89000, strategy="ema_trend", regime="trending_up", rr_ratio=2.0,
+        )
+        entry_result = _ok_result("entry-id", filled=True)
+        # Stop fails 3x, emergency close fails 3x — total 6 failures
+        exchange.place_order.side_effect = [
+            RuntimeError("stop fail 1"),
+            RuntimeError("stop fail 2"),
+            RuntimeError("stop fail 3"),
+            RuntimeError("close fail 1"),
+            RuntimeError("close fail 2"),
+            RuntimeError("close fail 3"),
+        ]
+        repo = AsyncMock()
+
+        result = await om._place_stop_with_retry(
+            stop_side=OrderSide.SELL,
+            size=Decimal("0.01"),
+            stop_price=Decimal("83000"),
+            entry_result=entry_result,
+            signal=signal,
+            repo=repo,
+        )
+        # Should signal CRITICAL state via order_id
+        assert "EMERGENCY-CLOSE-FAILED" in result.order_id
+        # Should have halted the bot
+        repo.update_bot_state.assert_called()
+        call_kwargs = repo.update_bot_state.call_args.kwargs
+        assert call_kwargs["is_halted"] is True
+        assert "emergency_close_failed" in call_kwargs["halt_reason"]
+        # Should have logged the critical error
+        log_calls = [c for c in repo.log.call_args_list if c.args[0] == "error"]
+        assert any("LIVE WITH NO STOP" in c.args[2] for c in log_calls)
+
+    @pytest.mark.asyncio
+    async def test_emergency_close_accepted_but_not_filled_treated_as_failure(self, om, exchange):
+        """Coinbase accepting an order but not filling it should retry, not pass."""
+        from bot.strategy.base import Signal
+        signal = Signal(
+            direction="long", entry_price=85000, stop_price=83000,
+            target_price=89000, strategy="ema_trend", regime="trending_up", rr_ratio=2.0,
+        )
+        entry_result = _ok_result("entry-id", filled=True)
+        # Stop fails 3x. Emergency close: first 2 accepted but unfilled, third succeeds.
+        exchange.place_order.side_effect = [
+            RuntimeError("stop1"),
+            RuntimeError("stop2"),
+            RuntimeError("stop3"),
+            _ok_result("close-1", filled=False),  # accepted, not filled
+            _ok_result("close-2", filled=False),  # accepted, not filled
+            _ok_result("close-3", filled=True),   # actually filled
+        ]
+        result = await om._place_stop_with_retry(
+            stop_side=OrderSide.SELL,
+            size=Decimal("0.01"),
+            stop_price=Decimal("83000"),
+            entry_result=entry_result,
+            signal=signal,
+            repo=AsyncMock(),
+        )
+        assert "EMERGENCY-CLOSE-FAILED" not in result.order_id  # close eventually succeeded

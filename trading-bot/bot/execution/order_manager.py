@@ -43,6 +43,7 @@ class OrderManager:
         self,
         signal: Signal,
         position_size: PositionSizeResult,
+        repo=None,
     ) -> tuple[OrderResult, OrderResult]:
         """
         Place an entry market order followed by a stop-market order.
@@ -52,7 +53,13 @@ class OrderManager:
         (entry_result, stop_result)
             Both OrderResult objects.  If the stop order fails after 3
             retries the entry is closed at market and the returned
-            stop_result will have ``filled=False``.
+            stop_result will have ``filled=False`` and a synthetic order_id
+            starting with ``stop-failed-`` so the caller can route to the
+            rejected-trade path.
+
+        If the emergency close ALSO fails (C1 fix), the bot halts itself
+        via ``repo.update_bot_state(is_halted=True, ...)`` and the trade
+        record is marked for human intervention.
 
         Raises
         ------
@@ -96,6 +103,7 @@ class OrderManager:
             stop_price=Decimal(str(signal.stop_price)),
             entry_result=entry_result,
             signal=signal,
+            repo=repo,
         )
 
         return entry_result, stop_result
@@ -275,10 +283,24 @@ class OrderManager:
         stop_price: Decimal,
         entry_result: OrderResult,
         signal: Signal,
+        repo=None,
     ) -> OrderResult:
         """
         Attempt to place a stop-loss order up to 3 times.
         If all attempts fail, close the entry position at market.
+
+        C1 hardening: the previous version had a single un-protected call to
+        ``place_order(MARKET, reduce_only=True)`` after stop retries failed.
+        If that emergency close itself failed (rate limit, Coinbase 5xx,
+        position-not-found race, insufficient margin briefly), the function
+        raised — and the caller saw an exception with NO indication that
+        the entry was now LIVE WITH NO STOP. Catastrophic.
+
+        Now:
+          - emergency close is wrapped in its own retry loop (3x with 1s delay)
+          - filled status is checked before declaring success
+          - if EVERYTHING fails: log CRITICAL to tb_bot_log AND halt the bot
+            so no further trades are placed; human intervention required.
         """
         last_error: Optional[Exception] = None
 
@@ -311,22 +333,68 @@ class OrderManager:
                 if attempt < _STOP_RETRY_ATTEMPTS:
                     await asyncio.sleep(_STOP_RETRY_DELAY_SEC)
 
-        # All retries exhausted -- emergency close at market
+        # All stop retries exhausted -- emergency close at market
         logger.error(
             "stop_all_retries_failed_emergency_close",
             entry_order_id=entry_result.order_id,
             error=str(last_error),
         )
+        if repo is not None:
+            try:
+                await repo.log(
+                    "error", "order_manager",
+                    f"Stop placement failed 3x for entry {entry_result.order_id}. "
+                    f"Attempting emergency market close. Last error: {last_error}"
+                )
+            except Exception:
+                pass
 
         close_side = (
             OrderSide.SELL if signal.direction == "long" else OrderSide.BUY
         )
-        emergency_result = await self._exchange.place_order(
-            side=close_side,
+
+        emergency_result = await self._emergency_close_with_retry(
+            close_side=close_side,
             size=size,
-            order_type=OrderType.MARKET,
-            reduce_only=True,
+            entry_order_id=entry_result.order_id,
+            repo=repo,
         )
+
+        if emergency_result is None:
+            # Emergency close ALSO failed after retries. Position is live with
+            # no stop. Halt the bot and surface CRITICAL alert.
+            logger.critical(
+                "emergency_close_FAILED_position_unprotected",
+                entry_order_id=entry_result.order_id,
+            )
+            if repo is not None:
+                try:
+                    await repo.update_bot_state(
+                        is_halted=True,
+                        halt_reason=(
+                            f"emergency_close_failed: entry {entry_result.order_id} "
+                            f"has NO stop and emergency close failed 3x. "
+                            f"MANUAL INTERVENTION REQUIRED on Coinbase."
+                        ),
+                    )
+                    await repo.log(
+                        "error", "order_manager",
+                        f"CRITICAL: entry {entry_result.order_id} is LIVE WITH NO STOP "
+                        f"and emergency close failed 3x. Bot has been auto-halted. "
+                        f"Go to Coinbase Advanced UI immediately and close the position manually."
+                    )
+                except Exception:
+                    pass
+
+            # Return synthetic with order_id that signals UNPROTECTED state
+            return OrderResult(
+                order_id=f"stop-failed-EMERGENCY-CLOSE-FAILED-{entry_result.order_id}",
+                side=stop_side,
+                order_type=OrderType.STOP_MARKET,
+                size=size,
+                stop_price=stop_price,
+                filled=False,
+            )
 
         logger.info(
             "emergency_close_filled",
@@ -334,7 +402,7 @@ class OrderManager:
             fill_price=str(emergency_result.price),
         )
 
-        # Return a synthetic stop result to signal failure
+        # Return a synthetic stop result to signal stop-failure but close-success
         return OrderResult(
             order_id=f"stop-failed-{entry_result.order_id}",
             side=stop_side,
@@ -343,3 +411,55 @@ class OrderManager:
             stop_price=stop_price,
             filled=False,
         )
+
+    async def _emergency_close_with_retry(
+        self,
+        close_side: OrderSide,
+        size: Decimal,
+        entry_order_id: str,
+        repo=None,
+    ) -> Optional[OrderResult]:
+        """
+        Attempt the emergency market close up to 3 times.
+        Returns the OrderResult if it filled, None if all attempts failed.
+
+        Verifies ``filled=True`` on the response, not just absence of exception.
+        Coinbase can accept an order without filling it (extreme illiquidity).
+        """
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, 4):  # 3 attempts
+            try:
+                result = await self._exchange.place_order(
+                    side=close_side,
+                    size=size,
+                    order_type=OrderType.MARKET,
+                    reduce_only=True,
+                )
+                if result.filled:
+                    return result
+                # Got a result but unfilled — treat as failure for retry purposes
+                logger.warning(
+                    "emergency_close_not_filled",
+                    attempt=attempt,
+                    order_id=result.order_id,
+                )
+                last_error = RuntimeError(f"order {result.order_id} accepted but not filled")
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "emergency_close_attempt_failed",
+                    attempt=attempt,
+                    entry_order_id=entry_order_id,
+                    error=str(exc),
+                )
+
+            if attempt < 3:
+                await asyncio.sleep(1.0)
+
+        logger.error(
+            "emergency_close_all_attempts_failed",
+            entry_order_id=entry_order_id,
+            last_error=str(last_error),
+        )
+        return None

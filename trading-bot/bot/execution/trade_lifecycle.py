@@ -128,13 +128,33 @@ class TradeLifecycle:
             entry_result, stop_result = await self._orders.open_position(
                 signal=signal,
                 position_size=pos_size,
+                repo=self._repo,  # pass repo so emergency-close failures log + halt (C1)
             )
         except Exception as exc:
             logger.error("order_placement_failed", error=str(exc))
             await self._create_rejected_trade(signal, f"Order error: {exc}", now)
             return "error"
 
-        # If stop placement failed (emergency close happened), record as error
+        # If stop placement failed (emergency close happened), record as error.
+        # Also detect the EMERGENCY-CLOSE-FAILED variant (C1) — position is
+        # LIVE WITH NO STOP and bot has auto-halted. Record as critical error.
+        if (
+            not stop_result.filled
+            and stop_result.order_id.startswith("stop-failed-EMERGENCY-CLOSE-FAILED")
+        ):
+            logger.critical(
+                "trade_orphaned_position_unprotected",
+                entry_order_id=entry_result.order_id,
+            )
+            await self._create_rejected_trade(
+                signal,
+                f"CRITICAL: Entry filled but stop placement AND emergency close both "
+                f"failed. Position is LIVE WITH NO STOP on Coinbase. Bot has been "
+                f"auto-halted. Close the {signal.direction} position manually on Coinbase.",
+                now,
+            )
+            return "error"
+
         if not stop_result.filled and stop_result.order_id.startswith("stop-failed"):
             logger.error(
                 "stop_placement_failed_emergency_closed",
