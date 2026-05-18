@@ -146,28 +146,62 @@ class OrderManager:
         direction: str,
     ) -> OrderResult:
         """
-        Cancel the existing stop order and place a new one at the updated price.
+        Trail/update a stop by placing a new stop FIRST, then cancelling the old.
 
-        Returns the new stop OrderResult.
+        Why place-then-cancel (C2 fix): the original code cancelled the old
+        stop first, then placed the new one. If the new placement failed (any
+        Coinbase API hiccup) the position would have NO stop on the exchange
+        until the next position_tick (~60s window) — and the bot's DB would
+        falsely show status=trailing with a tighter stop that didn't exist.
+
+        Now: if the new place fails, the OLD stop is still active and we raise.
+        The caller (position_manager) will see the exception, log it, and
+        leave the trade record's stop_order_id pointing at the still-live
+        old order. Bot continues to have stop protection.
+
+        Both orders are reduce_only — if both end up briefly on the book
+        (cancel of old fails after new is placed), they can't both trigger
+        because only one position exists.
         """
-        # Cancel old stop
-        cancelled = await self._exchange.cancel_order(old_stop_order_id)
-        if not cancelled:
-            logger.warning(
-                "old_stop_cancel_failed",
-                order_id=old_stop_order_id,
-            )
-
-        # Place new stop
         stop_side = OrderSide.SELL if direction == "long" else OrderSide.BUY
 
-        new_result = await self._exchange.place_order(
-            side=stop_side,
-            size=size,
-            order_type=OrderType.STOP_MARKET,
-            stop_price=new_stop_price,
-            reduce_only=True,
-        )
+        # STEP 1: place the new stop. If this fails, old stop remains active.
+        try:
+            new_result = await self._exchange.place_order(
+                side=stop_side,
+                size=size,
+                order_type=OrderType.STOP_MARKET,
+                stop_price=new_stop_price,
+                reduce_only=True,
+            )
+        except Exception as exc:
+            logger.error(
+                "new_stop_placement_failed_keeping_old",
+                old_order_id=old_stop_order_id,
+                new_stop_price=str(new_stop_price),
+                error=str(exc),
+            )
+            raise  # caller knows to leave the trade record alone
+
+        # STEP 2: now that the new stop is live, cancel the old.
+        # If this fails it's safe to ignore — the old stop is reduce_only
+        # and can't trigger because only one position exists. Worst case:
+        # an extra harmless order on the book until it ages out.
+        try:
+            cancelled = await self._exchange.cancel_order(old_stop_order_id)
+            if not cancelled:
+                logger.warning(
+                    "old_stop_cancel_failed_after_new_placed",
+                    old_order_id=old_stop_order_id,
+                    new_order_id=new_result.order_id,
+                )
+        except Exception as exc:
+            logger.warning(
+                "old_stop_cancel_error_after_new_placed",
+                old_order_id=old_stop_order_id,
+                new_order_id=new_result.order_id,
+                error=str(exc),
+            )
 
         logger.info(
             "stop_updated",
@@ -178,27 +212,57 @@ class OrderManager:
 
         return new_result
 
-    async def cancel_all_orders_for_trade(self, trade) -> None:
-        """Cancel all exchange orders associated with a trade record."""
+    async def cancel_all_orders_for_trade(self, trade, repo=None) -> list[str]:
+        """
+        Cancel all exchange orders associated with a trade record.
+
+        Returns the list of order_ids that FAILED to cancel — empty list on
+        full success. Critical at trade-close: an uncancelled stop (or target)
+        order can later trigger after the position is gone, creating a phantom
+        position in the opposite direction. (H6 fix.)
+
+        If a repo is passed in, failures are also written to tb_bot_log so
+        they're visible in the dashboard.
+        """
         order_ids = []
         for attr in ("stop_order_id", "target_order_id", "entry_order_id"):
             oid = getattr(trade, attr, None)
             if oid:
-                order_ids.append(oid)
+                order_ids.append((attr, oid))
 
-        for oid in order_ids:
+        failed: list[str] = []
+        for attr, oid in order_ids:
             try:
                 cancelled = await self._exchange.cancel_order(oid)
                 if cancelled:
                     logger.info("order_cancelled", order_id=oid, trade_id=str(getattr(trade, "id", "?")))
                 else:
-                    logger.debug("order_cancel_not_found", order_id=oid)
+                    # Not necessarily failure — could be already-filled or already-cancelled.
+                    # Coinbase returns False for "not found" which can mean either.
+                    logger.debug("order_cancel_not_found", order_id=oid, attr=attr)
+                    failed.append(oid)
             except Exception as exc:
                 logger.warning(
                     "order_cancel_error",
                     order_id=oid,
+                    attr=attr,
                     error=str(exc),
                 )
+                failed.append(oid)
+
+        if failed and repo is not None:
+            try:
+                await repo.log(
+                    "warn", "order_manager",
+                    f"Trade {getattr(trade, 'id', '?')}: failed to cancel "
+                    f"{len(failed)} of {len(order_ids)} orders ({failed}). "
+                    f"Check Coinbase order book for stale orders that could create "
+                    f"phantom positions if they later trigger."
+                )
+            except Exception:
+                pass
+
+        return failed
 
     # ------------------------------------------------------------------
     # Internal

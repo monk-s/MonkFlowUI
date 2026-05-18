@@ -297,8 +297,10 @@ class PositionManager:
                 pass
             return
 
-        # Cancel all pending orders
-        await self._orders.cancel_all_orders_for_trade(trade)
+        # Cancel all pending orders. Pass repo so any cancel failures get
+        # logged to tb_bot_log (H6) — uncancelled stops are a phantom-position
+        # risk if they trigger after the position is gone.
+        await self._orders.cancel_all_orders_for_trade(trade, repo=self._repo)
 
         # Close position on exchange
         try:
