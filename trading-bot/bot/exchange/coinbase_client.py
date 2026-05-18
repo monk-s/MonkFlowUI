@@ -245,6 +245,62 @@ class CoinbaseClient(ExchangeInterface):
         data = await self._request("POST", "/api/v3/brokerage/orders", body)
         order_data = data.get("success_response", data)
 
+        # H1: Coinbase returns these status values:
+        #   "FILLED"           — completely filled
+        #   "PARTIALLY_FILLED" — some quantity filled, rest cancelled/pending
+        #   "OPEN" / "PENDING" — accepted but no fills yet (limit/stop)
+        #   "CANCELLED" / etc — not filled at all
+        # The original code only treated "FILLED" as success. PARTIALLY_FILLED
+        # was treated as "not filled" → caller raised RuntimeError → trade
+        # record never created → BUT the partial position WOULD still be live
+        # on Coinbase, orphaned.
+        status = (order_data.get("status") or "").upper()
+        is_filled = status == "FILLED"
+        is_partial = status == "PARTIALLY_FILLED"
+
+        if is_partial and order_type == OrderType.MARKET and not reduce_only:
+            # ORPHAN-AVOIDANCE: market entry that only partially filled.
+            # Close the partial position immediately with a reduce_only market
+            # order so we don't leave naked exposure on the exchange. Then we
+            # still report filled=False so the caller treats this as a
+            # failed entry (correct outcome — entry didn't get the planned size).
+            filled_size = order_data.get("filled_size") or order_data.get("cumulative_quantity")
+            logger.error(
+                "partial_fill_detected_auto_closing",
+                order_id=order_data.get("order_id"),
+                intended_size=str(size),
+                filled_size=str(filled_size),
+                side=side.value,
+            )
+            try:
+                opposite = OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
+                # Use the actual filled size if Coinbase reported it, otherwise the
+                # intended size (Coinbase will reject if no position exists, which
+                # is safe — we just want to ensure no orphaned BTC).
+                close_size = Decimal(str(filled_size)) if filled_size else size
+                close_config = {"market_market_ioc": {"base_size": str(close_size)}}
+                close_body = {
+                    "client_order_id": str(uuid.uuid4()),
+                    "product_id": self.symbol,
+                    "side": opposite.value.upper(),
+                    "order_configuration": close_config,
+                    "is_reduce_only": True,
+                }
+                if leverage:
+                    close_body["leverage"] = str(leverage)
+                await self._request("POST", "/api/v3/brokerage/orders", close_body)
+                logger.info("partial_fill_closed", closed_size=str(close_size))
+            except Exception as exc:
+                logger.critical(
+                    "partial_fill_close_FAILED_position_orphaned",
+                    error=str(exc),
+                    filled_size=str(filled_size),
+                    side=side.value,
+                )
+                # Don't raise — let the caller see filled=False and reject the trade.
+                # The orphan needs human attention; the bot's other safety logic
+                # (position_manager next tick) may catch it.
+
         return OrderResult(
             order_id=order_data.get("order_id", client_order_id),
             side=side,
@@ -252,7 +308,7 @@ class CoinbaseClient(ExchangeInterface):
             size=size,
             price=price,
             stop_price=stop_price,
-            filled=order_data.get("status") == "FILLED",
+            filled=is_filled,
             timestamp=datetime.now(timezone.utc),
             raw_response=data,
         )

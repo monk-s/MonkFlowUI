@@ -83,3 +83,57 @@ class TestStopLimitGapProtection:
         body = client._request.call_args.args[2]
         assert "market_market_ioc" in body["order_configuration"]
         assert "stop_limit_stop_limit_gtc" not in body["order_configuration"]
+
+
+class TestPartialFillAutoClose:
+    """H1 regression: partial fills on market entries get auto-closed to avoid orphans."""
+
+    @pytest.mark.asyncio
+    async def test_partial_fill_triggers_reduce_only_close(self, client):
+        # First call returns partial fill, second is the auto-close
+        client._request = AsyncMock(side_effect=[
+            {"success_response": {"order_id": "partial-entry", "status": "PARTIALLY_FILLED", "filled_size": "0.005"}},
+            {"success_response": {"order_id": "auto-close", "status": "FILLED"}},
+        ])
+        result = await client.place_order(
+            side=OrderSide.BUY,
+            size=Decimal("0.01"),
+            order_type=OrderType.MARKET,
+        )
+        # filled=False because caller should treat this as a failed entry
+        assert result.filled is False
+        # Two requests made: original + auto-close
+        assert client._request.call_count == 2
+        close_body = client._request.call_args_list[1].args[2]
+        assert close_body["side"] == "SELL"  # opposite of BUY
+        assert close_body["is_reduce_only"] is True
+        assert close_body["order_configuration"]["market_market_ioc"]["base_size"] == "0.005"
+
+    @pytest.mark.asyncio
+    async def test_filled_status_returns_filled_true(self, client):
+        client._request = AsyncMock(return_value={
+            "success_response": {"order_id": "full-fill", "status": "FILLED"}
+        })
+        result = await client.place_order(
+            side=OrderSide.BUY,
+            size=Decimal("0.01"),
+            order_type=OrderType.MARKET,
+        )
+        assert result.filled is True
+        assert client._request.call_count == 1  # no auto-close
+
+    @pytest.mark.asyncio
+    async def test_reduce_only_partial_does_NOT_auto_close(self, client):
+        """A partial close (reduce_only) shouldn't auto-close itself — that would loop."""
+        client._request = AsyncMock(return_value={
+            "success_response": {"order_id": "partial-close", "status": "PARTIALLY_FILLED"}
+        })
+        result = await client.place_order(
+            side=OrderSide.SELL,
+            size=Decimal("0.01"),
+            order_type=OrderType.MARKET,
+            reduce_only=True,
+        )
+        assert result.filled is False
+        # Only ONE request — no auto-close attempted on reduce_only partials
+        assert client._request.call_count == 1
