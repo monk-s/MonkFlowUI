@@ -379,10 +379,19 @@ class TestE2ECircuitBreaker:
         """When daily P&L < -5% threshold, trades are rejected with breaker reason."""
         # Force daily_pnl into the breaker zone:
         # 5% of $10,000 = $500 -- so -$600 trips the breaker.
-        async def fake_daily_pnl():
+        # H7: signatures now accept `live_only` kwarg; mocks must too.
+        async def fake_daily_pnl(live_only: bool = False):
+            return -600.0
+
+        async def fake_weekly_pnl(live_only: bool = False):
+            return -600.0
+
+        async def fake_monthly_pnl(live_only: bool = False):
             return -600.0
 
         monkeypatch.setattr(bot_stack.repo, "get_daily_pnl", fake_daily_pnl)
+        monkeypatch.setattr(bot_stack.repo, "get_weekly_pnl", fake_weekly_pnl)
+        monkeypatch.setattr(bot_stack.repo, "get_monthly_pnl", fake_monthly_pnl)
 
         signal = _make_signal(direction="long", entry=85000.0)
         result = await bot_stack.lifecycle.process_signal(signal)

@@ -390,8 +390,16 @@ class PositionManager:
         open_trades: list,
         equity: Decimal,
     ) -> None:
-        """If circuit breakers trip, close all positions."""
-        daily_pnl = await self._repo.get_daily_pnl()
+        """If circuit breakers trip, close all positions.
+
+        H7: Uses real weekly/monthly P&L windows (rolling 7d / 30d) instead
+        of the prior copy-of-daily simplification. Filters to live-mode trades
+        only so any prior paper losses don't pollute live breaker math.
+        """
+        live_only = settings.TRADING_MODE == "live"
+        daily_pnl = await self._repo.get_daily_pnl(live_only=live_only)
+        weekly_pnl = await self._repo.get_weekly_pnl(live_only=live_only)
+        monthly_pnl = await self._repo.get_monthly_pnl(live_only=live_only)
         peak = await self._repo.get_peak_equity()
         total_pnl_pct = (
             ((float(equity) - peak) / peak) * 100 if peak > 0 else 0.0
@@ -400,8 +408,8 @@ class PositionManager:
         cb_result = await self._risk.check_circuit_breakers(
             equity=equity,
             daily_pnl=daily_pnl,
-            weekly_pnl=daily_pnl,  # simplified; real impl would track weekly
-            monthly_pnl=daily_pnl,  # simplified; real impl would track monthly
+            weekly_pnl=weekly_pnl,
+            monthly_pnl=monthly_pnl,
             total_pnl_pct=total_pnl_pct,
         )
 

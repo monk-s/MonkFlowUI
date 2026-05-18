@@ -79,6 +79,38 @@ class TestRiskManager:
         assert "Total circuit breaker" in result.reason
 
     @pytest.mark.asyncio
+    async def test_weekly_distinct_from_daily(self, rm):
+        """H7: weekly breaker fires when weekly loss exceeds threshold, even if daily is fine."""
+        # daily_pnl is small (-2% of equity = -$200 of $10K) — below 5% daily threshold
+        # weekly_pnl is large (-$1100 of $10K = -11%) — exceeds 10% weekly threshold
+        result = await rm.check_trade(
+            signal=_make_signal(),
+            equity=Decimal("10000"),
+            open_positions=[],
+            daily_pnl=-200.0,    # -2%, OK
+            weekly_pnl=-1100.0,  # -11%, exceeds -10% weekly threshold
+            monthly_pnl=-1100.0,
+            total_pnl_pct=0.0,
+        )
+        assert not result.allowed
+        assert "Weekly circuit breaker" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_monthly_distinct_from_weekly(self, rm):
+        """H7: monthly breaker fires from cumulative slow bleed even if weekly is OK."""
+        result = await rm.check_trade(
+            signal=_make_signal(),
+            equity=Decimal("10000"),
+            open_positions=[],
+            daily_pnl=-200.0,
+            weekly_pnl=-900.0,    # -9%, just below weekly threshold
+            monthly_pnl=-1700.0,  # -17%, exceeds -15% monthly threshold
+            total_pnl_pct=0.0,
+        )
+        assert not result.allowed
+        assert "Monthly circuit breaker" in result.reason
+
+    @pytest.mark.asyncio
     async def test_reject_low_rr(self, rm):
         signal = _make_signal(rr=1.5)
         result = await rm.check_trade(

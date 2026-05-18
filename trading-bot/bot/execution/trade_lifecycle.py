@@ -67,10 +67,17 @@ class TradeLifecycle:
         now = datetime.now(timezone.utc)
 
         # --- Step 1: Risk check ---
+        # H7: use real weekly/monthly P&L windows (previously the simplified
+        # version reused daily_pnl, making weekly/monthly checks effectively
+        # duplicates of daily). Filter to live trades only when in live mode
+        # so prior paper trade results don't pollute live circuit breaker math.
         try:
             equity = await self._exchange.get_equity()
             open_trades = await self._repo.get_open_trades()
-            daily_pnl = await self._repo.get_daily_pnl()
+            live_only = settings.TRADING_MODE == "live"
+            daily_pnl = await self._repo.get_daily_pnl(live_only=live_only)
+            weekly_pnl = await self._repo.get_weekly_pnl(live_only=live_only)
+            monthly_pnl = await self._repo.get_monthly_pnl(live_only=live_only)
             peak_equity = await self._repo.get_peak_equity()
 
             total_pnl_pct = (
@@ -84,8 +91,8 @@ class TradeLifecycle:
                 equity=equity,
                 open_positions=open_trades,
                 daily_pnl=daily_pnl,
-                weekly_pnl=daily_pnl,  # simplified
-                monthly_pnl=daily_pnl,  # simplified
+                weekly_pnl=weekly_pnl,
+                monthly_pnl=monthly_pnl,
                 total_pnl_pct=total_pnl_pct,
             )
         except Exception as exc:

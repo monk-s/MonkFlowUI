@@ -2,7 +2,7 @@
 Async CRUD operations for the trading bot database.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -378,20 +378,59 @@ class Repository:
                 "profit_factor": round(profit_factor, 2),
             }
 
-    async def get_daily_pnl(self) -> float:
-        """Sum of net_pnl for trades closed today (UTC)."""
+    async def get_daily_pnl(self, live_only: bool = False) -> float:
+        """
+        Sum of net_pnl for trades closed today (UTC).
+
+        live_only=True: filters out paper-mode trades by entry_order_id prefix
+        (PaperEngine prefixes all order IDs with 'paper-'). Use this in live
+        mode so prior paper trades' losses don't pollute the live circuit
+        breaker math.
+        """
         async with self.session_factory() as session:
             today_start = _utcnow().replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
-            result = await session.execute(
-                select(func.coalesce(func.sum(Trade.net_pnl), 0)).where(
-                    Trade.status.in_(["stopped", "target", "closed"]),
-                    Trade.exit_at >= today_start,
-                )
+            q = select(func.coalesce(func.sum(Trade.net_pnl), 0)).where(
+                Trade.status.in_(["stopped", "target", "closed"]),
+                Trade.exit_at >= today_start,
             )
-            val = result.scalar_one()
-            return float(val)
+            if live_only:
+                q = q.where(~Trade.entry_order_id.like("paper-%"))
+            result = await session.execute(q)
+            return float(result.scalar_one())
+
+    async def get_weekly_pnl(self, live_only: bool = False) -> float:
+        """
+        Sum of net_pnl for trades closed in the last 7 days (UTC).
+
+        Rolling 7-day window so the figure doesn't reset at midnight or on
+        the calendar week boundary — matches how the circuit breaker should
+        actually work (continuous drawdown protection, not calendar-week).
+        """
+        async with self.session_factory() as session:
+            week_ago = _utcnow() - timedelta(days=7)
+            q = select(func.coalesce(func.sum(Trade.net_pnl), 0)).where(
+                Trade.status.in_(["stopped", "target", "closed"]),
+                Trade.exit_at >= week_ago,
+            )
+            if live_only:
+                q = q.where(~Trade.entry_order_id.like("paper-%"))
+            result = await session.execute(q)
+            return float(result.scalar_one())
+
+    async def get_monthly_pnl(self, live_only: bool = False) -> float:
+        """Sum of net_pnl for trades closed in the last 30 days (UTC)."""
+        async with self.session_factory() as session:
+            month_ago = _utcnow() - timedelta(days=30)
+            q = select(func.coalesce(func.sum(Trade.net_pnl), 0)).where(
+                Trade.status.in_(["stopped", "target", "closed"]),
+                Trade.exit_at >= month_ago,
+            )
+            if live_only:
+                q = q.where(~Trade.entry_order_id.like("paper-%"))
+            result = await session.execute(q)
+            return float(result.scalar_one())
 
     async def get_peak_equity(self) -> float:
         """Highest equity ever recorded in balance history."""
