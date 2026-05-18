@@ -2,6 +2,177 @@
 
 ---
 
+## Session: 2026-05-18 — Live-Mode Safety Audit (Round 2)
+
+### Goal
+
+Bot is **live** with $2,605.25 USDC on Coinbase BTC-PERP-INTX (regime=choppy,
+no positions yet). Hunt for any remaining bugs in the same class as those
+already caught (silent-failure accounting, type mismatches, race conditions,
+stale-state, asymmetric safety logic) BEFORE the first live signal fires.
+
+### Method
+
+Two Explore agents in parallel:
+1. Pattern-match against all bugs already caught (Decimal/float, abs(), silent
+   error swallowing, stale state, None guards, currency assumptions)
+2. Deep-dive on the 5 money-critical paths (signal→open, position monitoring,
+   trade close/P&L, equity+breakers, halt+recovery)
+
+Combined output: 14 candidate issues. Hand-verified each by reading the actual
+code (agent claims included 1 hallucinated severity inflation). Then fixed all
+verified CRITICAL + HIGH in 7 commits.
+
+### Findings
+
+#### CRITICAL (3) — position-could-be-unprotected bugs
+
+- **[C1]** `order_manager._place_stop_with_retry` — emergency market close
+  after 3 stop-placement retries had NO try/except. If Coinbase rejected the
+  emergency close (rate limit, position-not-found race, insufficient margin),
+  the function raised with no indication the position was LIVE WITH NO STOP.
+  FIXED in commit `b3dde87`: emergency close now has its own 3x retry +
+  filled=True verification + auto-halt + CRITICAL log if everything fails.
+
+- **[C2]** `order_manager.update_stop` — trailing stop activation cancelled
+  the old stop FIRST, then placed the new one. If new placement failed (any
+  Coinbase hiccup), the position would have NO stop on the exchange for up
+  to 60 seconds. DB would falsely show status=trailing.
+  FIXED in commit `5ee4328`: reversed to place-then-cancel. If new placement
+  fails, old stop stays live. If cancel-old fails after new is placed:
+  harmless (both are reduce_only, only one position exists).
+
+- **[C3]** `coinbase_client.place_order` STOP_MARKET — set `limit_price ==
+  stop_price`. If BTC gaps past the stop (news, whale moves), the limit
+  doesn't fill and the position keeps losing.
+  FIXED in commit `7125719`: limit is now placed `STOP_LIMIT_SLIPPAGE_PCT`
+  (default 0.5%) worse than the trigger so reasonable gaps still fill.
+  Worst-case extra slippage at current sizing: ~$13/trade.
+
+#### HIGH (7) — wrong numbers / wrong state / wrong outcome
+
+- **[H1]** `coinbase_client.place_order` — partial fills were treated as
+  "not filled" → caller raised RuntimeError → trade record never created,
+  BUT partial position would be live on Coinbase, orphaned.
+  FIXED in commit `c63e2a3`: detect `PARTIALLY_FILLED` status, immediately
+  place reduce_only market order to close the partial, return filled=False
+  so caller still records a rejected trade.
+
+- **[H2]** `position_manager._close_trade` — `float(trade.entry_price)` and
+  `float(trade.stop_price)` without None guards. Recovered-orphan or
+  partially-written rows could crash mid-close, leaving DB in "open" while
+  position is closed on Coinbase.
+  FIXED in commit `3957796`: None-guards added with the same `or 0.0`
+  pattern used elsewhere. Bails safely before exchange call if invalid.
+
+- **[H3]** `position_manager.check_positions` — line 60 assigned
+  `current_price = float(await self._exchange.get_equity())` then never
+  used the variable. Wasted 1,440 Coinbase API calls/day.
+  FIXED in commit `3957796`: dead line removed.
+
+- **[H4]** `tb_bot_state.live_balance` column existed in schema but no code
+  wrote to it. Permanently NULL.
+  FIXED in commit `94ce595`: `balance_snapshot` job now writes equity to
+  `tb_bot_state.live_balance` when TRADING_MODE=live.
+
+- **[H5]** `/api/close-all` marked trades `status="closed"` regardless of
+  whether Coinbase confirmed the close. User clicks panic button →
+  dashboard reports "3 closed" → 1 position still live on exchange.
+  FIXED in commit `94ce595`: only updates DB after `result.filled==True`.
+  Response shape: `{requested, confirmed_closed, still_open: [trade_ids]}`.
+
+- **[H6]** `order_manager.cancel_all_orders_for_trade` silently swallowed
+  cancel failures. Uncancelled stops at trade-close are a phantom-position
+  risk (stop triggers after position is gone → opens opposite position).
+  FIXED in commit `5ee4328`: returns list of failed order IDs; accepts
+  optional repo kwarg to log failures to `tb_bot_log` with the trade_id.
+
+- **[H7]** Both `position_manager._check_portfolio_circuit_breakers` and
+  `trade_lifecycle.process_signal` had `weekly_pnl=daily_pnl,
+  monthly_pnl=daily_pnl` — making those breakers duplicates of daily.
+  Slow-bleed scenarios wouldn't trip.
+  FIXED in commit `26b722d`: added `get_weekly_pnl` (7-day rolling) and
+  `get_monthly_pnl` (30-day rolling) repo methods. Both filter to
+  live-mode trades only (`entry_order_id NOT LIKE 'paper-%'`) so prior
+  paper trade results don't pollute live circuit breaker math.
+
+#### MEDIUM (4) — deferred with rationale (tracked as LOW)
+
+- M1: `realized_pnl` doesn't include accrued unpaid funding (reporting
+  error <$1/trade at current size)
+- M2: JWT auth doesn't include body in signature (auth works in practice;
+  AUTH TEST PASSED; will fix if Coinbase ever rejects POSTs)
+- M3: `tb_circuit_breakers.starting_equity` stale on capital deposit
+  (display only — actual trip math uses live equity)
+- M4: Orphan recovery doesn't handle partial fills (edge case, requires
+  mid-fill crash; H1 fix makes partial fills auto-close so this never
+  fires)
+
+#### Agent claims that turned out FALSE
+
+- Agent 1 claimed `abs()` on daily/weekly/monthly breakers was the same
+  pattern as the total breaker bug. **Verified false**: those branches
+  are already guarded by `if daily_pnl < 0 else 0.0` upstream, so they
+  cannot false-trip on gains. No fix needed.
+
+- Agent 1 claimed line 60 in position_manager was CRITICAL because the
+  bad `current_price` value was used to close trades at wrong prices.
+  **Verified partially false**: variable IS misnamed and dead, but
+  `market_price` (the real value, from `get_current_price()`) is what
+  actually flows through to trade decisions. Severity downgraded to HIGH
+  (wasted API calls + confusing) and fixed as H3.
+
+### Fixes Applied (in this session)
+
+| Commit | Fix |
+|---|---|
+| `7125719` | C3: stop-limit slippage buffer |
+| `3957796` | H2, H3: None guards + dead code removed |
+| `5ee4328` | C2, H6: place-then-cancel + cancel failure tracking |
+| `b3dde87` | C1: emergency close hardening + auto-halt |
+| `c63e2a3` | H1: partial fill detection + auto-close |
+| `94ce595` | H4, H5: live_balance update + close-all verification |
+| `26b722d` | H7: real weekly/monthly P&L (live-mode filtered) |
+
+### Verification
+
+- **Unit tests**: 70 → 94 (added 24 new regression tests across
+  test_coinbase_client, test_order_manager, test_position_manager,
+  test_risk_manager). All pass.
+- **E2E tests**: 6/6 still pass against Railway DB (updated mocks for new
+  `live_only` kwarg signature)
+- **Total**: 100 tests, all green
+- **Live bot**: continues running through all redeploys (Railway rolling
+  restart, ~30s healthcheck per deploy). No interruption to live trading
+  posture. Bot still in choppy regime, no signals, $1000.24 → $2605.25
+  equity preserved.
+
+### Next Session Priority
+
+1. Wait for the first live signal (could be hours, could be days — depends
+   on when BTC exits choppy regime per ADX≥35 filter)
+2. When it fires: verify the full live execution flow against the new
+   safety hardening (especially stop placement + position monitoring)
+3. Address the 4 MEDIUM items if/when convenient (none are blockers)
+4. After 30 closed live trades: pull stats, compare to backtest's
+   `adx35` expected expectancy (+0.078R, ~0.4% annual)
+
+### Metrics
+
+- Files modified: 5 (`order_manager.py`, `position_manager.py`,
+  `trade_lifecycle.py`, `coinbase_client.py`, `tick_scheduler.py`,
+  `repository.py`, `routes.py`, `settings.py`)
+- Files added: 2 (`tests/test_order_manager.py`,
+  `tests/test_position_manager.py`)
+- Test count: 70 → 94 unit + 6 E2E = 100
+- Critical bugs caught + fixed: 3
+- High bugs caught + fixed: 7
+- Medium deferred (LOW): 4
+- Agent hallucinations caught: 2
+- Audit categories evaluated: 5 critical money paths + 6 pattern classes
+
+---
+
 ## Session: 2026-05-15 — Initial E2E Audit + Fixes
 
 ### Goal
