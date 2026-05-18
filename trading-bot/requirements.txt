@@ -12,6 +12,10 @@ greenlet==3.1.1                 # required by sqlalchemy[asyncio] runtime
 # HTTP client
 httpx==0.28.1
 
+# JWT auth for Coinbase Advanced Trade (CDP keys, ECDSA/Ed25519)
+pyjwt[crypto]==2.10.1
+cryptography==44.0.0  # explicit pin (pyjwt[crypto] pulls it transitively)
+
 # WebSocket (for future live data)
 websockets==14.1
 

@@ -37,8 +37,12 @@ class CoinbaseClient(ExchangeInterface):
     """Live Coinbase Advanced Trade API client."""
 
     def __init__(self):
-        self.auth = CoinbaseAuth(settings.CB_API_KEY, settings.CB_API_SECRET)
         self.base_url = settings.rest_url
+        self.auth = CoinbaseAuth(
+            api_key=settings.CB_API_KEY,
+            api_secret=settings.CB_API_SECRET,
+            base_url=self.base_url,
+        )
         self.symbol = settings.SYMBOL
         self._client: Optional[httpx.AsyncClient] = None
 
