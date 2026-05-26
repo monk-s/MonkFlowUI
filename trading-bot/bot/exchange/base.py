@@ -85,13 +85,31 @@ class ExchangeInterface(ABC):
         stop_price: Optional[Decimal] = None,
         leverage: Decimal = Decimal("4"),
         reduce_only: bool = False,
+        post_only: bool = False,
     ) -> OrderResult:
-        """Place an order. Returns OrderResult with order_id."""
+        """Place an order. Returns OrderResult with order_id.
+
+        post_only: when True (LIMIT orders), request maker-only — if the
+        order would immediately take liquidity at placement, the exchange
+        cancels it instead of executing. Used by the v3 grid trader to
+        guarantee maker fees (cheaper) and avoid taking the spread.
+        """
         ...
 
     @abstractmethod
     async def cancel_order(self, order_id: str) -> bool:
         """Cancel an order by ID. Returns True if cancelled."""
+        ...
+
+    @abstractmethod
+    async def get_order(self, order_id: str) -> Optional[OrderResult]:
+        """Look up an order by ID. Returns None if not found.
+
+        For pending orders, OrderResult.filled is False; price reflects
+        the limit/stop level. For filled orders, OrderResult.filled is True
+        and price/fee reflect the actual execution. Caller checks .filled
+        to decide whether to apply the fill.
+        """
         ...
 
     @abstractmethod

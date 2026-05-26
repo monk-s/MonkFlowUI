@@ -16,6 +16,10 @@ from bot.persistence.models import (
     BotState,
     Candle,
     CircuitBreaker,
+    GridActiveOrder,
+    GridDailyMetric,
+    GridFill,
+    GridState,
     Trade,
     TradeEvent,
 )
@@ -440,3 +444,275 @@ class Repository:
             )
             val = result.scalar_one()
             return float(val)
+
+    # ══════════════════════════════════════════════════════════════════
+    # v3 GRID — tb3_* CRUD
+    # ══════════════════════════════════════════════════════════════════
+
+    # ------------------------------------------------------------------
+    # tb3_grid_state (singleton, id=1)
+    # ------------------------------------------------------------------
+
+    async def get_grid_state(self) -> Optional[GridState]:
+        """Return the singleton grid state row, or None if not initialized.
+
+        The migration seeds a row at install time, so this normally
+        returns a row; callers should still treat None as "no state yet"
+        for forward-compat.
+        """
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(GridState).where(GridState.id == 1)
+            )
+            return result.scalar_one_or_none()
+
+    async def update_grid_state(self, **kwargs) -> None:
+        """Update arbitrary columns on the singleton grid state row."""
+        kwargs["updated_at"] = _utcnow()
+        async with self.session_factory() as session:
+            await session.execute(
+                update(GridState).where(GridState.id == 1).values(**kwargs)
+            )
+            await session.commit()
+
+    # ------------------------------------------------------------------
+    # tb3_active_orders
+    # ------------------------------------------------------------------
+
+    async def insert_active_order(
+        self,
+        *,
+        exchange_order_id: str,
+        side: str,
+        level_index: int,
+        level_price: float,
+        qty: float,
+    ) -> GridActiveOrder:
+        """Record a newly-placed grid order."""
+        async with self.session_factory() as session:
+            order = GridActiveOrder(
+                exchange_order_id=exchange_order_id,
+                side=side,
+                level_index=level_index,
+                level_price=level_price,
+                qty=qty,
+                status="open",
+            )
+            session.add(order)
+            await session.commit()
+            await session.refresh(order)
+            return order
+
+    async def update_active_order(
+        self,
+        exchange_order_id: str,
+        **kwargs,
+    ) -> None:
+        """Update an active order by exchange_order_id (fill, cancel, etc.)."""
+        async with self.session_factory() as session:
+            await session.execute(
+                update(GridActiveOrder)
+                .where(GridActiveOrder.exchange_order_id == exchange_order_id)
+                .values(**kwargs)
+            )
+            await session.commit()
+
+    async def mark_order_filled(
+        self,
+        *,
+        exchange_order_id: str,
+        fill_price: float,
+        fill_qty: float,
+        fee_paid: float,
+    ) -> None:
+        await self.update_active_order(
+            exchange_order_id,
+            status="filled",
+            filled_at=_utcnow(),
+            fill_price=fill_price,
+            fill_qty=fill_qty,
+            fee_paid=fee_paid,
+        )
+
+    async def mark_order_cancelled(self, exchange_order_id: str) -> None:
+        await self.update_active_order(
+            exchange_order_id,
+            status="cancelled",
+            cancelled_at=_utcnow(),
+        )
+
+    async def get_active_order(
+        self, exchange_order_id: str
+    ) -> Optional[GridActiveOrder]:
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(GridActiveOrder).where(
+                    GridActiveOrder.exchange_order_id == exchange_order_id
+                )
+            )
+            return result.scalar_one_or_none()
+
+    async def get_open_active_orders(self) -> list[GridActiveOrder]:
+        """All open grid orders (status='open'), ordered by level_index."""
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(GridActiveOrder)
+                .where(GridActiveOrder.status == "open")
+                .order_by(GridActiveOrder.level_index.asc())
+            )
+            return list(result.scalars().all())
+
+    async def get_stale_open_orders(
+        self, max_age_minutes: int
+    ) -> list[GridActiveOrder]:
+        """Return open orders older than max_age_minutes."""
+        cutoff = _utcnow() - timedelta(minutes=max_age_minutes)
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(GridActiveOrder)
+                .where(
+                    GridActiveOrder.status == "open",
+                    GridActiveOrder.created_at < cutoff,
+                )
+                .order_by(GridActiveOrder.created_at.asc())
+            )
+            return list(result.scalars().all())
+
+    async def get_open_orders_at_level(
+        self, level_index: int, side: Optional[str] = None
+    ) -> list[GridActiveOrder]:
+        """Look up open orders at a specific level (and side, if given)."""
+        async with self.session_factory() as session:
+            stmt = select(GridActiveOrder).where(
+                GridActiveOrder.status == "open",
+                GridActiveOrder.level_index == level_index,
+            )
+            if side is not None:
+                stmt = stmt.where(GridActiveOrder.side == side)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def touch_order_polled(self, exchange_order_id: str) -> None:
+        """Bump last_polled_at on an open order (for stale-poll diagnostics)."""
+        await self.update_active_order(
+            exchange_order_id, last_polled_at=_utcnow()
+        )
+
+    # ------------------------------------------------------------------
+    # tb3_grid_fills
+    # ------------------------------------------------------------------
+
+    async def record_grid_fill(
+        self,
+        *,
+        active_order_id: Optional[int],
+        exchange_order_id: str,
+        side: str,
+        level_index: int,
+        fill_price: float,
+        fill_qty: float,
+        fee_paid: float,
+        realized_pnl: float,
+        inventory_after_qty: float,
+        inventory_after_avg_cost: float,
+    ) -> GridFill:
+        """Insert a fill row. Called by GridPositionManager after applying the fill."""
+        async with self.session_factory() as session:
+            fill = GridFill(
+                active_order_id=active_order_id,
+                exchange_order_id=exchange_order_id,
+                side=side,
+                level_index=level_index,
+                fill_price=fill_price,
+                fill_qty=fill_qty,
+                fee_paid=fee_paid,
+                realized_pnl=realized_pnl,
+                inventory_after_qty=inventory_after_qty,
+                inventory_after_avg_cost=inventory_after_avg_cost,
+            )
+            session.add(fill)
+            await session.commit()
+            await session.refresh(fill)
+            return fill
+
+    async def get_grid_fills_since(
+        self, since: datetime, limit: int = 500
+    ) -> list[GridFill]:
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(GridFill)
+                .where(GridFill.created_at >= since)
+                .order_by(GridFill.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def get_recent_grid_fills(self, limit: int = 100) -> list[GridFill]:
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(GridFill)
+                .order_by(GridFill.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    # ------------------------------------------------------------------
+    # tb3_grid_metrics (daily aggregates)
+    # ------------------------------------------------------------------
+
+    async def upsert_grid_daily_metric(
+        self,
+        *,
+        date: datetime,
+        n_buy_fills: int,
+        n_sell_fills: int,
+        gross_realized_pnl: float,
+        fees_paid: float,
+        net_pnl: float,
+        inventory_end_qty: Optional[float] = None,
+        inventory_end_avg_cost: Optional[float] = None,
+        equity_end: Optional[float] = None,
+        drawdown_pct: Optional[float] = None,
+    ) -> None:
+        """Upsert a daily metric row (one per UTC day)."""
+        async with self.session_factory() as session:
+            stmt = pg_insert(GridDailyMetric).values(
+                date=date,
+                n_buy_fills=n_buy_fills,
+                n_sell_fills=n_sell_fills,
+                gross_realized_pnl=gross_realized_pnl,
+                fees_paid=fees_paid,
+                net_pnl=net_pnl,
+                inventory_end_qty=inventory_end_qty,
+                inventory_end_avg_cost=inventory_end_avg_cost,
+                equity_end=equity_end,
+                drawdown_pct=drawdown_pct,
+            )
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_grid_metrics_date",
+                set_={
+                    "n_buy_fills": stmt.excluded.n_buy_fills,
+                    "n_sell_fills": stmt.excluded.n_sell_fills,
+                    "gross_realized_pnl": stmt.excluded.gross_realized_pnl,
+                    "fees_paid": stmt.excluded.fees_paid,
+                    "net_pnl": stmt.excluded.net_pnl,
+                    "inventory_end_qty": stmt.excluded.inventory_end_qty,
+                    "inventory_end_avg_cost": stmt.excluded.inventory_end_avg_cost,
+                    "equity_end": stmt.excluded.equity_end,
+                    "drawdown_pct": stmt.excluded.drawdown_pct,
+                },
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+    async def get_grid_daily_metrics(
+        self, days: int = 30
+    ) -> list[GridDailyMetric]:
+        async with self.session_factory() as session:
+            cutoff = _utcnow() - timedelta(days=days)
+            result = await session.execute(
+                select(GridDailyMetric)
+                .where(GridDailyMetric.date >= cutoff)
+                .order_by(GridDailyMetric.date.desc())
+            )
+            return list(result.scalars().all())

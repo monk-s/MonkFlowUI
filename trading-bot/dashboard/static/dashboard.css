@@ -189,6 +189,14 @@ td {
 
 .empty { color: var(--muted); text-align: center; padding: 30px; font-size: 12px; }
 
+/* v3 grid monitor — compact table for fills + active orders */
+table.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.data-table th { text-align: left; font-weight: 600; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+table.data-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+table.data-table tr:hover { background: rgba(255,255,255,0.02); }
+.green { color: var(--green); }
+.red { color: var(--red); }
+
 .log-filters { display: flex; gap: 8px; margin-bottom: 10px; }
 .log-filters select {
   padding: 6px 10px;

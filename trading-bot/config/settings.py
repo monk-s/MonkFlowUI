@@ -110,6 +110,77 @@ class Settings(BaseSettings):
     CANDLE_WARMUP_COUNT: int = 200  # fetch 200 candles for indicator warmup
     STALE_DATA_THRESHOLD_HOURS: int = 8  # flag stale if > 8h old
 
+    # ── v3: Grid Trader ─────────────────────────────────────────────────────
+    # Which engine to run. "ema_trend" is the v1 legacy strategy (deprecated).
+    # "grid" is the v3 lean-long hybrid grid trader.
+    BOT_ENGINE: Literal["ema_trend", "grid"] = "grid"
+
+    # Pre-buy: % of starting capital to immediately allocate to a LONG
+    # perp position on first deploy.
+    # 50% = "moderate aggressive" baseline (+58% annual in backtest)
+    # 70% = "more aggressive" variant (+100% annual in backtest, ~-2pp DD)
+    # User confirmed 2026-05-26 they want the 70% variant; chosen for the
+    # asymmetric reward profile (~2x expected gain for ~1.6x downside).
+    # See data/profitability_roadmap.png + AUDIT_LOG.md.
+    GRID_PREBUY_PCT: float = 70.0
+
+    # Number of grid levels (evenly spaced across the active range).
+    # 30 levels with ~$9.6K capital = ~$320/level after 50% pre-buy.
+    GRID_NUM_LEVELS: int = 30
+
+    # Range mode. "dynamic" recenters every GRID_RECENTER_DAYS based on
+    # recent N-day high/low (no hindsight bias). "static" uses
+    # GRID_STATIC_RANGE_LOW/HIGH (set once and never change).
+    GRID_RANGE_MODE: Literal["dynamic", "static"] = "dynamic"
+
+    # Dynamic mode: how many days of history to use when recentering,
+    # and how often to recenter.
+    GRID_RECENTER_DAYS: int = 60          # lookback window for high/low
+    GRID_RECENTER_INTERVAL_DAYS: int = 60 # how often to rebuild the grid
+    # Padding added to recent-range bounds (15% = grid extends 15% above
+    # recent high and 15% below recent low, so we don't immediately get
+    # blown out of range by normal volatility).
+    GRID_RANGE_PADDING_PCT: float = 15.0
+
+    # Static-range fallback (only used when GRID_RANGE_MODE=static).
+    GRID_STATIC_RANGE_LOW: float = 50000.0
+    GRID_STATIC_RANGE_HIGH: float = 110000.0
+
+    # Grid tick: how often the bot checks the orderbook + fills + level set.
+    # 30s is plenty for grid trading; faster ticks just burn rate-limit budget.
+    GRID_TICK_INTERVAL_SEC: int = 30
+
+    # Maker-only safety. If True, only POST_ONLY limit orders are placed.
+    # Falls back to taker only when GRID_TAKER_FALLBACK is True AND a
+    # retry threshold is exceeded (handled in grid_order_manager).
+    GRID_MAKER_ONLY: bool = True
+    GRID_TAKER_FALLBACK: bool = False
+
+    # How many price levels above and below current price to keep populated
+    # at any time. 10 each side = 20 total open orders concurrently.
+    # Combined with 70% pre-buy, this aggressive sizing roughly maxes out
+    # the Coinbase 25% margin cap on a $9.6K account — fully utilizing
+    # available margin for fill frequency (~2× the 5-per-side variant)
+    # without crossing into reckless territory. See AUDIT_LOG 2026-05-26.
+    GRID_OPEN_ORDERS_PER_SIDE: int = 10
+
+    # Order staleness: cancel + replace if an open order is older than this
+    # many minutes without filling. Catches edge cases where the price
+    # drifted away from the order and a stale level is no longer relevant.
+    GRID_ORDER_STALE_MINUTES: int = 1440  # 24h default
+
+    # Grid-level equity drawdown circuit breaker. If peak-to-trough equity
+    # DD ≥ this %, the bot cancels all open orders, market-closes the perp
+    # position, and halts. Re-arm requires manual unhalt AND daily close
+    # above the 50-day MA.
+    GRID_DD_CIRCUIT_BREAKER_PCT: float = 40.0
+    GRID_DD_REARM_MA_DAYS: int = 50
+
+    # Long-only floor. When True, sell orders only execute if current
+    # position size exceeds prebuy_qty + 1 level worth (prevents the grid
+    # from accidentally flipping net-short during a strong uptrend).
+    GRID_LONG_ONLY: bool = True
+
     # --- Logging ---
     LOG_LEVEL: str = "INFO"
 

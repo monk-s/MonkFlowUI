@@ -288,3 +288,128 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
         except Exception as e:
             await repo.log("error", "dashboard", f"Manual position tick failed: {e}")
             return {"ok": False, "error": str(e)}
+
+    # ══════════════════════════════════════════════════════════════════
+    # v3 GRID endpoints
+    # ──────────────────────────────────────────────────────────────────
+    # Return data from tb3_grid_state, tb3_active_orders, tb3_grid_fills,
+    # tb3_grid_metrics. If running in v1 mode (BOT_ENGINE=ema_trend), the
+    # tables are still queried (they exist post-migration), they're just
+    # empty — frontend renders empty states.
+    # ══════════════════════════════════════════════════════════════════
+
+    @app.get("/api/grid/state")
+    async def grid_state():
+        """Current grid state: range, levels, inventory, prebuy, active orders."""
+        gs = await repo.get_grid_state()
+        if gs is None:
+            return {"initialized": False}
+        active = await repo.get_open_active_orders()
+        return {
+            "initialized": True,
+            "symbol": gs.symbol,
+            "range_low": float(gs.current_range_low) if gs.current_range_low is not None else None,
+            "range_high": float(gs.current_range_high) if gs.current_range_high is not None else None,
+            "num_levels": gs.num_levels,
+            "capital_per_level": float(gs.capital_per_level) if gs.capital_per_level is not None else None,
+            "prebuy_qty": float(gs.prebuy_qty) if gs.prebuy_qty is not None else None,
+            "prebuy_avg_price": float(gs.prebuy_avg_price) if gs.prebuy_avg_price is not None else None,
+            "prebuy_at": gs.prebuy_at.isoformat() if gs.prebuy_at else None,
+            "prebuy_status": getattr(gs, "prebuy_status", None),
+            "inventory_qty": float(gs.inventory_qty or 0),
+            "inventory_avg_cost": float(gs.inventory_avg_cost) if gs.inventory_avg_cost is not None else None,
+            "realized_pnl_total": float(gs.realized_pnl_total or 0),
+            "fees_paid_total": float(gs.fees_paid_total or 0),
+            "n_buy_fills": int(gs.n_buy_fills or 0),
+            "n_sell_fills": int(gs.n_sell_fills or 0),
+            "last_recenter_at": gs.last_recenter_at.isoformat() if gs.last_recenter_at else None,
+            "next_recenter_at": gs.next_recenter_at.isoformat() if gs.next_recenter_at else None,
+            "active_orders": [
+                {
+                    "id": o.id,
+                    "exchange_order_id": o.exchange_order_id,
+                    "side": o.side,
+                    "level_index": o.level_index,
+                    "level_price": float(o.level_price),
+                    "qty": float(o.qty),
+                    "status": o.status,
+                    "created_at": o.created_at.isoformat() if o.created_at else None,
+                    "last_polled_at": o.last_polled_at.isoformat() if o.last_polled_at else None,
+                }
+                for o in active
+            ],
+            "active_orders_count": len(active),
+        }
+
+    @app.get("/api/grid/fills")
+    async def grid_fills(since: str = None, limit: int = 100):
+        """Paginated recent grid fills. `since` is an ISO8601 timestamp."""
+        if since:
+            try:
+                since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                return {"error": f"invalid 'since' (need ISO8601): {since!r}"}
+            fills = await repo.get_grid_fills_since(since_dt, limit=limit)
+        else:
+            fills = await repo.get_recent_grid_fills(limit=limit)
+        return {
+            "fills": [
+                {
+                    "id": f.id,
+                    "created_at": f.created_at.isoformat() if f.created_at else None,
+                    "side": f.side,
+                    "level_index": f.level_index,
+                    "fill_price": float(f.fill_price),
+                    "fill_qty": float(f.fill_qty),
+                    "fee_paid": float(f.fee_paid or 0),
+                    "realized_pnl": float(f.realized_pnl or 0),
+                    "inventory_after_qty": float(f.inventory_after_qty),
+                    "inventory_after_avg_cost": float(f.inventory_after_avg_cost),
+                    "exchange_order_id": f.exchange_order_id,
+                }
+                for f in fills
+            ],
+            "count": len(fills),
+        }
+
+    @app.get("/api/grid/metrics")
+    async def grid_metrics(period: str = "30d"):
+        """Daily aggregate metrics. `period` = 24h | 7d | 30d (default 30d)."""
+        days_map = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}
+        days = days_map.get(period, 30)
+        metrics = await repo.get_grid_daily_metrics(days=days)
+        return {
+            "period": period,
+            "days": days,
+            "metrics": [
+                {
+                    "date": m.date.isoformat() if m.date else None,
+                    "n_buy_fills": m.n_buy_fills,
+                    "n_sell_fills": m.n_sell_fills,
+                    "gross_realized_pnl": float(m.gross_realized_pnl or 0),
+                    "fees_paid": float(m.fees_paid or 0),
+                    "net_pnl": float(m.net_pnl or 0),
+                    "inventory_end_qty": float(m.inventory_end_qty) if m.inventory_end_qty is not None else None,
+                    "inventory_end_avg_cost": float(m.inventory_end_avg_cost) if m.inventory_end_avg_cost is not None else None,
+                    "equity_end": float(m.equity_end) if m.equity_end is not None else None,
+                    "drawdown_pct": float(m.drawdown_pct) if m.drawdown_pct is not None else None,
+                }
+                for m in metrics
+            ],
+        }
+
+    @app.post("/api/admin/run-grid-tick")
+    async def run_grid_tick_now():
+        """Force the grid maintenance tick to run right now (v3 only)."""
+        if scheduler is None:
+            return {"ok": False, "error": "scheduler not wired into dashboard"}
+        await repo.log(
+            "info", "dashboard",
+            "Manual grid tick triggered via /api/admin/run-grid-tick",
+        )
+        try:
+            await scheduler._grid_tick()
+            return {"ok": True, "ran": "grid_tick"}
+        except Exception as e:
+            await repo.log("error", "dashboard", f"Manual grid tick failed: {e}")
+            return {"ok": False, "error": str(e)}

@@ -103,6 +103,11 @@ class PaperEngine(ExchangeInterface):
         self.total_fees = Decimal("0")
         self.total_funding = Decimal("0")
         self._last_price: Optional[Decimal] = None
+        # v3 grid fill simulation: track min/max price seen per pending order
+        # since placement. get_order() consults these to decide if a limit
+        # would have filled while we weren't looking.
+        self._order_price_min: dict[str, Decimal] = {}
+        self._order_price_max: dict[str, Decimal] = {}
 
         logger.info(
             "paper_engine_initialized",
@@ -164,8 +169,12 @@ class PaperEngine(ExchangeInterface):
         stop_price: Optional[Decimal] = None,
         leverage: Decimal = Decimal("4"),
         reduce_only: bool = False,
+        post_only: bool = False,
     ) -> OrderResult:
         order_id = f"paper-{uuid.uuid4().hex[:12]}"
+        # `post_only` accepted for API compatibility; PaperEngine treats LIMIT
+        # orders as always maker-side (no spread modeled here). The grid will
+        # still get the correct maker fees via PAPER_MAKER_FEE_PCT.
 
         if order_type == OrderType.MARKET:
             # Fill immediately with slippage
@@ -386,9 +395,101 @@ class PaperEngine(ExchangeInterface):
     async def cancel_order(self, order_id: str) -> bool:
         if order_id in self.pending_orders:
             del self.pending_orders[order_id]
+            self._order_price_min.pop(order_id, None)
+            self._order_price_max.pop(order_id, None)
             logger.info("paper_order_cancelled", order_id=order_id)
             return True
         return False
+
+    async def get_order(self, order_id: str) -> Optional[OrderResult]:
+        """Look up an order. Simulates fills for pending grid limits.
+
+        For pending LIMIT orders, we check whether the price has crossed
+        the limit (using min/max tracking since placement). If yes, we
+        fill the order at the limit price (no slippage — limit orders
+        execute at the limit price or better), apply the fee, and return
+        the filled OrderResult.
+
+        For filled orders, we return the historical fill record.
+        For unknown order IDs, we return None.
+        """
+        # 1. Already-filled orders
+        for r in self.filled_orders:
+            if r.order_id == order_id:
+                return r
+
+        # 2. Pending orders — simulate fill check
+        if order_id in self.pending_orders:
+            pending = self.pending_orders[order_id]
+            await self.get_current_price()  # refresh min/max tracking
+
+            mn = self._order_price_min.get(order_id)
+            mx = self._order_price_max.get(order_id)
+            limit = pending.price
+
+            fill_triggered = False
+            if pending.order_type == OrderType.LIMIT and limit is not None:
+                if pending.side == OrderSide.BUY and mn is not None and mn <= limit:
+                    fill_triggered = True
+                elif pending.side == OrderSide.SELL and mx is not None and mx >= limit:
+                    fill_triggered = True
+
+            if not fill_triggered:
+                # Still pending — return current state
+                return OrderResult(
+                    order_id=order_id,
+                    side=pending.side,
+                    order_type=pending.order_type,
+                    size=pending.size,
+                    price=pending.price,
+                    stop_price=pending.stop_price,
+                    filled=False,
+                    timestamp=pending.created_at,
+                )
+
+            # Fill at limit price (no slippage on a maker limit)
+            fill_price = limit
+            fee = self._calculate_fee(pending.size, fill_price, is_taker=False)
+            self.total_fees += fee
+            self.balance -= fee
+
+            if pending.reduce_only:
+                pnl = self._close_position_internal(pending.side, pending.size, fill_price)
+                self.balance += pnl
+                logger.info(
+                    "paper_limit_fill_close",
+                    order_id=order_id, side=pending.side.value,
+                    fill_price=str(fill_price), pnl=str(pnl),
+                )
+            else:
+                # For grid limits (NOT reduce_only), each fill is a stand-alone
+                # entry/exit. The grid_position_manager will track inventory
+                # at the application layer; PaperEngine doesn't open/close
+                # paper-position records for these (avoids double-bookkeeping).
+                logger.info(
+                    "paper_limit_fill",
+                    order_id=order_id, side=pending.side.value,
+                    fill_price=str(fill_price), fee=str(fee),
+                )
+
+            result = OrderResult(
+                order_id=order_id,
+                side=pending.side,
+                order_type=pending.order_type,
+                size=pending.size,
+                price=fill_price,
+                filled=True,
+                fee=fee,
+                timestamp=datetime.now(timezone.utc),
+            )
+            # Move from pending to filled
+            self.filled_orders.append(result)
+            del self.pending_orders[order_id]
+            self._order_price_min.pop(order_id, None)
+            self._order_price_max.pop(order_id, None)
+            return result
+
+        return None
 
     async def get_positions(self) -> list[Position]:
         if not self.positions:
@@ -399,6 +500,17 @@ class PaperEngine(ExchangeInterface):
     async def get_current_price(self) -> Decimal:
         price = await self.market_client.get_current_price()
         self._last_price = price
+        # Update min/max tracking for all pending orders (so get_order()
+        # can detect that a limit would have been hit between polls)
+        for oid in list(self.pending_orders.keys()):
+            if oid not in self._order_price_min:
+                self._order_price_min[oid] = price
+                self._order_price_max[oid] = price
+            else:
+                if price < self._order_price_min[oid]:
+                    self._order_price_min[oid] = price
+                if price > self._order_price_max[oid]:
+                    self._order_price_max[oid] = price
         return price
 
     async def get_candles(self, timeframe: str, limit: int = 200) -> list[dict]:
