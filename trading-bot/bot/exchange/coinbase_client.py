@@ -186,6 +186,7 @@ class CoinbaseClient(ExchangeInterface):
         stop_price: Optional[Decimal] = None,
         leverage: Decimal = Decimal("4"),
         reduce_only: bool = False,
+        post_only: bool = False,
     ) -> OrderResult:
         client_order_id = str(uuid.uuid4())
 
@@ -195,9 +196,14 @@ class CoinbaseClient(ExchangeInterface):
                 "base_size": str(size),
             }
         elif order_type == OrderType.LIMIT:
+            # post_only=True → use limit_limit_gtc with post_only flag.
+            # Coinbase will REJECT (not execute as taker) if the order
+            # would cross the spread at placement. This guarantees maker
+            # fees for the grid trader.
             order_config["limit_limit_gtc"] = {
                 "base_size": str(size),
                 "limit_price": str(price),
+                "post_only": post_only,
             }
         elif order_type == OrderType.STOP_MARKET:
             # GAP PROTECTION: Coinbase only offers stop-LIMIT (no true stop-market).
@@ -324,6 +330,111 @@ class CoinbaseClient(ExchangeInterface):
         except Exception as e:
             logger.error("cancel_order_failed", order_id=order_id, error=str(e))
             return False
+
+    async def get_order(self, order_id: str) -> Optional[OrderResult]:
+        """Look up an order by Coinbase order_id.
+
+        Used by the v3 grid trader to poll for fills on its open limit
+        orders. Returns:
+          - None if the order isn't found (e.g. wrong id)
+          - OrderResult with filled=True if FILLED (price/fee reflect execution)
+          - OrderResult with filled=False if OPEN / PENDING / PARTIALLY_FILLED
+          - OrderResult with filled=False if CANCELLED / EXPIRED / FAILED
+            (caller distinguishes via raw_response.status if needed)
+
+        Coinbase endpoint: GET /api/v3/brokerage/orders/historical/{order_id}
+        """
+        try:
+            data = await self._request(
+                "GET",
+                f"/api/v3/brokerage/orders/historical/{order_id}",
+            )
+        except Exception as e:
+            logger.warning("get_order_failed", order_id=order_id, error=str(e))
+            return None
+
+        order = data.get("order") or data
+        if not order:
+            return None
+
+        # Extract side
+        side_str = (order.get("side") or "").upper()
+        if side_str == "BUY":
+            side = OrderSide.BUY
+        elif side_str == "SELL":
+            side = OrderSide.SELL
+        else:
+            return None
+
+        # Extract status — FILLED is the only "executed" terminal state we care
+        # about; PARTIALLY_FILLED is treated as partial-filled (caller decides
+        # what to do with it). All other states (OPEN, PENDING, CANCELLED, etc)
+        # → filled=False.
+        status = (order.get("status") or "").upper()
+        is_filled = status == "FILLED"
+
+        # Extract size and prices. Coinbase response fields vary by order type;
+        # try the common shapes.
+        cfg = order.get("order_configuration", {}) or {}
+        limit_cfg = (cfg.get("limit_limit_gtc") or cfg.get("limit_limit_fok") or {})
+        market_cfg = cfg.get("market_market_ioc") or {}
+        stop_cfg = cfg.get("stop_limit_stop_limit_gtc") or {}
+
+        size_str = (
+            limit_cfg.get("base_size")
+            or market_cfg.get("base_size")
+            or stop_cfg.get("base_size")
+            or order.get("base_size")
+            or "0"
+        )
+        try:
+            size = Decimal(str(size_str))
+        except Exception:
+            size = Decimal("0")
+
+        # Filled price = avg_filled_price (if Coinbase populates it) or the
+        # limit price (fallback). For OPEN orders, returning the limit price
+        # is fine — caller checks .filled to know it's not executed yet.
+        avg_filled_price_str = order.get("average_filled_price") or "0"
+        try:
+            avg_filled_price = Decimal(str(avg_filled_price_str))
+        except Exception:
+            avg_filled_price = Decimal("0")
+
+        limit_price = None
+        if limit_cfg.get("limit_price"):
+            try:
+                limit_price = Decimal(str(limit_cfg["limit_price"]))
+            except Exception:
+                limit_price = None
+
+        order_type = OrderType.MARKET
+        if limit_cfg:
+            order_type = OrderType.LIMIT
+        elif stop_cfg:
+            order_type = OrderType.STOP_LIMIT
+
+        # If filled, report avg_filled_price; else report the limit_price.
+        price = avg_filled_price if is_filled and avg_filled_price > 0 else limit_price
+
+        # Fee = total_fees (string Decimal in USDC)
+        fee_str = order.get("total_fees") or "0"
+        try:
+            fee = Decimal(str(fee_str))
+        except Exception:
+            fee = Decimal("0")
+
+        return OrderResult(
+            order_id=order_id,
+            side=side,
+            order_type=order_type,
+            size=size,
+            price=price,
+            filled=is_filled,
+            fee=fee,
+            timestamp=datetime.now(timezone.utc),
+            raw_response={"status": status, "order": order},
+        )
 
     async def get_positions(self) -> list[Position]:
         try:

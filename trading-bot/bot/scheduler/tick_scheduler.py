@@ -5,7 +5,7 @@ Two scheduled ticks:
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -34,6 +34,7 @@ class TickScheduler:
         position_manager,
         repository,
         exchange,
+        grid_tick_handler=None,  # v3: optional GridTickHandler
     ):
         self.candle_store = candle_store
         self.regime_detector = regime_detector
@@ -43,32 +44,65 @@ class TickScheduler:
         self.position_manager = position_manager
         self.repo = repository
         self.exchange = exchange
+        self.grid_tick_handler = grid_tick_handler
         self.scheduler = AsyncIOScheduler()
         self._running = False
 
     def start(self) -> None:
-        """Start both scheduled ticks."""
-        # Strategy tick: fire at 4H candle close times (UTC)
-        # 00:00, 04:00, 08:00, 12:00, 16:00, 20:00
-        hours = settings.STRATEGY_TICK_HOURS  # "0,4,8,12,16,20"
-        self.scheduler.add_job(
-            self._strategy_tick,
-            CronTrigger(hour=hours, minute=1, timezone="UTC"),
-            id="strategy_tick",
-            name="Strategy Evaluation (4H)",
-            max_instances=1,
-            misfire_grace_time=300,  # 5 min grace for misfires
-        )
+        """Start scheduled ticks.
 
-        # Position check tick: every 60 seconds
-        self.scheduler.add_job(
-            self._position_tick,
-            IntervalTrigger(seconds=settings.POSITION_CHECK_INTERVAL_SEC),
-            id="position_tick",
-            name="Position Monitor (60s)",
-            max_instances=1,
-            misfire_grace_time=30,
-        )
+        v3 grid mode (BOT_ENGINE=grid) registers ONLY the grid tick +
+        heartbeat + balance snapshot. v1 mode (BOT_ENGINE=ema_trend)
+        registers the legacy 4H strategy tick + 60s position tick.
+        """
+        if settings.BOT_ENGINE == "grid":
+            # v3: grid tick replaces strategy + position ticks
+            if self.grid_tick_handler is None:
+                raise RuntimeError(
+                    "BOT_ENGINE=grid but no grid_tick_handler provided to TickScheduler"
+                )
+            self.scheduler.add_job(
+                self._grid_tick,
+                IntervalTrigger(seconds=settings.GRID_TICK_INTERVAL_SEC),
+                id="grid_tick",
+                name=f"Grid Maintenance ({settings.GRID_TICK_INTERVAL_SEC}s)",
+                max_instances=1,
+                misfire_grace_time=30,
+            )
+            # Daily rollup: aggregate yesterday's grid fills at 00:05 UTC
+            self.scheduler.add_job(
+                self._grid_daily_rollup,
+                CronTrigger(hour=0, minute=5, timezone="UTC"),
+                id="grid_daily_rollup",
+                name="Grid Daily Rollup (00:05 UTC)",
+                max_instances=1,
+                misfire_grace_time=3600,  # 1h grace for late deploys
+            )
+            logger.info(
+                "scheduler_grid_mode",
+                grid_interval=settings.GRID_TICK_INTERVAL_SEC,
+            )
+        else:
+            # v1: legacy ema_trend mode
+            hours = settings.STRATEGY_TICK_HOURS  # "0,4,8,12,16,20"
+            self.scheduler.add_job(
+                self._strategy_tick,
+                CronTrigger(hour=hours, minute=1, timezone="UTC"),
+                id="strategy_tick",
+                name="Strategy Evaluation (4H)",
+                max_instances=1,
+                misfire_grace_time=300,
+            )
+
+            # Position check tick: every 60 seconds
+            self.scheduler.add_job(
+                self._position_tick,
+                IntervalTrigger(seconds=settings.POSITION_CHECK_INTERVAL_SEC),
+                id="position_tick",
+                name="Position Monitor (60s)",
+                max_instances=1,
+                misfire_grace_time=30,
+            )
 
         # Heartbeat: update bot_state every 5 minutes
         self.scheduler.add_job(
@@ -92,8 +126,7 @@ class TickScheduler:
         self._running = True
         logger.info(
             "scheduler_started",
-            strategy_hours=hours,
-            position_interval=settings.POSITION_CHECK_INTERVAL_SEC,
+            engine=settings.BOT_ENGINE,
         )
 
     def stop(self) -> None:
@@ -220,6 +253,97 @@ class TickScheduler:
                 await self.repo.log("error", "scheduler", f"Strategy tick failed: {e}")
             except Exception:
                 pass  # don't mask the original error if the DB itself is down
+
+    async def _grid_tick(self) -> None:
+        """v3 grid maintenance tick (every GRID_TICK_INTERVAL_SEC).
+
+        Delegates to the GridTickHandler. Wrapped in try/except so the
+        scheduler stays alive even if a single tick fails.
+        """
+        try:
+            await self.grid_tick_handler.run()
+        except Exception as e:
+            logger.error("grid_tick_error", error=str(e), exc_info=True)
+            try:
+                await self.repo.log(
+                    "error", "scheduler",
+                    f"Grid tick failed: {e} (next 30s tick will reconcile)"
+                )
+            except Exception:
+                pass
+
+    async def _grid_daily_rollup(self) -> None:
+        """End-of-day aggregate rollup at 00:05 UTC.
+
+        Reads YESTERDAY's `tb3_grid_fills`, sums counts + gross/fees/net P&L,
+        snapshots end-of-day inventory + equity, and UPSERTs one row to
+        `tb3_grid_metrics`. Idempotent via unique constraint on (date) —
+        safe to re-run if the cron misfires.
+        """
+        try:
+            today_utc = datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            yesterday_start = today_utc - timedelta(days=1)
+
+            # Read fills since yesterday's midnight; trim to BEFORE today's midnight
+            fills_since = await self.repo.get_grid_fills_since(
+                yesterday_start, limit=100000
+            )
+            fills = [f for f in fills_since if f.created_at < today_utc]
+
+            n_buy = sum(1 for f in fills if f.side == "buy")
+            n_sell = sum(1 for f in fills if f.side == "sell")
+            gross = sum(float(f.realized_pnl or 0) for f in fills)
+            fees = sum(float(f.fee_paid or 0) for f in fills)
+            net = gross - fees
+
+            # End-of-day inventory + equity snapshot
+            gs = await self.repo.get_grid_state()
+            equity = float(await self.exchange.get_equity())
+            peak = float(await self.repo.get_peak_equity() or equity)
+            dd_pct = ((equity - peak) / peak * 100) if peak > 0 else 0.0
+
+            inv_qty = float(gs.inventory_qty or 0) if gs else 0.0
+            inv_avg = (
+                float(gs.inventory_avg_cost)
+                if gs and gs.inventory_avg_cost is not None
+                else None
+            )
+
+            await self.repo.upsert_grid_daily_metric(
+                date=yesterday_start,
+                n_buy_fills=n_buy,
+                n_sell_fills=n_sell,
+                gross_realized_pnl=gross,
+                fees_paid=fees,
+                net_pnl=net,
+                inventory_end_qty=inv_qty,
+                inventory_end_avg_cost=inv_avg,
+                equity_end=equity,
+                drawdown_pct=round(dd_pct, 2),
+            )
+
+            logger.info(
+                "grid_daily_rollup_complete",
+                date=yesterday_start.date().isoformat(),
+                n_buy_fills=n_buy,
+                n_sell_fills=n_sell,
+                net_pnl=round(net, 2),
+                equity_end=round(equity, 2),
+            )
+        except Exception as e:
+            logger.error(
+                "grid_daily_rollup_failed", error=str(e), exc_info=True,
+            )
+            try:
+                await self.repo.log(
+                    "error", "scheduler",
+                    f"Grid daily rollup failed: {e} "
+                    f"(will retry tomorrow; missing day OK)"
+                )
+            except Exception:
+                pass
 
     async def _position_tick(self) -> None:
         """

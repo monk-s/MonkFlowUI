@@ -2,6 +2,7 @@
 const REFRESH_MS = 10000;
 let equityChart = null;
 let drawdownChart = null;
+let gridPnlChart = null;
 
 // Tab switching
 document.querySelectorAll('.tab').forEach(tab => {
@@ -12,6 +13,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
     if (tab.dataset.tab === 'equity') refreshEquity();
     if (tab.dataset.tab === 'logs') refreshLogs();
+    if (tab.dataset.tab === 'grid') refreshGrid();
   });
 });
 
@@ -227,6 +229,186 @@ async function refreshConfig() {
   el.innerHTML = '<div class="config-grid">' + rows + '</div>';
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Grid Monitor (v3)
+// ═══════════════════════════════════════════════════════════════════════
+
+async function refreshGrid() {
+  const state = await api('/api/grid/state');
+  if (!state) return;
+  if (!state.initialized) {
+    document.getElementById('g-range-info').textContent = 'Grid not initialized — waiting for first recenter';
+    return;
+  }
+
+  // Stat cards
+  document.getElementById('g-inv').textContent = fmt(state.inventory_qty, 4) + ' BTC';
+  const avg = state.inventory_avg_cost;
+  document.getElementById('g-avg').textContent = avg ? '$' + fmt(avg, 0) : '--';
+  const realizedEl = document.getElementById('g-realized');
+  realizedEl.textContent = pnlSign(state.realized_pnl_total) + '$' + fmt(Math.abs(state.realized_pnl_total));
+  realizedEl.className = 'stat-value ' + pnlClass(state.realized_pnl_total);
+  document.getElementById('g-active').textContent = state.active_orders_count;
+  document.getElementById('g-fills').textContent = `${state.n_buy_fills} / ${state.n_sell_fills}`;
+  const prebuyEl = document.getElementById('g-prebuy');
+  prebuyEl.textContent = state.prebuy_status || 'not started';
+  prebuyEl.className = 'stat-value ' + (state.prebuy_status === 'complete' ? 'green' : state.prebuy_status === 'failed' ? 'red' : '');
+
+  // Range info
+  document.getElementById('g-range-info').innerHTML = state.range_low != null ? (
+    `Range <strong>$${fmt(state.range_low, 0)}</strong> – <strong>$${fmt(state.range_high, 0)}</strong> | ` +
+    `${state.num_levels} levels | recentered: ${state.last_recenter_at ? new Date(state.last_recenter_at).toLocaleString() : 'never'}`
+  ) : 'No active range';
+
+  // Render SVG range visualization
+  await renderGridRangeSvg(state);
+
+  // Active orders table
+  const ordersHtml = (state.active_orders || []).length === 0
+    ? '<p class="empty">No active orders</p>'
+    : `<table class="data-table">
+        <thead><tr><th>Level</th><th>Price</th><th>Side</th><th>Qty (BTC)</th><th>Age</th></tr></thead>
+        <tbody>${(state.active_orders || []).map(o => {
+          const ageMin = o.created_at ? Math.floor((Date.now() - new Date(o.created_at)) / 60000) : 0;
+          return `<tr>
+            <td>${o.level_index}</td>
+            <td>$${fmt(o.level_price, 0)}</td>
+            <td class="${o.side === 'buy' ? 'green' : 'red'}">${o.side.toUpperCase()}</td>
+            <td>${fmt(o.qty, 4)}</td>
+            <td>${ageMin}m</td>
+          </tr>`;
+        }).join('')}</tbody>
+       </table>`;
+  document.getElementById('g-orders-content').innerHTML = ordersHtml;
+
+  // Daily P&L chart
+  await renderGridPnlChart();
+
+  // Recent fills
+  const fills = await api('/api/grid/fills?limit=20');
+  const fillsList = fills?.fills || [];
+  document.getElementById('g-fills-content').innerHTML = fillsList.length === 0
+    ? '<p class="empty">No fills yet</p>'
+    : `<table class="data-table">
+        <thead><tr><th>Time</th><th>Side</th><th>Lvl</th><th>Price</th><th>Qty</th><th>P&L</th></tr></thead>
+        <tbody>${fillsList.map(f => `<tr>
+          <td>${new Date(f.created_at).toLocaleTimeString()}</td>
+          <td class="${f.side === 'buy' ? 'green' : 'red'}">${f.side.toUpperCase()}</td>
+          <td>${f.level_index}</td>
+          <td>$${fmt(f.fill_price, 0)}</td>
+          <td>${fmt(f.fill_qty, 4)}</td>
+          <td class="${pnlClass(f.realized_pnl)}">${pnlSign(f.realized_pnl)}$${fmt(Math.abs(f.realized_pnl))}</td>
+        </tr>`).join('')}</tbody>
+       </table>`;
+}
+
+async function renderGridRangeSvg(state) {
+  // Need current price for the price-line overlay — get from overview
+  const ov = await api('/api/overview');
+  // The /api/overview doesn't return BTC price directly; we use the avg_cost or
+  // last fill price as a proxy. Or just call /api/grid/fills?limit=1.
+  const recent = await api('/api/grid/fills?limit=1');
+  let currentPrice = null;
+  if (recent?.fills?.length) {
+    currentPrice = recent.fills[0].fill_price;
+  } else if (state.prebuy_avg_price) {
+    currentPrice = state.prebuy_avg_price;
+  } else if (state.range_low != null) {
+    currentPrice = (state.range_low + state.range_high) / 2;
+  }
+
+  const svg = document.getElementById('g-range-svg');
+  if (!svg) return;
+  svg.innerHTML = '';
+  if (state.range_low == null || state.range_high == null) return;
+
+  const lo = state.range_low, hi = state.range_high;
+  const w = svg.clientWidth || 800;
+  const h = 280;
+  const padX = 80, padY = 20;
+
+  // Build level set
+  const n = state.num_levels;
+  const levels = [];
+  if (n >= 2) {
+    const step = (hi - lo) / (n - 1);
+    for (let i = 0; i < n; i++) levels.push({ idx: i, price: lo + i * step });
+  }
+
+  function yFor(price) {
+    return padY + (1 - (price - lo) / (hi - lo)) * (h - 2 * padY);
+  }
+
+  // Buy + sell side maps from active orders
+  const ordersByLevel = {};
+  (state.active_orders || []).forEach(o => {
+    ordersByLevel[o.level_index] = o.side;
+  });
+
+  // Draw level lines
+  for (const lvl of levels) {
+    const y = yFor(lvl.price);
+    const side = ordersByLevel[lvl.idx];
+    const stroke = side === 'buy' ? '#27c93f'
+                   : side === 'sell' ? '#ff5f56'
+                   : '#444';
+    const dasharray = side ? '0' : '4 4';
+    svg.insertAdjacentHTML('beforeend',
+      `<line x1="${padX}" y1="${y}" x2="${w - padX}" y2="${y}" stroke="${stroke}" stroke-dasharray="${dasharray}" stroke-width="${side ? 2 : 1}" />`
+    );
+    if (side) {
+      svg.insertAdjacentHTML('beforeend',
+        `<circle cx="${w - padX + 10}" cy="${y}" r="4" fill="${stroke}" />`
+      );
+    }
+    // Label
+    svg.insertAdjacentHTML('beforeend',
+      `<text x="${padX - 8}" y="${y + 4}" font-size="11" fill="#999" text-anchor="end">$${Math.round(lvl.price).toLocaleString()}</text>`
+    );
+  }
+
+  // Current price line
+  if (currentPrice != null && currentPrice >= lo && currentPrice <= hi) {
+    const y = yFor(currentPrice);
+    svg.insertAdjacentHTML('beforeend',
+      `<line x1="${padX}" y1="${y}" x2="${w - padX}" y2="${y}" stroke="#ffd166" stroke-width="2" />` +
+      `<text x="${w - padX + 5}" y="${y - 4}" font-size="12" fill="#ffd166">$${Math.round(currentPrice).toLocaleString()} (last)</text>`
+    );
+  }
+}
+
+async function renderGridPnlChart() {
+  const d = await api('/api/grid/metrics?period=30d');
+  if (!d) return;
+  const metrics = (d.metrics || []).slice().reverse(); // oldest → newest
+
+  const ctx = document.getElementById('g-pnl-chart');
+  if (!ctx) return;
+  if (gridPnlChart) gridPnlChart.destroy();
+  gridPnlChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: metrics.map(m => new Date(m.date).toLocaleDateString()),
+      datasets: [{
+        label: 'Net P&L ($)',
+        data: metrics.map(m => m.net_pnl),
+        backgroundColor: metrics.map(m => m.net_pnl >= 0 ? 'rgba(39,201,63,0.6)' : 'rgba(255,95,86,0.6)'),
+        borderColor: metrics.map(m => m.net_pnl >= 0 ? '#27c93f' : '#ff5f56'),
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { color: '#aaa' } },
+        x: { ticks: { color: '#aaa', maxRotation: 45 } },
+      },
+    },
+  });
+}
+
 // Controls
 async function haltBot() {
   if (!confirm('Halt the bot? It will stop placing new trades.')) return;
@@ -256,6 +438,10 @@ async function refreshAll() {
   await refreshPositions();
   await refreshHistory();
   await refreshConfig();
+  // Only refresh grid if the tab is visible (saves bandwidth)
+  if (document.getElementById('tab-grid')?.classList.contains('active')) {
+    await refreshGrid();
+  }
 }
 
 refreshAll();

@@ -148,6 +148,39 @@ async def boot() -> None:
 
     candle_store = CandleStore(exchange=exchange, repository=repo)
 
+    # ---- v3 grid stack (BOT_ENGINE=grid only) ----
+    # Instantiate the cheap components now; defer GridOrderManager + tick
+    # handler until equity is known (in _background_boot). The scheduler
+    # accepts grid_tick_handler=None at construct time — we set it via
+    # `scheduler.grid_tick_handler = ...` once instantiated, and the
+    # scheduler.start() call happens AFTER that in _background_boot.
+    grid_tick_handler = None
+    grid_order_mgr = None
+    grid_pos_mgr = None
+    grid_risk_mgr = None
+    if settings.BOT_ENGINE == "grid":
+        from bot.execution.grid_position_manager import GridPositionManager
+        from bot.risk.grid_risk_manager import GridRiskManager
+
+        # These two only need repo + exchange handles; they don't need equity.
+        grid_pos_mgr = GridPositionManager(
+            repository=repo,
+            long_only=settings.GRID_LONG_ONLY,
+        )
+        grid_risk_mgr = GridRiskManager(
+            repository=repo,
+            exchange=exchange,
+            dd_threshold_pct=settings.GRID_DD_CIRCUIT_BREAKER_PCT,
+            rearm_ma_days=settings.GRID_DD_REARM_MA_DAYS,
+        )
+        logger.info(
+            "grid_stack_pre_wired",
+            note="GridOrderManager + GridTickHandler deferred until equity is known",
+            num_levels=settings.GRID_NUM_LEVELS,
+            prebuy_pct=settings.GRID_PREBUY_PCT,
+            tick_interval_sec=settings.GRID_TICK_INTERVAL_SEC,
+        )
+
     scheduler = TickScheduler(
         candle_store=candle_store,
         regime_detector=regime_detector,
@@ -157,6 +190,7 @@ async def boot() -> None:
         position_manager=position_manager,
         repository=repo,
         exchange=exchange,
+        grid_tick_handler=grid_tick_handler,
     )
 
     # ---- 4. Wire dashboard (routes registered, ready to serve) ----
@@ -320,6 +354,127 @@ async def boot() -> None:
             )
         except Exception as exc:
             logger.warning("initial_balance_snapshot_failed", error=str(exc))
+
+        # ---- v3 grid: instantiate equity-dependent components, load state, pre-buy ----
+        # Done AFTER candle warmup + circuit-breaker seed so we have equity
+        # to size the grid. Skipped entirely if BOT_ENGINE != "grid".
+        nonlocal grid_order_mgr, grid_tick_handler  # set in outer scope
+        if settings.BOT_ENGINE == "grid" and grid_pos_mgr is not None:
+            try:
+                # Get the live equity (post-candle-warmup, post-CB-seed)
+                live_equity = float(await exchange.get_equity())
+                if live_equity <= 0:
+                    logger.error(
+                        "grid_boot_zero_equity",
+                        equity=live_equity,
+                        note="Cannot size grid with zero equity — skipping pre-buy",
+                    )
+                else:
+                    # AUDIT-FIX B: capital_per_level computed from REAL equity,
+                    # not the PAPER_STARTING_BALANCE default. Critical in live mode.
+                    cap_per_level = live_equity / settings.GRID_NUM_LEVELS
+
+                    from bot.execution.grid_order_manager import GridOrderManager
+                    from bot.scheduler.grid_tick import GridTickHandler
+
+                    grid_order_mgr = GridOrderManager(
+                        exchange=exchange,
+                        repository=repo,
+                        position_manager=grid_pos_mgr,
+                        symbol=settings.SYMBOL,
+                        capital_per_level=cap_per_level,
+                        leverage=settings.LEVERAGE,
+                        maker_only=settings.GRID_MAKER_ONLY,
+                        taker_fallback=settings.GRID_TAKER_FALLBACK,
+                        orders_per_side=settings.GRID_OPEN_ORDERS_PER_SIDE,
+                        order_stale_minutes=settings.GRID_ORDER_STALE_MINUTES,
+                    )
+                    grid_tick_handler = GridTickHandler(
+                        exchange=exchange,
+                        repository=repo,
+                        grid_order_manager=grid_order_mgr,
+                        grid_position_manager=grid_pos_mgr,
+                        grid_risk_manager=grid_risk_mgr,
+                        symbol=settings.SYMBOL,
+                    )
+                    # Inject into the already-built scheduler before .start()
+                    scheduler.grid_tick_handler = grid_tick_handler
+                    logger.info(
+                        "grid_stack_finalized",
+                        live_equity=live_equity,
+                        cap_per_level=cap_per_level,
+                    )
+
+                # Restore in-memory inventory state from DB (no-op on first deploy)
+                await grid_pos_mgr.load_from_db()
+                logger.info(
+                    "grid_position_loaded",
+                    inventory_qty=float(grid_pos_mgr.state.qty),
+                    prebuy_qty=float(grid_pos_mgr.state.prebuy_qty),
+                )
+
+                # Idempotent pre-buy: only fires if status indicates incomplete
+                gs = await repo.get_grid_state()
+                pb_status = getattr(gs, "prebuy_status", None) if gs else None
+                if pb_status in (None, "pending", "partial"):
+                    cur_equity = float(await exchange.get_equity())
+                    target_notional = cur_equity * settings.GRID_PREBUY_PCT / 100
+                    # Top-up logic: if 'partial', subtract what's already filled
+                    if pb_status == "partial" and gs and gs.prebuy_qty:
+                        cur_price = float(await exchange.get_current_price())
+                        already_filled_notional = float(gs.prebuy_qty) * cur_price
+                        target_notional = max(0, target_notional - already_filled_notional)
+                        logger.info(
+                            "grid_prebuy_resuming_partial",
+                            already_filled_qty=float(gs.prebuy_qty),
+                            remaining_notional=target_notional,
+                        )
+
+                    if target_notional <= 0:
+                        logger.warning(
+                            "grid_prebuy_skipped_zero_notional",
+                            equity=cur_equity, pct=settings.GRID_PREBUY_PCT,
+                        )
+                    else:
+                        current_price = float(await exchange.get_current_price())
+                        result = await grid_order_mgr.execute_prebuy(
+                            notional_usd=target_notional,
+                            current_price=current_price,
+                        )
+                        if result.success:
+                            logger.info(
+                                "grid_prebuy_success",
+                                qty=float(result.filled_qty),
+                                avg_price=float(result.avg_fill_price),
+                            )
+                            await repo.log(
+                                "info", "lifecycle",
+                                f"Grid pre-buy filled: {float(result.filled_qty)} BTC "
+                                f"@ avg ${float(result.avg_fill_price):.2f}",
+                            )
+                        else:
+                            logger.critical(
+                                "grid_prebuy_failed",
+                                error=result.error,
+                            )
+                            await repo.log(
+                                "critical", "lifecycle",
+                                f"Grid pre-buy FAILED: {result.error}. "
+                                f"Bot will halt — manual intervention required."
+                            )
+                            await repo.update_bot_state(
+                                is_halted=True,
+                                halt_reason=f"grid_prebuy_failed: {result.error}",
+                            )
+                else:
+                    logger.info(
+                        "grid_prebuy_already_complete",
+                        status=pb_status,
+                        qty=float(gs.prebuy_qty) if gs and gs.prebuy_qty else 0,
+                    )
+            except Exception as exc:
+                logger.error("grid_boot_failed", error=str(exc), exc_info=True)
+                # Non-fatal — the scheduler will still start; manual diagnosis needed
 
         # Now that data is loaded, start the trading scheduler
         scheduler.start()

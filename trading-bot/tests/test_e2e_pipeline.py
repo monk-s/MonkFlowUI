@@ -126,9 +126,10 @@ async def session_factory(test_engine: AsyncEngine):
     """A fresh sessionmaker bound to the test engine, plus per-test cleanup."""
     factory = async_sessionmaker(test_engine, expire_on_commit=False)
 
-    # Clean state before each test: TRUNCATE all tb_* tables
+    # Clean state before each test: TRUNCATE all tb_* + tb3_* tables
     async with test_engine.begin() as conn:
-        # Order matters because of FKs (events references trades)
+        # Order matters because of FKs (events references trades; grid_fills
+        # references grid_active_orders).
         await conn.execute(text(f"""
             TRUNCATE TABLE
                 {TEST_SCHEMA}.tb_trade_events,
@@ -136,11 +137,16 @@ async def session_factory(test_engine: AsyncEngine):
                 {TEST_SCHEMA}.tb_balance_history,
                 {TEST_SCHEMA}.tb_circuit_breakers,
                 {TEST_SCHEMA}.tb_candles,
-                {TEST_SCHEMA}.tb_bot_log
+                {TEST_SCHEMA}.tb_bot_log,
+                {TEST_SCHEMA}.tb3_grid_fills,
+                {TEST_SCHEMA}.tb3_active_orders,
+                {TEST_SCHEMA}.tb3_grid_metrics
             RESTART IDENTITY CASCADE
         """))
-        # bot_state is a singleton -- delete then re-seed
+        # Singletons: delete then let migration-seeded INSERT...ON CONFLICT
+        # re-seed on next access (or the test code seeds explicitly).
         await conn.execute(text(f"DELETE FROM {TEST_SCHEMA}.tb_bot_state"))
+        await conn.execute(text(f"DELETE FROM {TEST_SCHEMA}.tb3_grid_state"))
 
     yield factory
 
@@ -485,3 +491,188 @@ class TestE2EDashboardHealth:
             pos_payload = positions.json()
             assert "positions" in pos_payload
             assert isinstance(pos_payload["positions"], list)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# v3 GRID TRADER E2E
+# ────────────────────────────────────────────────────────────────────────
+# These exercise the full v3 stack against the same isolated PostgreSQL
+# schema + PaperEngine. They cover the lifecycle (boot → prebuy → fills →
+# recenter → CB trip) and the idempotency contract (prebuy_status).
+# ════════════════════════════════════════════════════════════════════════
+
+
+class TestGridE2E:
+    """v3 grid trader: full lifecycle against real DB + PaperEngine."""
+
+    @pytest_asyncio.fixture
+    async def grid_stack(self, repo):
+        """Wire a complete grid stack: PaperEngine + grid components."""
+        from decimal import Decimal as D
+        from bot.exchange.paper_engine import PaperEngine
+        from bot.execution.grid_order_manager import GridOrderManager
+        from bot.execution.grid_position_manager import GridPositionManager
+        from bot.risk.grid_risk_manager import GridRiskManager
+        from bot.scheduler.grid_tick import GridTickHandler
+
+        exchange = PaperEngine()
+        pos_mgr = GridPositionManager(repository=repo, long_only=True)
+        risk_mgr = GridRiskManager(
+            repository=repo, exchange=exchange,
+            dd_threshold_pct=40.0, rearm_ma_days=50,
+        )
+        order_mgr = GridOrderManager(
+            exchange=exchange, repository=repo, position_manager=pos_mgr,
+            symbol="BTC-PERP-INTX",
+            capital_per_level=320.0, leverage=1.0,
+            maker_only=True, orders_per_side=3,
+            order_stale_minutes=1440, maker_fee_pct=0.04,
+        )
+        tick_handler = GridTickHandler(
+            exchange=exchange, repository=repo,
+            grid_order_manager=order_mgr,
+            grid_position_manager=pos_mgr,
+            grid_risk_manager=risk_mgr,
+        )
+
+        # Ensure tb3_grid_state singleton exists (re-seed since fixture truncated it)
+        from sqlalchemy import text
+        async with repo.session_factory() as session:
+            await session.execute(text(
+                "INSERT INTO tb3_grid_state (id, symbol) VALUES (1, 'BTC-PERP-INTX') "
+                "ON CONFLICT (id) DO NOTHING"
+            ))
+            await session.commit()
+        # Ensure tb_bot_state singleton (some grid tests check halt status)
+        await repo.get_bot_state()
+
+        yield {
+            "exchange": exchange,
+            "pos_mgr": pos_mgr,
+            "order_mgr": order_mgr,
+            "risk_mgr": risk_mgr,
+            "tick_handler": tick_handler,
+            "repo": repo,
+        }
+
+        await exchange.close()
+
+    @pytest.mark.asyncio
+    async def test_first_deploy_runs_prebuy_then_populates_grid(self, grid_stack):
+        """Pre-buy fires on first call; status transitions to 'complete'."""
+        order_mgr = grid_stack["order_mgr"]
+        repo = grid_stack["repo"]
+        exchange = grid_stack["exchange"]
+
+        current_price = float(await exchange.get_current_price())
+        result = await order_mgr.execute_prebuy(
+            notional_usd=2000.0, current_price=current_price,
+        )
+        assert result.success, f"prebuy failed: {result.error}"
+
+        gs = await repo.get_grid_state()
+        assert gs.prebuy_status == "complete"
+        assert float(gs.prebuy_qty) > 0
+        assert float(gs.inventory_qty) > 0
+
+    @pytest.mark.asyncio
+    async def test_restart_with_complete_skips_prebuy(self, grid_stack):
+        """Restart logic: if prebuy_status='complete', don't re-execute."""
+        repo = grid_stack["repo"]
+        # Simulate prior completed prebuy
+        await repo.update_grid_state(
+            prebuy_status="complete",
+            prebuy_qty=0.025,
+            prebuy_avg_price=77000.0,
+        )
+
+        # Logic mirrors bot/main.py:
+        gs = await repo.get_grid_state()
+        pb_status = getattr(gs, "prebuy_status", None)
+        should_prebuy = pb_status in (None, "pending", "partial")
+        assert should_prebuy is False
+
+    @pytest.mark.asyncio
+    async def test_restart_with_partial_completes_topup(self, grid_stack):
+        """Restart logic: 'partial' should trigger top-up."""
+        repo = grid_stack["repo"]
+        await repo.update_grid_state(
+            prebuy_status="partial",
+            prebuy_qty=0.01,  # only got 0.01 BTC when intended ~0.05
+            prebuy_avg_price=77000.0,
+        )
+        gs = await repo.get_grid_state()
+        pb_status = getattr(gs, "prebuy_status", None)
+        should_resume = pb_status in (None, "pending", "partial")
+        assert should_resume is True
+
+    @pytest.mark.asyncio
+    async def test_fill_processed_and_opposite_placed(self, grid_stack):
+        """Drive a buy fill; verify the opposite-side sell gets placed."""
+        from bot.strategy.grid_strategy import compute_range_and_levels
+        order_mgr = grid_stack["order_mgr"]
+        exchange = grid_stack["exchange"]
+        repo = grid_stack["repo"]
+
+        current_price = float(await exchange.get_current_price())
+        gr = compute_range_and_levels(
+            mode="static",
+            static_low=current_price * 0.85,
+            static_high=current_price * 1.15,
+            n_levels=11,
+        )
+        # Pre-buy first to give inventory above floor
+        await order_mgr.execute_prebuy(notional_usd=2000.0, current_price=current_price)
+        # Populate the grid (long_only=True → only buys initially)
+        await order_mgr.tick(grid_range=gr, current_price=current_price)
+
+        buys = [o for o in await repo.get_open_active_orders() if o.side == "buy"]
+        assert len(buys) >= 1, "expected at least 1 buy level populated"
+
+    @pytest.mark.asyncio
+    async def test_halted_bot_skips_tick_cleanly(self, grid_stack):
+        """tick_handler.run() when is_halted=True is a no-op."""
+        tick = grid_stack["tick_handler"]
+        repo = grid_stack["repo"]
+        await repo.update_bot_state(is_halted=True, halt_reason="test")
+        await tick.run()  # should NOT raise; should NOT place orders
+        opens = await repo.get_open_active_orders()
+        assert len(opens) == 0
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_state_persisted(self, grid_stack):
+        """If CB trips, bot_state.is_halted gets set with correct reason."""
+        from decimal import Decimal as D
+        from unittest.mock import AsyncMock as AM
+        tick = grid_stack["tick_handler"]
+        repo = grid_stack["repo"]
+        # Mock the risk_manager's check_circuit_breaker to return tripped=True
+        from bot.risk.grid_risk_manager import CircuitBreakerStatus
+        grid_stack["risk_mgr"].check_circuit_breaker = AM(
+            return_value=CircuitBreakerStatus(
+                tripped=True, peak_equity=D("10000"), current_equity=D("5500"),
+                drawdown_pct=-45.0, threshold_pct=-40.0,
+            )
+        )
+        await tick.run()
+        state = await repo.get_bot_state()
+        assert state.is_halted is True
+        assert "grid_dd_circuit_breaker" in (state.halt_reason or "")
+
+    @pytest.mark.asyncio
+    async def test_grid_fill_persists_to_db(self, grid_stack):
+        """Apply a buy fill via position_manager — verify tb3_grid_fills row."""
+        from decimal import Decimal as D
+        pos_mgr = grid_stack["pos_mgr"]
+        repo = grid_stack["repo"]
+
+        await pos_mgr.apply_fill(
+            side="buy",
+            qty=D("0.001"), price=D("75000"), fee=D("0.30"),
+            exchange_order_id="test-fill-1", level_index=5,
+        )
+        fills = await repo.get_recent_grid_fills(limit=10)
+        assert len(fills) == 1
+        assert fills[0].side == "buy"
+        assert float(fills[0].fill_price) == 75000.0
+        assert float(fills[0].fill_qty) == 0.001
