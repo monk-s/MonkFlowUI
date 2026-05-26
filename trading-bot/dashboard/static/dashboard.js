@@ -110,19 +110,90 @@ async function refreshPositions() {
     return;
   }
 
-  el.innerHTML = `<table><thead><tr>
-    <th>Dir</th><th>Strategy</th><th>Entry</th><th>Current</th><th>Stop</th><th>Target</th><th>Size</th><th>P&L</th><th>R</th>
-  </tr></thead><tbody>${d.positions.map(p => `<tr>
-    <td style="color:${p.direction === 'long' ? 'var(--green)' : 'var(--red)'}; font-weight:700">${escapeHtml(p.direction.toUpperCase())}</td>
-    <td>${escapeHtml(p.strategy)}</td>
-    <td>$${fmt(p.entry_price)}</td>
-    <td>$${fmt(p.current_price)}</td>
-    <td>$${fmt(p.stop_price)}</td>
-    <td>$${fmt(p.target_price)}</td>
-    <td>${fmt(p.size_btc, 4)}</td>
-    <td style="color:${pnlClass(p.unrealized_pnl)}">${pnlSign(p.unrealized_pnl)}$${fmt(Math.abs(p.unrealized_pnl))}</td>
-    <td style="color:${pnlClass(p.r_multiple)}">${pnlSign(p.r_multiple)}${fmt(p.r_multiple, 1)}R</td>
-  </tr>`).join('')}</tbody></table>`;
+  // Separate v3 grid-managed positions from v1 trade records. Grid positions
+  // get a dedicated detail card; v1 trades use the existing tabular view.
+  const gridPositions = d.positions.filter(p => p.managed_by === 'grid');
+  const v1Trades      = d.positions.filter(p => p.managed_by !== 'grid');
+
+  const parts = [];
+
+  for (const p of gridPositions) {
+    const dir = p.direction.toUpperCase();
+    const dirColor = p.direction === 'long' ? 'var(--green)' : 'var(--red)';
+    const sizeUsd = p.size_btc * p.current_price;
+    const pctChange = p.entry_price ? ((p.current_price - p.entry_price) / p.entry_price * 100) : 0;
+    const aboveFloor = p.inventory_above_floor_qty || 0;
+    const totalFills = (p.n_buy_fills || 0) + (p.n_sell_fills || 0);
+    parts.push(`
+      <div class="position-card grid-managed">
+        <div class="position-card-header">
+          <div>
+            <span class="pill" style="background:${dirColor}; color:#000">${escapeHtml(dir)}</span>
+            <span class="pill pill-muted">grid-managed</span>
+            <span class="pill pill-muted">${escapeHtml(p.prebuy_status || 'unknown status')}</span>
+          </div>
+          <div class="position-card-meta">
+            Entered ${p.entry_at ? new Date(p.entry_at).toLocaleString() : '–'}
+          </div>
+        </div>
+        <div class="position-grid-stats">
+          <div class="pg-stat">
+            <div class="pg-label">Size</div>
+            <div class="pg-value">${fmt(p.size_btc, 4)} BTC</div>
+            <div class="pg-sub">≈ $${fmt(sizeUsd, 0)}</div>
+          </div>
+          <div class="pg-stat">
+            <div class="pg-label">Avg Cost</div>
+            <div class="pg-value">$${fmt(p.entry_price, 0)}</div>
+            <div class="pg-sub">Mark: $${fmt(p.current_price, 0)}</div>
+          </div>
+          <div class="pg-stat">
+            <div class="pg-label">Unrealized P&L</div>
+            <div class="pg-value ${pnlClass(p.unrealized_pnl)}">${pnlSign(p.unrealized_pnl)}$${fmt(Math.abs(p.unrealized_pnl))}</div>
+            <div class="pg-sub ${pnlClass(pctChange)}">${pnlSign(pctChange)}${fmt(pctChange, 2)}%</div>
+          </div>
+          <div class="pg-stat">
+            <div class="pg-label">Inventory Floor</div>
+            <div class="pg-value">${fmt(p.inventory_floor_qty || 0, 4)}</div>
+            <div class="pg-sub">+${fmt(aboveFloor, 4)} above</div>
+          </div>
+          <div class="pg-stat">
+            <div class="pg-label">Realized P&L</div>
+            <div class="pg-value ${pnlClass(p.realized_pnl_total)}">${pnlSign(p.realized_pnl_total)}$${fmt(Math.abs(p.realized_pnl_total))}</div>
+            <div class="pg-sub">Fees: $${fmt(p.fees_paid_total)}</div>
+          </div>
+          <div class="pg-stat">
+            <div class="pg-label">Fills</div>
+            <div class="pg-value">${totalFills}</div>
+            <div class="pg-sub">${p.n_buy_fills || 0} buys · ${p.n_sell_fills || 0} sells</div>
+          </div>
+        </div>
+        <div class="position-card-footer">
+          No fixed stop or target — exit conditions managed by 40% drawdown circuit breaker.
+          <a href="#" onclick="document.querySelector('.tab[data-tab=grid]').click(); return false;">Open Grid tab for full state →</a>
+        </div>
+      </div>
+    `);
+  }
+
+  if (v1Trades.length > 0) {
+    parts.push(`<h3 style="margin-top:20px;font-size:13px;color:var(--muted)">Strategy trades (v1)</h3>`);
+    parts.push(`<table><thead><tr>
+      <th>Dir</th><th>Strategy</th><th>Entry</th><th>Current</th><th>Stop</th><th>Target</th><th>Size</th><th>P&L</th><th>R</th>
+    </tr></thead><tbody>${v1Trades.map(p => `<tr>
+      <td style="color:${p.direction === 'long' ? 'var(--green)' : 'var(--red)'}; font-weight:700">${escapeHtml(p.direction.toUpperCase())}</td>
+      <td>${escapeHtml(p.strategy)}</td>
+      <td>$${fmt(p.entry_price)}</td>
+      <td>$${fmt(p.current_price)}</td>
+      <td>$${fmt(p.stop_price)}</td>
+      <td>$${fmt(p.target_price)}</td>
+      <td>${fmt(p.size_btc, 4)}</td>
+      <td style="color:${pnlClass(p.unrealized_pnl)}">${pnlSign(p.unrealized_pnl)}$${fmt(Math.abs(p.unrealized_pnl))}</td>
+      <td style="color:${pnlClass(p.r_multiple)}">${pnlSign(p.r_multiple)}${fmt(p.r_multiple, 1)}R</td>
+    </tr>`).join('')}</tbody></table>`);
+  }
+
+  el.innerHTML = parts.join('');
 }
 
 // Trade History
