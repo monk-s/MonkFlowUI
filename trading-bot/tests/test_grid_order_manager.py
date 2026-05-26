@@ -268,9 +268,12 @@ def _build_setup(
     capital_per_level=320.0,
     orders_per_side=3,
     long_only=True,
+    floor_fraction=Decimal("1.0"),  # legacy strict floor for these tests
 ):
     repo = FakeRepo()
-    pos_mgr = GridPositionManager(repository=repo, long_only=long_only)
+    pos_mgr = GridPositionManager(
+        repository=repo, long_only=long_only, floor_fraction=floor_fraction,
+    )
     exch = FakeExchange()
     om = GridOrderManager(
         exchange=exch,

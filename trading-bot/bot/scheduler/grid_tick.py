@@ -163,6 +163,40 @@ class GridTickHandler:
     # Helpers
     # ─────────────────────────────────────────────────────────────────
 
+    async def force_recenter(self) -> dict:
+        """Cancel all open orders + immediately rebuild the grid range.
+
+        Bypasses the `should_recenter` interval check. Used by the admin
+        endpoint when config has changed and the user wants the new
+        range / floor active right away (instead of waiting for the
+        natural recenter cadence).
+
+        Returns a small dict describing what happened, suitable for the
+        admin API response.
+        """
+        new_range = await self._compute_new_range()
+        if new_range is None:
+            return {
+                "ok": False,
+                "error": "could not compute new range (insufficient history?)",
+            }
+        try:
+            current_price = float(await self.exchange.get_current_price())
+        except Exception as e:
+            return {"ok": False, "error": f"get_current_price failed: {e}"}
+        await self.order_manager.recenter(
+            new_range=new_range, current_price=current_price,
+        )
+        return {
+            "ok": True,
+            "ran": "force_recenter",
+            "new_range_low": new_range.low,
+            "new_range_high": new_range.high,
+            "n_levels": new_range.n_levels,
+            "step": new_range.step(),
+            "current_price": current_price,
+        }
+
     async def _compute_new_range(self) -> Optional[GridRange]:
         """Build a new GridRange using current settings + recent daily data."""
         if settings.GRID_RANGE_MODE == "static":

@@ -461,3 +461,26 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
         except Exception as e:
             await repo.log("error", "dashboard", f"Manual grid tick failed: {e}")
             return {"ok": False, "error": str(e)}
+
+    @app.post("/api/admin/force-recenter")
+    async def force_recenter():
+        """Cancel all open orders + rebuild the grid range immediately.
+
+        Bypasses the natural recenter interval. Use after changing
+        GRID_RANGE_PADDING_PCT / GRID_RECENTER_DAYS so the live bot
+        picks up the new sizing without waiting (the natural recenter
+        only fires every GRID_RECENTER_INTERVAL_DAYS = 14 days by
+        default).
+        """
+        if scheduler is None or scheduler.grid_tick_handler is None:
+            return {"ok": False, "error": "grid_tick_handler not wired into dashboard"}
+        await repo.log(
+            "info", "dashboard",
+            "Force recenter triggered via /api/admin/force-recenter",
+        )
+        try:
+            result = await scheduler.grid_tick_handler.force_recenter()
+            return result
+        except Exception as e:
+            await repo.log("error", "dashboard", f"Force recenter failed: {e}")
+            return {"ok": False, "error": str(e)}

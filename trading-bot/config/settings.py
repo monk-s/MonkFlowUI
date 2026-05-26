@@ -135,12 +135,19 @@ class Settings(BaseSettings):
 
     # Dynamic mode: how many days of history to use when recentering,
     # and how often to recenter.
-    GRID_RECENTER_DAYS: int = 60          # lookback window for high/low
-    GRID_RECENTER_INTERVAL_DAYS: int = 60 # how often to rebuild the grid
-    # Padding added to recent-range bounds (15% = grid extends 15% above
-    # recent high and 15% below recent low, so we don't immediately get
-    # blown out of range by normal volatility).
-    GRID_RANGE_PADDING_PCT: float = 15.0
+    #
+    # Defaults tuned for AGGRESSIVE CHOP HARVESTING (2026-05-26 retune):
+    #   60-day lookback + 15% padding produced a $23K-wide range with
+    #   ~$800/level steps — too coarse for typical BTC chop ($300-$1000/h).
+    #   14-day + 5% padding produces ~$5-8K wide ranges with $170-$280/level
+    #   steps. Many more level-crosses per day; healthier fill cadence.
+    GRID_RECENTER_DAYS: int = 14          # lookback window for high/low
+    GRID_RECENTER_INTERVAL_DAYS: int = 14 # how often to rebuild the grid
+    # Padding added to recent-range bounds (5% = grid extends 5% of the
+    # range width above recent high and 5% below recent low). Smaller
+    # padding = tighter levels = more chop fills, at the cost of more
+    # frequent out-of-range events that trigger recenters.
+    GRID_RANGE_PADDING_PCT: float = 5.0
 
     # Static-range fallback (only used when GRID_RANGE_MODE=static).
     GRID_STATIC_RANGE_LOW: float = 50000.0
@@ -176,10 +183,26 @@ class Settings(BaseSettings):
     GRID_DD_CIRCUIT_BREAKER_PCT: float = 40.0
     GRID_DD_REARM_MA_DAYS: int = 50
 
-    # Long-only floor. When True, sell orders only execute if current
-    # position size exceeds prebuy_qty + 1 level worth (prevents the grid
-    # from accidentally flipping net-short during a strong uptrend).
+    # Long-only floor. When True, the grid enforces a minimum inventory
+    # below which sells are rejected — prevents the grid from flipping
+    # net-short during a strong uptrend.
     GRID_LONG_ONLY: bool = True
+
+    # Floor expressed as a fraction of `prebuy_qty`. The original spec
+    # used 1.0 (floor == full prebuy) which meant inventory_qty MUST
+    # equal prebuy_qty exactly before any sell could be PLACED — the
+    # grid was unidirectional until at least one buy filled first, so
+    # rising or sideways markets produced ZERO fills.
+    #
+    # 0.5 (default) means sells are allowed as long as inventory stays
+    # above 50% of the original prebuy_qty. On a 70% prebuy that still
+    # guarantees a minimum 35%-of-equity long bias (the "lean-long"
+    # contract is preserved), while giving the grid enough headroom to
+    # pre-place its 10 sell orders out of the box.
+    #
+    # To tighten: set 0.85 (~3 sells of headroom). To go bidirectional
+    # entirely: set GRID_LONG_ONLY=False.
+    GRID_INVENTORY_FLOOR_FRACTION: float = 0.50
 
     # --- Logging ---
     LOG_LEVEL: str = "INFO"
