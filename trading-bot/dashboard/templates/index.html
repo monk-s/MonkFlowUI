@@ -63,34 +63,92 @@
 
   <!-- Grid Monitor Tab (v3) -->
   <div class="tab-content" id="tab-grid">
+    <!-- Status banner (top of tab): healthy or halted -->
+    <div id="g-status-banner" class="grid-banner healthy">
+      <span class="grid-banner-icon"></span>
+      <span class="grid-banner-text" id="g-status-text">Loading…</span>
+      <span class="grid-banner-sub" id="g-status-sub"></span>
+    </div>
+
+    <!-- Headline stats: equity, inventory value, realized P&L, drawdown -->
     <div class="stats-grid">
-      <div class="stat"><div class="stat-label">Inventory</div><div class="stat-value" id="g-inv">--</div></div>
-      <div class="stat"><div class="stat-label">Avg Cost</div><div class="stat-value" id="g-avg">--</div></div>
-      <div class="stat"><div class="stat-label">Realized P&L</div><div class="stat-value" id="g-realized">--</div></div>
-      <div class="stat"><div class="stat-label">Active Orders</div><div class="stat-value" id="g-active">--</div></div>
-      <div class="stat"><div class="stat-label">Buy/Sell Fills</div><div class="stat-value" id="g-fills">--</div></div>
-      <div class="stat"><div class="stat-label">Prebuy Status</div><div class="stat-value" id="g-prebuy">--</div></div>
+      <div class="stat">
+        <div class="stat-label">Equity</div>
+        <div class="stat-value" id="g-equity">--</div>
+        <div class="stat-sub" id="g-equity-sub">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Inventory</div>
+        <div class="stat-value" id="g-inv">--</div>
+        <div class="stat-sub" id="g-inv-sub">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Avg Cost</div>
+        <div class="stat-value" id="g-avg">--</div>
+        <div class="stat-sub" id="g-avg-sub">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Realized P&amp;L</div>
+        <div class="stat-value" id="g-realized">--</div>
+        <div class="stat-sub" id="g-realized-sub">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Drawdown</div>
+        <div class="stat-value" id="g-dd">--</div>
+        <div class="stat-sub" id="g-dd-sub">CB trips at -40%</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Activity</div>
+        <div class="stat-value" id="g-activity">--</div>
+        <div class="stat-sub" id="g-activity-sub">&nbsp;</div>
+      </div>
     </div>
+
+    <!-- Grid Range — visualization + meta -->
     <div class="card">
-      <h2>Grid Range</h2>
-      <div id="g-range-info" class="empty">No grid initialized yet</div>
-      <svg id="g-range-svg" width="100%" height="280" style="margin-top:1em"></svg>
+      <div class="card-header">
+        <h2>Grid Range</h2>
+        <div class="card-meta" id="g-range-meta">--</div>
+      </div>
+      <div id="g-range-info" class="empty">Waiting for first recenter…</div>
+      <svg id="g-range-svg" width="100%" height="320" style="margin-top:1em;display:block"></svg>
+      <div class="grid-legend">
+        <span class="legend-item"><span class="legend-dot buy"></span> Buy limit</span>
+        <span class="legend-item"><span class="legend-dot sell"></span> Sell limit</span>
+        <span class="legend-item"><span class="legend-dot price"></span> Current price</span>
+        <span class="legend-item"><span class="legend-dot floor"></span> Inventory floor (prebuy)</span>
+      </div>
     </div>
+
+    <!-- Active orders table -->
     <div class="card">
-      <h2>Active Orders</h2>
+      <div class="card-header">
+        <h2>Active Orders</h2>
+        <div class="card-meta" id="g-orders-meta">--</div>
+      </div>
       <div id="g-orders-content">
         <p class="empty">No active orders</p>
       </div>
     </div>
+
+    <!-- Recent fills -->
     <div class="card">
-      <h2>Daily P&L (30d)</h2>
-      <canvas id="g-pnl-chart" height="200"></canvas>
-    </div>
-    <div class="card">
-      <h2>Recent Fills</h2>
+      <div class="card-header">
+        <h2>Recent Fills</h2>
+        <div class="card-meta" id="g-fills-meta">--</div>
+      </div>
       <div id="g-fills-content">
         <p class="empty">No fills yet</p>
       </div>
+    </div>
+
+    <!-- Daily P&L (empty until first 00:05 UTC rollup) -->
+    <div class="card">
+      <div class="card-header">
+        <h2>Daily P&amp;L</h2>
+        <div class="card-meta" id="g-pnl-meta">Rollup fires at 00:05 UTC daily</div>
+      </div>
+      <canvas id="g-pnl-chart" height="200"></canvas>
     </div>
   </div>
 
