@@ -58,6 +58,15 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
 
     @app.get("/api/positions")
     async def get_positions():
+        """Unified positions view: v1 trade records + v3 grid-managed perp.
+
+        v1 mode: returns tb_trades open trades (entry/stop/target lifecycle).
+        v3 mode: returns the grid-managed perp position from tb3_grid_state
+                 (continuous long position adjusted by buy/sell fills).
+        Both lists are returned; the frontend renders them with different
+        styling so the user sees a single "Open Positions" view regardless
+        of which engine is running.
+        """
         trades = await repo.get_open_trades()
         current_price = float(await exchange.get_current_price())
 
@@ -76,6 +85,7 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
 
             result.append({
                 "id": str(t.id),
+                "managed_by": "v1",
                 "strategy": t.strategy,
                 "direction": t.direction,
                 "status": t.status,
@@ -89,6 +99,44 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
                 "unrealized_pnl": round(pnl, 2),
                 "r_multiple": round(r_multiple, 2),
                 "entry_at": t.entry_at.isoformat() if t.entry_at else None,
+            })
+
+        # v3 grid-managed position: read inventory from tb3_grid_state.
+        # We surface it here so the Positions tab is a single source-of-truth
+        # for "what am I holding right now?" regardless of engine.
+        gs = await repo.get_grid_state()
+        if gs is not None and gs.inventory_qty and float(gs.inventory_qty) > 0:
+            inv_qty = float(gs.inventory_qty)
+            avg_cost = float(gs.inventory_avg_cost or 0)
+            # Long-only convention: grid only opens long perp positions
+            unrealized = inv_qty * (current_price - avg_cost) if avg_cost else 0.0
+            prebuy_qty = float(gs.prebuy_qty or 0)
+            n_buy_fills = int(gs.n_buy_fills or 0)
+            n_sell_fills = int(gs.n_sell_fills or 0)
+            result.append({
+                "id": "grid-managed",
+                "managed_by": "grid",
+                "strategy": "grid",
+                "direction": "long",
+                "status": "open",
+                "entry_price": avg_cost,
+                "current_price": current_price,
+                "stop_price": 0,            # no fixed stop — circuit breaker handles catastrophe
+                "target_price": 0,           # no fixed target — grid trades the range
+                "trailing_stop": None,
+                "size_btc": inv_qty,
+                "risk_amount": 0,
+                "unrealized_pnl": round(unrealized, 2),
+                "r_multiple": 0,             # not meaningful for grid
+                "entry_at": gs.prebuy_at.isoformat() if gs.prebuy_at else None,
+                # Grid-specific fields the frontend can use:
+                "inventory_floor_qty": prebuy_qty,
+                "inventory_above_floor_qty": round(inv_qty - prebuy_qty, 6),
+                "n_buy_fills": n_buy_fills,
+                "n_sell_fills": n_sell_fills,
+                "realized_pnl_total": float(gs.realized_pnl_total or 0),
+                "fees_paid_total": float(gs.fees_paid_total or 0),
+                "prebuy_status": getattr(gs, "prebuy_status", None),
             })
 
         return {"positions": result, "current_price": current_price}

@@ -249,6 +249,50 @@ table.data-table th.num { text-align: right; }
   text-align: center; padding: 0 24px;
 }
 
+/* Position card for v3 grid-managed positions on the Positions tab */
+.position-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.position-card.grid-managed { border-left: 3px solid var(--blue); }
+.position-card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 14px;
+}
+.position-card-meta { font-size: 11px; color: var(--muted); }
+.position-card-footer {
+  font-size: 11px; color: var(--muted);
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.position-card-footer a { color: var(--accent); text-decoration: none; margin-left: 8px; }
+.position-card-footer a:hover { text-decoration: underline; }
+.position-grid-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.pg-stat { padding: 6px 0; }
+.pg-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.pg-value { font-size: 18px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pg-value.green { color: var(--green); }
+.pg-value.red { color: var(--red); }
+.pg-sub { font-size: 11px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pg-sub.green { color: var(--green); }
+.pg-sub.red { color: var(--red); }
+
+/* Pills used in the position card header */
+.pill {
+  display: inline-block;
+  padding: 3px 10px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; margin-right: 6px;
+}
+.pill-muted { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+
 .log-filters { display: flex; gap: 8px; margin-bottom: 10px; }
 .log-filters select {
   padding: 6px 10px;
