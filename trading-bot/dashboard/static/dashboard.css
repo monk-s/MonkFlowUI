@@ -1,6 +1,23 @@
+/* ===========================================================================
+   Dashboard design system
+   ---------------------------------------------------------------------------
+   Component vocabulary used across all 7 tabs:
+     .card             section container
+     .card-header      title row inside a card (h2 + right-aligned .card-meta)
+     .stats-grid       row of .stat tiles
+     .stat             tile with .stat-label / .stat-value / .stat-sub
+     .data-table       canonical table styling (no global <table> selector)
+     .empty-state      "no data" placeholder explaining WHY data is missing
+     .status-banner    healthy / warning / halted banner at top of a tab
+     .badge            header status (mode/regime)
+     .pill             inline contextual label
+     .btn              action button (variants: primary / ok / warn / danger)
+   ========================================================================= */
+
 :root {
   --bg: #0d1117;
   --surface: #161b22;
+  --card: var(--surface); /* alias kept so legacy var(--card) references resolve */
   --border: #30363d;
   --text: #e6edf3;
   --muted: #8b949e;
@@ -22,6 +39,7 @@ body {
 
 .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
 
+/* === Header (top of page) === */
 header {
   display: flex;
   justify-content: space-between;
@@ -30,33 +48,16 @@ header {
 }
 
 h1 { font-size: 18px; color: var(--accent); }
+
 h2 {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--muted);
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
+  font-weight: 600;
 }
 
 .header-badges { display: flex; gap: 8px; align-items: center; }
-
-.badge {
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1px;
-}
-
-.badge.paper { background: rgba(88,166,255,0.15); color: var(--blue); }
-.badge.live { background: rgba(63,185,80,0.15); color: var(--green); }
-.badge.halted { background: rgba(248,81,73,0.15); color: var(--red); }
-.badge.trending-up { background: rgba(63,185,80,0.15); color: var(--green); }
-.badge.trending-down { background: rgba(248,81,73,0.15); color: var(--red); }
-.badge.ranging { background: rgba(210,153,34,0.15); color: var(--yellow); }
-.badge.choppy { background: rgba(139,148,158,0.15); color: var(--muted); }
 
 .status-dot {
   width: 8px; height: 8px; border-radius: 50%;
@@ -69,12 +70,28 @@ h2 {
   50% { opacity: 0.4; }
 }
 
+/* === Badge (header mode / regime indicators) === */
+.badge {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.badge.paper          { background: rgba(88,166,255,0.15);  color: var(--blue); }
+.badge.live           { background: rgba(63,185,80,0.15);   color: var(--green); }
+.badge.halted         { background: rgba(248,81,73,0.15);   color: var(--red); }
+.badge.trending-up    { background: rgba(63,185,80,0.15);   color: var(--green); }
+.badge.trending-down  { background: rgba(248,81,73,0.15);   color: var(--red); }
+.badge.ranging        { background: rgba(210,153,34,0.15);  color: var(--yellow); }
+.badge.choppy         { background: rgba(139,148,158,0.15); color: var(--muted); }
+
+/* === Tabs === */
 .tabs {
   display: flex;
   gap: 4px;
   margin-bottom: 16px;
   border-bottom: 1px solid var(--border);
-  padding-bottom: 0;
 }
 
 .tab {
@@ -88,13 +105,63 @@ h2 {
   border-bottom: 2px solid transparent;
   transition: all 0.2s;
 }
-
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
+/* === Card === */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.card-header h2 { margin: 0; }
+.card-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.card-meta strong { color: var(--text); font-weight: 600; }
+
+/* === Status banner (used at top of any tab) === */
+.status-banner {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 18px; border-radius: 6px;
+  background: rgba(63,185,80,0.08); border: 1px solid rgba(63,185,80,0.3);
+  margin-bottom: 16px;
+}
+.status-banner.halted  { background: rgba(248,81,73,0.10);  border-color: rgba(248,81,73,0.4); }
+.status-banner.warning { background: rgba(210,153,34,0.10); border-color: rgba(210,153,34,0.4); }
+.status-banner-icon {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--green); box-shadow: 0 0 8px rgba(63,185,80,0.6);
+  flex-shrink: 0;
+}
+.status-banner.halted  .status-banner-icon { background: var(--red);    box-shadow: 0 0 8px rgba(248,81,73,0.6); }
+.status-banner.warning .status-banner-icon { background: var(--yellow); box-shadow: 0 0 8px rgba(210,153,34,0.6); }
+.status-banner-text { font-weight: 600; font-size: 14px; }
+.status-banner-sub  { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; }
+
+/* === Stat tile === */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -109,20 +176,22 @@ h2 {
   padding: 14px;
   text-align: center;
 }
-
 .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 4px; }
-.stat-value { font-size: 20px; font-weight: 700; }
-.stat-value.green { color: var(--green); }
-.stat-value.red { color: var(--red); }
-
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 16px;
-  margin-bottom: 12px;
+.stat-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-value.green  { color: var(--green); }
+.stat-value.red    { color: var(--red); }
+.stat-value.yellow { color: var(--yellow); }
+.stat-sub {
+  font-size: 11px; color: var(--muted);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  min-height: 14px;
 }
+.stat-sub.green  { color: var(--green); }
+.stat-sub.red    { color: var(--red); }
+.stat-sub.yellow { color: var(--yellow); }
 
+/* === Portfolio heat bar (Overview) === */
 .heat-bar {
   width: 100%;
   height: 20px;
@@ -130,7 +199,6 @@ h2 {
   border-radius: 10px;
   overflow: hidden;
 }
-
 .heat-fill {
   height: 100%;
   border-radius: 10px;
@@ -143,7 +211,6 @@ h2 {
   color: var(--bg);
   min-width: 30px;
 }
-
 .heat-labels {
   display: flex;
   justify-content: space-between;
@@ -152,6 +219,7 @@ h2 {
   margin-top: 4px;
 }
 
+/* === Circuit breakers (Overview) === */
 .breakers { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
 
 .breaker {
@@ -160,98 +228,71 @@ h2 {
   border: 1px solid var(--border);
   background: var(--bg);
 }
-
-.breaker-label { font-size: 10px; color: var(--muted); text-transform: uppercase; }
-.breaker-value { font-size: 14px; font-weight: 700; margin-top: 2px; }
+.breaker-label  { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.breaker-value  { font-size: 14px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; color: var(--red); }
 .breaker-status { font-size: 10px; margin-top: 2px; }
+.breaker-status.ok      { color: var(--green); }
+.breaker-status.tripped { color: var(--red); }
 .breaker.tripped { border-color: var(--red); background: rgba(248,81,73,0.08); }
 
-table {
+/* === Data table (canonical) === */
+.data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 12px;
 }
-
-th {
+.data-table th {
   text-align: left;
+  font-weight: 600;
   color: var(--muted);
-  padding: 6px 8px;
+  padding: 8px;
   border-bottom: 1px solid var(--border);
-  font-weight: 500;
   font-size: 10px;
   text-transform: uppercase;
+  letter-spacing: 1px;
 }
-
-td {
+.data-table td {
   padding: 8px;
   border-bottom: 1px solid var(--border);
 }
+.data-table tr:hover { background: rgba(255,255,255,0.02); }
+.data-table td.num,
+.data-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table tr:last-child td { border-bottom: none; }
 
-.empty { color: var(--muted); text-align: center; padding: 30px; font-size: 12px; }
-
-/* v3 grid monitor — compact table for fills + active orders */
-table.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-table.data-table th { text-align: left; font-weight: 600; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
-table.data-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
-table.data-table tr:hover { background: rgba(255,255,255,0.02); }
-table.data-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
-table.data-table th.num { text-align: right; }
-.green { color: var(--green); }
-.red { color: var(--red); }
+/* Utility text-color helpers for inline cell coloring */
+.green  { color: var(--green); }
+.red    { color: var(--red); }
 .yellow { color: var(--yellow); }
+.muted  { color: var(--muted); }
 
-/* v3 grid monitor — status banner */
-.grid-banner {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 18px; border-radius: 6px;
-  background: rgba(63,185,80,0.08); border: 1px solid rgba(63,185,80,0.3);
-  margin-bottom: 16px;
+/* === Empty state (consistent across all tabs) === */
+.empty-state {
+  color: var(--muted);
+  text-align: center;
+  padding: 30px 24px;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.01);
 }
-.grid-banner.halted { background: rgba(248,81,73,0.10); border-color: rgba(248,81,73,0.4); }
-.grid-banner.warning { background: rgba(210,153,34,0.10); border-color: rgba(210,153,34,0.4); }
-.grid-banner-icon {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--green); box-shadow: 0 0 8px rgba(63,185,80,0.6);
-}
-.grid-banner.halted .grid-banner-icon { background: var(--red); box-shadow: 0 0 8px rgba(248,81,73,0.6); }
-.grid-banner.warning .grid-banner-icon { background: var(--yellow); box-shadow: 0 0 8px rgba(210,153,34,0.6); }
-.grid-banner-text { font-weight: 600; font-size: 14px; }
-.grid-banner-sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+.empty-state strong { color: var(--text); }
 
-/* stat sub-text (smaller line below the big stat value) */
-.stat-sub {
-  font-size: 11px; color: var(--muted);
-  margin-top: 2px;
-  font-variant-numeric: tabular-nums;
-  min-height: 14px;
-}
-
-/* Card header with title + right-aligned meta */
-.card-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
-.card-header h2 { margin: 0; }
-.card-meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
-
-/* Grid SVG legend */
+/* === Grid SVG legend === */
 .grid-legend { display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 4px 0; font-size: 11px; color: var(--muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
-.legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-.legend-dot.buy { background: var(--green); }
-.legend-dot.sell { background: var(--red); }
+.legend-dot  { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.legend-dot.buy   { background: var(--green); }
+.legend-dot.sell  { background: var(--red); }
 .legend-dot.price { background: var(--yellow); }
 .legend-dot.floor { background: var(--blue); }
 
-/* Placeholder card for empty P&L chart */
-.pnl-placeholder {
-  display: flex; align-items: center; justify-content: center;
-  height: 200px; color: var(--muted); font-size: 13px;
-  border: 1px dashed var(--border); border-radius: 4px;
-  background: rgba(255,255,255,0.01);
-  text-align: center; padding: 0 24px;
-}
+#g-range-svg { margin-top: 12px; display: block; }
 
-/* Position card for v3 grid-managed positions on the Positions tab */
+/* === Position card (grid-managed positions on Positions tab) === */
 .position-card {
-  background: var(--card);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 16px;
@@ -270,29 +311,21 @@ table.data-table th.num { text-align: right; }
 }
 .position-card-footer a { color: var(--accent); text-decoration: none; margin-left: 8px; }
 .position-card-footer a:hover { text-decoration: underline; }
-.position-grid-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
-}
-.pg-stat { padding: 6px 0; }
-.pg-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
-.pg-value { font-size: 18px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
-.pg-value.green { color: var(--green); }
-.pg-value.red { color: var(--red); }
-.pg-sub { font-size: 11px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
-.pg-sub.green { color: var(--green); }
-.pg-sub.red { color: var(--red); }
 
-/* Pills used in the position card header */
+/* === Pills (inline contextual labels) === */
 .pill {
   display: inline-block;
   padding: 3px 10px; border-radius: 999px;
   font-size: 10px; font-weight: 700; text-transform: uppercase;
   letter-spacing: 0.5px; margin-right: 6px;
 }
-.pill-muted { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+.pill-muted { background: var(--bg);                color: var(--muted); border: 1px solid var(--border); }
+.pill-long  { background: rgba(63,185,80,0.18);     color: var(--green); }
+.pill-short { background: rgba(248,81,73,0.18);     color: var(--red); }
+.pill-buy   { background: rgba(63,185,80,0.18);     color: var(--green); }
+.pill-sell  { background: rgba(248,81,73,0.18);     color: var(--red); }
 
+/* === Log filters + view (Logs tab) === */
 .log-filters { display: flex; gap: 8px; margin-bottom: 10px; }
 .log-filters select {
   padding: 6px 10px;
@@ -312,13 +345,14 @@ table.data-table th.num { text-align: right; }
 }
 
 .log-entry { padding: 3px 0; border-bottom: 1px solid var(--border); }
-.log-entry .time { color: var(--muted); }
-.log-entry .level-info { color: var(--blue); }
-.log-entry .level-warn { color: var(--yellow); }
+.log-entry .time        { color: var(--muted); }
+.log-entry .level-info  { color: var(--blue); }
+.log-entry .level-warn  { color: var(--yellow); }
 .log-entry .level-error { color: var(--red); }
-.log-entry .comp { color: var(--accent); }
+.log-entry .comp        { color: var(--accent); }
 
-.controls { display: flex; gap: 10px; }
+/* === Buttons === */
+.controls { display: flex; gap: 10px; flex-wrap: wrap; }
 
 .btn {
   padding: 8px 16px;
@@ -328,24 +362,16 @@ table.data-table th.num { text-align: right; }
   font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
+  background: transparent;
+  color: var(--text);
 }
-
-.btn-warn { background: rgba(210,153,34,0.15); border-color: var(--yellow); color: var(--yellow); }
-.btn-ok { background: rgba(63,185,80,0.15); border-color: var(--green); color: var(--green); }
-.btn-danger { background: rgba(248,81,73,0.15); border-color: var(--red); color: var(--red); }
-
 .btn:hover { opacity: 0.8; }
+.btn-primary { background: rgba(240,136,62,0.15); border-color: var(--accent); color: var(--accent); }
+.btn-ok      { background: rgba(63,185,80,0.15);  border-color: var(--green);  color: var(--green); }
+.btn-warn    { background: rgba(210,153,34,0.15); border-color: var(--yellow); color: var(--yellow); }
+.btn-danger  { background: rgba(248,81,73,0.15);  border-color: var(--red);    color: var(--red); }
 
-.history-stats {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 12px;
-  font-size: 12px;
-}
-
-.history-stats span { color: var(--muted); }
-.history-stats strong { color: var(--text); }
-
+/* === Config (key/value list) === */
 .config-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -361,4 +387,17 @@ table.data-table th.num { text-align: right; }
 }
 
 .config-key { color: var(--muted); }
-.config-val { font-weight: 600; }
+.config-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* === Sub-section title (rare; used inline inside a card body) === */
+.subsection-title {
+  margin-top: 20px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+  font-weight: 600;
+}

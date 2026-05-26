@@ -30,33 +30,78 @@
 
   <!-- Overview Tab -->
   <div class="tab-content active" id="tab-overview">
+    <div id="o-status-banner" class="status-banner healthy">
+      <span class="status-banner-icon"></span>
+      <span class="status-banner-text" id="o-status-text">Loading…</span>
+      <span class="status-banner-sub" id="o-status-sub"></span>
+    </div>
+
     <div class="stats-grid">
-      <div class="stat"><div class="stat-label">Equity</div><div class="stat-value" id="s-equity">--</div></div>
-      <div class="stat"><div class="stat-label">Daily P&L</div><div class="stat-value" id="s-daily">--</div></div>
-      <div class="stat"><div class="stat-label">Total P&L</div><div class="stat-value" id="s-total">--</div></div>
-      <div class="stat"><div class="stat-label">Open Positions</div><div class="stat-value" id="s-open">0</div></div>
-      <div class="stat"><div class="stat-label">Win Rate</div><div class="stat-value" id="s-winrate">--</div></div>
-      <div class="stat"><div class="stat-label">Drawdown</div><div class="stat-value" id="s-dd">--</div></div>
+      <div class="stat">
+        <div class="stat-label">Equity</div>
+        <div class="stat-value" id="s-equity">--</div>
+        <div class="stat-sub" id="s-equity-sub">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Daily P&amp;L</div>
+        <div class="stat-value" id="s-daily">--</div>
+        <div class="stat-sub" id="s-daily-sub">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Total P&amp;L</div>
+        <div class="stat-value" id="s-total">--</div>
+        <div class="stat-sub" id="s-total-sub">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Open Positions</div>
+        <div class="stat-value" id="s-open">0</div>
+        <div class="stat-sub" id="s-open-sub">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-value" id="s-winrate">--</div>
+        <div class="stat-sub" id="s-winrate-sub">&nbsp;</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Drawdown</div>
+        <div class="stat-value" id="s-dd">--</div>
+        <div class="stat-sub" id="s-dd-sub">&nbsp;</div>
+      </div>
     </div>
 
     <div class="card">
-      <h2>Portfolio Heat</h2>
+      <div class="card-header">
+        <h2>Portfolio Heat</h2>
+        <div class="card-meta">Max 5% before alerts</div>
+      </div>
       <div class="heat-bar"><div class="heat-fill" id="heat-fill"></div></div>
       <div class="heat-labels"><span>0% Safe</span><span>3%</span><span>5% Max</span></div>
     </div>
 
     <div class="card">
-      <h2>Circuit Breakers</h2>
+      <div class="card-header">
+        <h2>Circuit Breakers</h2>
+        <div class="card-meta" id="breakers-meta">--</div>
+      </div>
       <div class="breakers" id="breakers"></div>
     </div>
   </div>
 
   <!-- Positions Tab -->
   <div class="tab-content" id="tab-positions">
+    <div id="p-status-banner" class="status-banner healthy">
+      <span class="status-banner-icon"></span>
+      <span class="status-banner-text" id="p-status-text">Loading…</span>
+      <span class="status-banner-sub" id="p-status-sub"></span>
+    </div>
+
     <div class="card">
-      <h2>Open Positions</h2>
+      <div class="card-header">
+        <h2>Open Positions</h2>
+        <div class="card-meta" id="positions-meta">--</div>
+      </div>
       <div id="positions-content">
-        <p class="empty">No open positions</p>
+        <p class="empty-state">No open positions</p>
       </div>
     </div>
   </div>
@@ -64,10 +109,10 @@
   <!-- Grid Monitor Tab (v3) -->
   <div class="tab-content" id="tab-grid">
     <!-- Status banner (top of tab): healthy or halted -->
-    <div id="g-status-banner" class="grid-banner healthy">
-      <span class="grid-banner-icon"></span>
-      <span class="grid-banner-text" id="g-status-text">Loading…</span>
-      <span class="grid-banner-sub" id="g-status-sub"></span>
+    <div id="g-status-banner" class="status-banner healthy">
+      <span class="status-banner-icon"></span>
+      <span class="status-banner-text" id="g-status-text">Loading…</span>
+      <span class="status-banner-sub" id="g-status-sub"></span>
     </div>
 
     <!-- Headline stats: equity, inventory value, realized P&L, drawdown -->
@@ -110,8 +155,8 @@
         <h2>Grid Range</h2>
         <div class="card-meta" id="g-range-meta">--</div>
       </div>
-      <div id="g-range-info" class="empty">Waiting for first recenter…</div>
-      <svg id="g-range-svg" width="100%" height="320" style="margin-top:1em;display:block"></svg>
+      <div id="g-range-info" class="empty-state">Waiting for first recenter…</div>
+      <svg id="g-range-svg" width="100%" height="320"></svg>
       <div class="grid-legend">
         <span class="legend-item"><span class="legend-dot buy"></span> Buy limit</span>
         <span class="legend-item"><span class="legend-dot sell"></span> Sell limit</span>
@@ -127,7 +172,7 @@
         <div class="card-meta" id="g-orders-meta">--</div>
       </div>
       <div id="g-orders-content">
-        <p class="empty">No active orders</p>
+        <p class="empty-state">No active orders</p>
       </div>
     </div>
 
@@ -138,7 +183,7 @@
         <div class="card-meta" id="g-fills-meta">--</div>
       </div>
       <div id="g-fills-content">
-        <p class="empty">No fills yet</p>
+        <p class="empty-state">No fills yet</p>
       </div>
     </div>
 
@@ -148,17 +193,27 @@
         <h2>Daily P&amp;L</h2>
         <div class="card-meta" id="g-pnl-meta">Rollup fires at 00:05 UTC daily</div>
       </div>
-      <canvas id="g-pnl-chart" height="200"></canvas>
+      <div id="g-pnl-wrapper">
+        <canvas id="g-pnl-chart" height="200"></canvas>
+      </div>
     </div>
   </div>
 
   <!-- History Tab -->
   <div class="tab-content" id="tab-history">
+    <div id="h-status-banner" class="status-banner healthy">
+      <span class="status-banner-icon"></span>
+      <span class="status-banner-text" id="h-status-text">Loading…</span>
+      <span class="status-banner-sub" id="h-status-sub"></span>
+    </div>
+
     <div class="card">
-      <div class="history-stats" id="history-stats"></div>
-      <h2>Trade History</h2>
+      <div class="card-header">
+        <h2>Trade History</h2>
+        <div class="card-meta" id="history-stats">--</div>
+      </div>
       <div id="history-content">
-        <p class="empty">No trades yet</p>
+        <p class="empty-state">No trades yet</p>
       </div>
     </div>
   </div>
@@ -166,11 +221,17 @@
   <!-- Equity Tab -->
   <div class="tab-content" id="tab-equity">
     <div class="card">
-      <h2>Equity Curve</h2>
+      <div class="card-header">
+        <h2>Equity Curve</h2>
+        <div class="card-meta" id="equity-meta">--</div>
+      </div>
       <canvas id="equity-chart" height="300"></canvas>
     </div>
     <div class="card">
-      <h2>Drawdown</h2>
+      <div class="card-header">
+        <h2>Drawdown</h2>
+        <div class="card-meta" id="drawdown-meta">--</div>
+      </div>
       <canvas id="drawdown-chart" height="150"></canvas>
     </div>
   </div>
@@ -178,6 +239,10 @@
   <!-- Logs Tab -->
   <div class="tab-content" id="tab-logs">
     <div class="card">
+      <div class="card-header">
+        <h2>Logs</h2>
+        <div class="card-meta" id="logs-meta">--</div>
+      </div>
       <div class="log-filters">
         <select id="log-level"><option value="">All Levels</option><option value="info">Info</option><option value="warn">Warn</option><option value="error">Error</option></select>
         <select id="log-component"><option value="">All Components</option><option value="strategy">Strategy</option><option value="lifecycle">Lifecycle</option><option value="risk">Risk</option><option value="exchange">Exchange</option><option value="scheduler">Scheduler</option></select>
@@ -189,11 +254,17 @@
   <!-- Config Tab -->
   <div class="tab-content" id="tab-config">
     <div class="card">
-      <h2>Configuration</h2>
+      <div class="card-header">
+        <h2>Configuration</h2>
+        <div class="card-meta">Read-only · env-driven</div>
+      </div>
       <div id="config-content"></div>
     </div>
     <div class="card">
-      <h2>Controls</h2>
+      <div class="card-header">
+        <h2>Controls</h2>
+        <div class="card-meta">Manual overrides</div>
+      </div>
       <div class="controls">
         <button class="btn btn-warn" id="btn-halt" onclick="haltBot()">Halt Bot</button>
         <button class="btn btn-ok" id="btn-resume" onclick="resumeBot()">Resume Bot</button>

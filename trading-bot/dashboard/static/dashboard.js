@@ -45,6 +45,38 @@ async function api(path) {
   catch { return null; }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Status-banner helper — shared across Overview / Positions / Grid / History
+// ─────────────────────────────────────────────────────────────────────────
+function _setStatusBanner(prefix, overview, opts = {}) {
+  const banner = document.getElementById(prefix + '-status-banner');
+  const textEl = document.getElementById(prefix + '-status-text');
+  const subEl  = document.getElementById(prefix + '-status-sub');
+  if (!banner || !textEl || !subEl) return;
+
+  banner.classList.remove('healthy', 'halted', 'warning');
+
+  const halted = overview?.status === 'HALTED';
+  const dd = overview?.drawdown_pct ?? 0;
+  const heartbeatAge = overview?.last_heartbeat ? _humanAge(overview.last_heartbeat) : '–';
+
+  if (halted) {
+    banner.classList.add('halted');
+    textEl.textContent = `HALTED — ${overview?.halt_reason || 'unknown reason'}`;
+    subEl.textContent = 'Manual unhalt + 50d MA re-arm required';
+    return;
+  }
+  if (dd <= -25) {
+    banner.classList.add('warning');
+    textEl.textContent = `Drawdown ${dd.toFixed(1)}% — approaching CB threshold (-40%)`;
+    subEl.textContent = `Last heartbeat: ${heartbeatAge}`;
+    return;
+  }
+  banner.classList.add('healthy');
+  textEl.textContent = opts.text || `Bot HEALTHY · ${(overview?.status || 'PAPER').toUpperCase()} mode`;
+  subEl.textContent  = opts.sub  || `Last heartbeat ${heartbeatAge}`;
+}
+
 // Overview
 async function refreshOverview() {
   const d = await api('/api/overview');
@@ -61,6 +93,15 @@ async function refreshOverview() {
 
   document.getElementById('status-dot').style.background = d.status === 'HALTED' ? 'var(--red)' : 'var(--green)';
 
+  // Status banner (mirrors Grid tab banner)
+  const regime = regimeMap[d.regime] || d.regime || '--';
+  _setStatusBanner('o', d, {
+    text: d.status === 'HALTED'
+      ? `HALTED — ${d.halt_reason || 'unknown reason'}`
+      : `Bot HEALTHY · ${(d.status || 'PAPER').toUpperCase()} mode · regime ${regime}`,
+    sub: `Equity ${'$' + fmt(d.equity)} · last heartbeat ${d.last_heartbeat ? _humanAge(d.last_heartbeat) : '–'}`,
+  });
+
   document.getElementById('s-equity').textContent = '$' + fmt(d.equity);
   const dailyEl = document.getElementById('s-daily');
   dailyEl.textContent = pnlSign(d.daily_pnl) + '$' + fmt(Math.abs(d.daily_pnl));
@@ -74,10 +115,12 @@ async function refreshOverview() {
 
   const wr = d.stats?.win_rate;
   document.getElementById('s-winrate').textContent = wr != null ? fmt(wr, 1) + '%' : '--';
+  const wrSub = document.getElementById('s-winrate-sub');
+  if (wrSub) wrSub.textContent = d.stats?.total_trades != null ? `${d.stats.total_trades} trades` : ' ';
 
   const ddEl = document.getElementById('s-dd');
   ddEl.textContent = fmt(d.drawdown_pct, 1) + '%';
-  ddEl.className = 'stat-value ' + (d.drawdown_pct < -5 ? 'red' : '');
+  ddEl.className = 'stat-value ' + (d.drawdown_pct < -25 ? 'red' : d.drawdown_pct < -15 ? 'yellow' : '');
 
   // Heat bar
   const heat = Math.min(d.portfolio_heat, 8);
@@ -87,12 +130,18 @@ async function refreshOverview() {
   heatFill.style.background = d.portfolio_heat < 3 ? 'var(--green)' : d.portfolio_heat < 5 ? 'var(--yellow)' : 'var(--red)';
 
   // Circuit breakers
+  const breakers = d.circuit_breakers || [];
+  const trippedCount = breakers.filter(cb => cb.tripped).length;
+  const brkMeta = document.getElementById('breakers-meta');
+  if (brkMeta) brkMeta.textContent = breakers.length
+    ? `${breakers.length} configured · ${trippedCount} tripped`
+    : 'none configured';
   const brkEl = document.getElementById('breakers');
-  brkEl.innerHTML = (d.circuit_breakers || []).map(cb => `
+  brkEl.innerHTML = breakers.map(cb => `
     <div class="breaker ${cb.tripped ? 'tripped' : ''}">
       <div class="breaker-label">${escapeHtml(cb.period)}</div>
-      <div class="breaker-value" style="color:var(--red)">${escapeHtml(cb.threshold)}%</div>
-      <div class="breaker-status" style="color:${cb.tripped ? 'var(--red)' : 'var(--green)'}">
+      <div class="breaker-value">${escapeHtml(cb.threshold)}%</div>
+      <div class="breaker-status ${cb.tripped ? 'tripped' : 'ok'}">
         ${cb.tripped ? 'TRIPPED' : 'OK (' + fmt(cb.current, 1) + '%)'}
       </div>
     </div>
@@ -101,25 +150,42 @@ async function refreshOverview() {
 
 // Positions
 async function refreshPositions() {
-  const d = await api('/api/positions');
+  const [d, overview] = await Promise.all([api('/api/positions'), api('/api/overview')]);
   if (!d) return;
   const el = document.getElementById('positions-content');
+  const positions = d.positions || [];
+  const gridPositions = positions.filter(p => p.managed_by === 'grid');
+  const v1Trades      = positions.filter(p => p.managed_by !== 'grid');
 
-  if (!d.positions?.length) {
-    el.innerHTML = '<p class="empty">No open positions</p>';
-    return;
+  // Card meta
+  const meta = document.getElementById('positions-meta');
+  if (meta) {
+    if (positions.length === 0) meta.textContent = '0 positions';
+    else meta.innerHTML = `<span><strong>${positions.length}</strong> open</span>` +
+      (gridPositions.length ? `<span><strong>${gridPositions.length}</strong> grid</span>` : '') +
+      (v1Trades.length ? `<span><strong>${v1Trades.length}</strong> v1</span>` : '');
   }
 
-  // Separate v3 grid-managed positions from v1 trade records. Grid positions
-  // get a dedicated detail card; v1 trades use the existing tabular view.
-  const gridPositions = d.positions.filter(p => p.managed_by === 'grid');
-  const v1Trades      = d.positions.filter(p => p.managed_by !== 'grid');
+  // Status banner (mirrors Overview)
+  _setStatusBanner('p', overview, {
+    text: overview?.status === 'HALTED'
+      ? `HALTED — ${overview.halt_reason || 'unknown reason'}`
+      : `Bot HEALTHY · ${(overview?.status || 'PAPER').toUpperCase()} mode · ${positions.length} open position${positions.length === 1 ? '' : 's'}`,
+    sub: gridPositions.length
+      ? `Grid prebuy ${gridPositions[0]?.prebuy_status || '–'} · last heartbeat ${overview?.last_heartbeat ? _humanAge(overview.last_heartbeat) : '–'}`
+      : `Last heartbeat ${overview?.last_heartbeat ? _humanAge(overview.last_heartbeat) : '–'}`,
+  });
+
+  if (positions.length === 0) {
+    el.innerHTML = '<p class="empty-state">No open positions. Grid populates on the first tick after prebuy; v1 strategy entries appear when the signal fires.</p>';
+    return;
+  }
 
   const parts = [];
 
   for (const p of gridPositions) {
     const dir = p.direction.toUpperCase();
-    const dirColor = p.direction === 'long' ? 'var(--green)' : 'var(--red)';
+    const dirPillClass = p.direction === 'long' ? 'pill-long' : 'pill-short';
     const sizeUsd = p.size_btc * p.current_price;
     const pctChange = p.entry_price ? ((p.current_price - p.entry_price) / p.entry_price * 100) : 0;
     const aboveFloor = p.inventory_above_floor_qty || 0;
@@ -128,7 +194,7 @@ async function refreshPositions() {
       <div class="position-card grid-managed">
         <div class="position-card-header">
           <div>
-            <span class="pill" style="background:${dirColor}; color:#000">${escapeHtml(dir)}</span>
+            <span class="pill ${dirPillClass}">${escapeHtml(dir)}</span>
             <span class="pill pill-muted">grid-managed</span>
             <span class="pill pill-muted">${escapeHtml(p.prebuy_status || 'unknown status')}</span>
           </div>
@@ -136,36 +202,36 @@ async function refreshPositions() {
             Entered ${p.entry_at ? new Date(p.entry_at).toLocaleString() : '–'}
           </div>
         </div>
-        <div class="position-grid-stats">
-          <div class="pg-stat">
-            <div class="pg-label">Size</div>
-            <div class="pg-value">${fmt(p.size_btc, 4)} BTC</div>
-            <div class="pg-sub">≈ $${fmt(sizeUsd, 0)}</div>
+        <div class="stats-grid">
+          <div class="stat">
+            <div class="stat-label">Size</div>
+            <div class="stat-value">${fmt(p.size_btc, 4)}</div>
+            <div class="stat-sub">${fmt(p.size_btc, 4)} BTC ≈ $${fmt(sizeUsd, 0)}</div>
           </div>
-          <div class="pg-stat">
-            <div class="pg-label">Avg Cost</div>
-            <div class="pg-value">$${fmt(p.entry_price, 0)}</div>
-            <div class="pg-sub">Mark: $${fmt(p.current_price, 0)}</div>
+          <div class="stat">
+            <div class="stat-label">Avg Cost</div>
+            <div class="stat-value">$${fmt(p.entry_price, 0)}</div>
+            <div class="stat-sub">Mark: $${fmt(p.current_price, 0)}</div>
           </div>
-          <div class="pg-stat">
-            <div class="pg-label">Unrealized P&L</div>
-            <div class="pg-value ${pnlClass(p.unrealized_pnl)}">${pnlSign(p.unrealized_pnl)}$${fmt(Math.abs(p.unrealized_pnl))}</div>
-            <div class="pg-sub ${pnlClass(pctChange)}">${pnlSign(pctChange)}${fmt(pctChange, 2)}%</div>
+          <div class="stat">
+            <div class="stat-label">Unrealized P&amp;L</div>
+            <div class="stat-value ${pnlClass(p.unrealized_pnl)}">${pnlSign(p.unrealized_pnl)}$${fmt(Math.abs(p.unrealized_pnl))}</div>
+            <div class="stat-sub ${pnlClass(pctChange)}">${pnlSign(pctChange)}${fmt(pctChange, 2)}%</div>
           </div>
-          <div class="pg-stat">
-            <div class="pg-label">Inventory Floor</div>
-            <div class="pg-value">${fmt(p.inventory_floor_qty || 0, 4)}</div>
-            <div class="pg-sub">+${fmt(aboveFloor, 4)} above</div>
+          <div class="stat">
+            <div class="stat-label">Inventory Floor</div>
+            <div class="stat-value">${fmt(p.inventory_floor_qty || 0, 4)}</div>
+            <div class="stat-sub">+${fmt(aboveFloor, 4)} above</div>
           </div>
-          <div class="pg-stat">
-            <div class="pg-label">Realized P&L</div>
-            <div class="pg-value ${pnlClass(p.realized_pnl_total)}">${pnlSign(p.realized_pnl_total)}$${fmt(Math.abs(p.realized_pnl_total))}</div>
-            <div class="pg-sub">Fees: $${fmt(p.fees_paid_total)}</div>
+          <div class="stat">
+            <div class="stat-label">Realized P&amp;L</div>
+            <div class="stat-value ${pnlClass(p.realized_pnl_total)}">${pnlSign(p.realized_pnl_total)}$${fmt(Math.abs(p.realized_pnl_total))}</div>
+            <div class="stat-sub">Fees: $${fmt(p.fees_paid_total)}</div>
           </div>
-          <div class="pg-stat">
-            <div class="pg-label">Fills</div>
-            <div class="pg-value">${totalFills}</div>
-            <div class="pg-sub">${p.n_buy_fills || 0} buys · ${p.n_sell_fills || 0} sells</div>
+          <div class="stat">
+            <div class="stat-label">Fills</div>
+            <div class="stat-value">${totalFills}</div>
+            <div class="stat-sub">${p.n_buy_fills || 0} buys · ${p.n_sell_fills || 0} sells</div>
           </div>
         </div>
         <div class="position-card-footer">
@@ -177,19 +243,19 @@ async function refreshPositions() {
   }
 
   if (v1Trades.length > 0) {
-    parts.push(`<h3 style="margin-top:20px;font-size:13px;color:var(--muted)">Strategy trades (v1)</h3>`);
-    parts.push(`<table><thead><tr>
-      <th>Dir</th><th>Strategy</th><th>Entry</th><th>Current</th><th>Stop</th><th>Target</th><th>Size</th><th>P&L</th><th>R</th>
+    parts.push('<div class="subsection-title">Strategy trades (v1)</div>');
+    parts.push(`<table class="data-table"><thead><tr>
+      <th>Dir</th><th>Strategy</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">Size</th><th class="num">P&amp;L</th><th class="num">R</th>
     </tr></thead><tbody>${v1Trades.map(p => `<tr>
-      <td style="color:${p.direction === 'long' ? 'var(--green)' : 'var(--red)'}; font-weight:700">${escapeHtml(p.direction.toUpperCase())}</td>
+      <td class="${p.direction === 'long' ? 'green' : 'red'}"><strong>${escapeHtml(p.direction.toUpperCase())}</strong></td>
       <td>${escapeHtml(p.strategy)}</td>
-      <td>$${fmt(p.entry_price)}</td>
-      <td>$${fmt(p.current_price)}</td>
-      <td>$${fmt(p.stop_price)}</td>
-      <td>$${fmt(p.target_price)}</td>
-      <td>${fmt(p.size_btc, 4)}</td>
-      <td style="color:${pnlClass(p.unrealized_pnl)}">${pnlSign(p.unrealized_pnl)}$${fmt(Math.abs(p.unrealized_pnl))}</td>
-      <td style="color:${pnlClass(p.r_multiple)}">${pnlSign(p.r_multiple)}${fmt(p.r_multiple, 1)}R</td>
+      <td class="num">$${fmt(p.entry_price)}</td>
+      <td class="num">$${fmt(p.current_price)}</td>
+      <td class="num">$${fmt(p.stop_price)}</td>
+      <td class="num">$${fmt(p.target_price)}</td>
+      <td class="num">${fmt(p.size_btc, 4)}</td>
+      <td class="num ${pnlClass(p.unrealized_pnl)}">${pnlSign(p.unrealized_pnl)}$${fmt(Math.abs(p.unrealized_pnl))}</td>
+      <td class="num ${pnlClass(p.r_multiple)}">${pnlSign(p.r_multiple)}${fmt(p.r_multiple, 1)}R</td>
     </tr>`).join('')}</tbody></table>`);
   }
 
@@ -198,40 +264,54 @@ async function refreshPositions() {
 
 // Trade History
 async function refreshHistory() {
-  const d = await api('/api/trades');
+  const [d, overview] = await Promise.all([api('/api/trades'), api('/api/overview')]);
   if (!d) return;
   const el = document.getElementById('history-content');
   const statsEl = document.getElementById('history-stats');
 
-  if (d.stats) {
+  // Card meta — five summary chips
+  if (d.stats && statsEl) {
     statsEl.innerHTML = `
       <span>Trades: <strong>${d.stats.total_trades || 0}</strong></span>
       <span>Win Rate: <strong>${fmt(d.stats.win_rate || 0, 1)}%</strong></span>
       <span>Avg R: <strong>${fmt(d.stats.avg_r || 0, 2)}</strong></span>
       <span>Expectancy: <strong>$${fmt(d.stats.expectancy || 0)}</strong></span>
-      <span>Profit Factor: <strong>${fmt(d.stats.profit_factor || 0, 2)}</strong></span>
+      <span>PF: <strong>${fmt(d.stats.profit_factor || 0, 2)}</strong></span>
     `;
+  } else if (statsEl) {
+    statsEl.textContent = '0 trades';
   }
 
+  // Status banner
+  const wr = d.stats?.win_rate;
+  _setStatusBanner('h', overview, {
+    text: overview?.status === 'HALTED'
+      ? `HALTED — ${overview.halt_reason || 'unknown reason'}`
+      : `Bot HEALTHY · ${(d.stats?.total_trades || 0)} lifetime trade${d.stats?.total_trades === 1 ? '' : 's'}`,
+    sub: wr != null
+      ? `Win rate ${fmt(wr, 1)}% · expectancy $${fmt(d.stats?.expectancy || 0)}`
+      : 'No closed trades yet',
+  });
+
   if (!d.trades?.length) {
-    el.innerHTML = '<p class="empty">No trades yet</p>';
+    el.innerHTML = '<p class="empty-state">No trades yet. Trade history fills as v1 strategy signals close out; grid fills live in the Grid tab.</p>';
     return;
   }
 
-  el.innerHTML = `<table><thead><tr>
-    <th>Date</th><th>Strategy</th><th>Dir</th><th>Status</th><th>Entry</th><th>Exit</th><th>P&L</th><th>R</th>
+  el.innerHTML = `<table class="data-table"><thead><tr>
+    <th>Date</th><th>Strategy</th><th>Dir</th><th>Status</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">P&amp;L</th><th class="num">R</th>
   </tr></thead><tbody>${d.trades.map(t => {
     const date = t.signal_at ? new Date(t.signal_at).toLocaleDateString() : '--';
     const pnl = t.net_pnl;
     return `<tr>
       <td>${escapeHtml(date)}</td>
       <td>${escapeHtml(t.strategy || '--')}</td>
-      <td style="color:${t.direction === 'long' ? 'var(--green)' : 'var(--red)'}; font-weight:700">${escapeHtml((t.direction || '--').toUpperCase())}</td>
+      <td class="${t.direction === 'long' ? 'green' : 'red'}"><strong>${escapeHtml((t.direction || '--').toUpperCase())}</strong></td>
       <td>${escapeHtml(t.status)}</td>
-      <td>${t.entry_price ? '$' + fmt(t.entry_price) : '--'}</td>
-      <td>${t.exit_price ? '$' + fmt(t.exit_price) : '--'}</td>
-      <td style="color:${pnlClass(pnl || 0)}">${pnl != null ? pnlSign(pnl) + '$' + fmt(Math.abs(pnl)) : '--'}</td>
-      <td>${t.r_multiple != null ? fmt(t.r_multiple, 1) + 'R' : '--'}</td>
+      <td class="num">${t.entry_price ? '$' + fmt(t.entry_price) : '--'}</td>
+      <td class="num">${t.exit_price ? '$' + fmt(t.exit_price) : '--'}</td>
+      <td class="num ${pnlClass(pnl || 0)}">${pnl != null ? pnlSign(pnl) + '$' + fmt(Math.abs(pnl)) : '--'}</td>
+      <td class="num">${t.r_multiple != null ? fmt(t.r_multiple, 1) + 'R' : '--'}</td>
     </tr>`;
   }).join('')}</tbody></table>`;
 }
@@ -239,11 +319,23 @@ async function refreshHistory() {
 // Equity Curve
 async function refreshEquity() {
   const d = await api('/api/equity');
-  if (!d?.points?.length) return;
+  const eqMeta = document.getElementById('equity-meta');
+  const ddMeta = document.getElementById('drawdown-meta');
+  if (!d?.points?.length) {
+    if (eqMeta) eqMeta.textContent = 'No data yet';
+    if (ddMeta) ddMeta.textContent = 'No data yet';
+    return;
+  }
 
   const labels = d.points.map(p => new Date(p.timestamp).toLocaleString());
   const equities = d.points.map(p => p.equity);
   const drawdowns = d.points.map(p => p.drawdown);
+  const lastDD = drawdowns[drawdowns.length - 1] || 0;
+  const minDD = Math.min(...drawdowns);
+  const last = d.points[d.points.length - 1];
+
+  if (eqMeta) eqMeta.innerHTML = `<span><strong>${d.points.length}</strong> snapshots</span><span>Last: <strong>$${fmt(last.equity)}</strong></span>`;
+  if (ddMeta) ddMeta.innerHTML = `<span>Current: <strong>${fmt(lastDD, 1)}%</strong></span><span>Worst: <strong>${fmt(minDD, 1)}%</strong></span>`;
 
   if (equityChart) equityChart.destroy();
   equityChart = new Chart(document.getElementById('equity-chart'), {
@@ -262,17 +354,32 @@ async function refreshEquity() {
 
 // Logs
 async function refreshLogs() {
-  const level = document.getElementById('log-level').value;
+  const levelSel = document.getElementById('log-level').value;
   const comp = document.getElementById('log-component').value;
   let url = '/api/logs?limit=100';
-  if (level) url += '&level=' + level;
+  if (levelSel) url += '&level=' + levelSel;
   if (comp) url += '&component=' + comp;
 
   const d = await api(url);
   if (!d) return;
   const el = document.getElementById('log-view');
+  const meta = document.getElementById('logs-meta');
+  const logs = d.logs || [];
 
-  el.innerHTML = (d.logs || []).map(l => {
+  if (meta) {
+    const filters = [];
+    if (levelSel) filters.push(`level=${levelSel}`);
+    if (comp) filters.push(`comp=${comp}`);
+    meta.innerHTML = `<span><strong>${logs.length}</strong> shown</span>` +
+      (filters.length ? `<span class="muted">filters: ${filters.join(' · ')}</span>` : '<span class="muted">no filters</span>');
+  }
+
+  if (logs.length === 0) {
+    el.innerHTML = '<p class="empty-state">No log entries match the current filters.</p>';
+    return;
+  }
+
+  el.innerHTML = logs.map(l => {
     const time = new Date(l.created_at).toLocaleTimeString();
     // Escape level/component/message: these may include upstream error text
     // (e.g. Coinbase API error bodies) that could contain HTML or scripts.
@@ -434,16 +541,21 @@ function _renderGridStatCards(state, overview) {
 }
 
 function _renderGridRangeCard(state) {
+  const info = document.getElementById('g-range-info');
   const lo = state.range_low, hi = state.range_high;
   if (lo == null || hi == null) {
-    document.getElementById('g-range-info').textContent = 'Range not yet computed';
+    info.className = 'empty-state';
+    info.textContent = 'Range not yet computed. Grid will populate after the first recenter (~30s after boot).';
     document.getElementById('g-range-meta').textContent = '';
     return;
   }
+  info.className = ''; // remove .empty-state styling when we have data
+  info.style.fontSize = '13px';
+  info.style.padding = '8px 0';
   const recentered = state.last_recenter_at ? _humanAge(state.last_recenter_at) : 'never';
-  document.getElementById('g-range-info').innerHTML =
+  info.innerHTML =
     `<strong>${_fmtMoney(lo, 0)}</strong> – <strong>${_fmtMoney(hi, 0)}</strong>  ` +
-    `<span style="color:var(--muted)">· ${state.num_levels} levels · ` +
+    `<span class="muted">· ${state.num_levels} levels · ` +
     `step ≈ ${_fmtMoney((hi - lo) / (state.num_levels - 1), 0)}</span>`;
   document.getElementById('g-range-meta').textContent = `Recentered ${recentered}`;
   _renderGridRangeSvg(state);
@@ -543,7 +655,7 @@ function _renderGridActiveOrders(state) {
   meta.textContent = `${orders.length} open · ${orders.filter(o => o.side==='buy').length} buy / ${orders.filter(o => o.side==='sell').length} sell`;
   if (orders.length === 0) {
     document.getElementById('g-orders-content').innerHTML =
-      `<p class="empty">No active orders yet. Grid populates ~30s after recenter; sells require inventory above the prebuy floor.</p>`;
+      `<p class="empty-state">No active orders yet. Grid populates ~30s after recenter; sells require inventory above the prebuy floor.</p>`;
     return;
   }
   // Sort by distance from current price (nearest first)
@@ -581,7 +693,7 @@ function _renderGridRecentFills(fillsResp) {
     : 'No fills yet';
   if (fills.length === 0) {
     document.getElementById('g-fills-content').innerHTML =
-      `<p class="empty">No fills yet. In typical BTC volatility expect 5–15 fills/day.</p>`;
+      `<p class="empty-state">No fills yet. In typical BTC volatility expect 5–15 fills/day.</p>`;
     return;
   }
   const rows = fills.map(f => `<tr>
@@ -603,16 +715,16 @@ async function _renderGridPnlChart() {
   const d = await api('/api/grid/metrics?period=30d');
   const chartEl = document.getElementById('g-pnl-chart');
   const meta = document.getElementById('g-pnl-meta');
-  const wrapper = chartEl?.parentElement;
+  const wrapper = document.getElementById('g-pnl-wrapper') || chartEl?.parentElement;
   if (!chartEl || !wrapper) return;
   const metrics = (d?.metrics || []).slice().reverse();
 
   if (metrics.length === 0) {
     chartEl.style.display = 'none';
-    let placeholder = wrapper.querySelector('.pnl-placeholder');
+    let placeholder = wrapper.querySelector('.empty-state');
     if (!placeholder) {
       placeholder = document.createElement('div');
-      placeholder.className = 'pnl-placeholder';
+      placeholder.className = 'empty-state';
       wrapper.appendChild(placeholder);
     }
     placeholder.textContent = 'No daily rollups yet. The first daily rollup fires at 00:05 UTC; this chart will fill in once data accumulates over several days.';
@@ -621,7 +733,7 @@ async function _renderGridPnlChart() {
     return;
   }
 
-  const placeholder = wrapper.querySelector('.pnl-placeholder');
+  const placeholder = wrapper.querySelector('.empty-state');
   if (placeholder) placeholder.remove();
   chartEl.style.display = '';
 
