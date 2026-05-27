@@ -320,6 +320,22 @@ class GridOrderManager:
             if result is None:
                 continue
             if not result.filled:
+                # AUDIT-FIX A3: if the exchange moved this order to a
+                # non-FILLED terminal state (CANCELLED / EXPIRED / FAILED),
+                # reconcile the DB row instead of polling it forever.
+                # Without this, every Coinbase-side cancel (user UI
+                # cancel, exchange risk-engine cancel, listing change,
+                # post-listing-event expire) produces a permanent orphan
+                # in tb3_active_orders.
+                terminal = getattr(result, "terminal_status", None)
+                if terminal:
+                    await self.repo.mark_order_cancelled(o.exchange_order_id)
+                    logger.warning(
+                        "poll_terminal_status_marked_cancelled",
+                        order_id=o.exchange_order_id,
+                        terminal_status=terminal,
+                        side=o.side, level=o.level_index,
+                    )
                 continue
 
             # FILLED — apply

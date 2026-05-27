@@ -221,6 +221,15 @@ class FakeExchange:
         if order_id in self.placed:
             self.filled.add(order_id)
 
+    def set_terminal_status(self, order_id: str, status: str):
+        """AUDIT-FIX A3: simulate the exchange moving an order to
+        CANCELLED / EXPIRED / FAILED behind our back (user cancel via UI,
+        exchange risk-engine cancel, listing change, etc).
+        """
+        if not hasattr(self, "terminal_statuses"):
+            self.terminal_statuses = {}
+        self.terminal_statuses[order_id] = status
+
     async def get_order(self, order_id: str) -> Optional[OrderResult]:
         if order_id in self.placed:
             base = self.placed[order_id]
@@ -230,6 +239,14 @@ class FakeExchange:
                 return OrderResult(
                     order_id=order_id, side=base.side, order_type=base.order_type,
                     size=base.size, price=base.price, filled=True, fee=fee,
+                )
+            # AUDIT-FIX A3: terminal_status overrides the still-pending response
+            terminal = getattr(self, "terminal_statuses", {}).get(order_id)
+            if terminal:
+                return OrderResult(
+                    order_id=order_id, side=base.side, order_type=base.order_type,
+                    size=base.size, price=base.price, filled=False,
+                    fee=Decimal("0"), terminal_status=terminal,
                 )
             return base
         # Check market fill history
@@ -590,6 +607,78 @@ class TestFullCycle:
         )
         # Inventory back at or near the floor
         assert pos_mgr.state.qty >= pos_mgr.state.prebuy_qty
+
+
+class TestA3PollTerminalStatus:
+    """AUDIT-FIX A3: when the exchange moves an order to a non-FILLED
+    terminal state (CANCELLED / EXPIRED / FAILED), _poll_and_apply_fills
+    must reconcile the DB row by marking it cancelled. Without this,
+    Coinbase-side cancellations behind our back leak orphan rows.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancelled_status_reconciles_db_row(self):
+        repo, _pos_mgr, exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Pick one open order; simulate Coinbase-side cancellation
+        open_orders = await repo.get_open_active_orders()
+        target = open_orders[0]
+        exch.set_terminal_status(target.exchange_order_id, "CANCELLED")
+
+        # The next poll should reconcile the row
+        await om._poll_and_apply_fills(gr)
+
+        refreshed = await repo.get_active_order(target.exchange_order_id)
+        assert refreshed.status == "cancelled", (
+            f"Expected status='cancelled' after CANCELLED terminal_status, "
+            f"got {refreshed.status!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_expired_status_reconciles_db_row(self):
+        repo, _pos_mgr, exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        target = (await repo.get_open_active_orders())[0]
+        exch.set_terminal_status(target.exchange_order_id, "EXPIRED")
+        await om._poll_and_apply_fills(gr)
+
+        assert (await repo.get_active_order(target.exchange_order_id)).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_failed_status_reconciles_db_row(self):
+        repo, _pos_mgr, exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        target = (await repo.get_open_active_orders())[0]
+        exch.set_terminal_status(target.exchange_order_id, "FAILED")
+        await om._poll_and_apply_fills(gr)
+
+        assert (await repo.get_active_order(target.exchange_order_id)).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_still_open_orders_not_touched(self):
+        """Regression: orders WITHOUT a terminal_status (still OPEN/PENDING)
+        must not be marked cancelled by the new poll path."""
+        repo, _pos_mgr, _exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        before_open = await repo.get_open_active_orders()
+        assert len(before_open) > 0
+
+        # Run poll — no terminal_status set on any order → all should stay open
+        await om._poll_and_apply_fills(gr)
+
+        after_open = await repo.get_open_active_orders()
+        assert len(after_open) == len(before_open), (
+            f"Non-terminal orders must stay open; "
+            f"before={len(before_open)}, after={len(after_open)}"
+        )
 
 
 class TestCancellation:

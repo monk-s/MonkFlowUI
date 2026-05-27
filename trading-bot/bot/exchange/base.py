@@ -37,6 +37,11 @@ class OrderResult:
     fee: Decimal = Decimal("0")
     timestamp: datetime = field(default_factory=datetime.utcnow)
     raw_response: Optional[dict] = None
+    # AUDIT-FIX A3: surfaced when get_order observes a non-FILLED terminal
+    # state on the exchange (CANCELLED / EXPIRED / FAILED). The grid
+    # caller uses this to mark the local DB row cancelled instead of
+    # polling indefinitely. None means "still active or filled normally."
+    terminal_status: Optional[str] = None
 
 
 @dataclass
