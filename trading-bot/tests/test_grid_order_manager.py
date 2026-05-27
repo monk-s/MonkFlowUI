@@ -196,6 +196,17 @@ class FakeExchange:
         price=None, stop_price=None,
         leverage=Decimal("1"), reduce_only=False, post_only=False,
     ) -> OrderResult:
+        # AUDIT-FIX A2: tests can set `reject_next_limit` to simulate a
+        # Coinbase {"success": false, ...} rejection (e.g., post_only
+        # would cross the spread). The exchange returns an OrderResult
+        # with empty order_id; the grid manager must NOT insert a row.
+        if order_type != OrderType.MARKET and getattr(self, "reject_next_limit", False):
+            self.reject_next_limit = False
+            return OrderResult(
+                order_id="",  # sentinel — empty means rejected
+                side=side, order_type=order_type,
+                size=size, price=price, filled=False, fee=Decimal("0"),
+            )
         oid = self._next_order_id()
         if order_type == OrderType.MARKET:
             # Market fills immediately at `price` if given, else $77000 (deterministic test default)
@@ -430,6 +441,69 @@ class TestTickPopulatesLevels:
         # Buys still populated
         buys = [o for o in open_orders if o.side == "buy"]
         assert len(buys) == 3
+
+
+class TestPlacementRejection:
+    """AUDIT-FIX A2: when the exchange rejects a limit placement (e.g.,
+    Coinbase returns {"success": false, "new_order_failure_reason":
+    "INVALID_LIMIT_PRICE_POST_ONLY"}), the grid manager MUST NOT write
+    a row to tb3_active_orders. Before this fix, the rejected order's
+    client UUID was inserted as status='open' and never reconciled.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rejected_limit_does_not_insert_row(self):
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            orders_per_side=3, long_only=False,
+        )
+        # Pre-place a buy successfully to confirm baseline behavior
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+
+        # Snapshot active-orders count BEFORE the rejected placement
+        before_count = len(repo.active_orders)
+
+        # Flip the exchange into reject-the-next-limit mode
+        exch.reject_next_limit = True
+        result = await om._place_limit(
+            side="buy", level_index=0, level_price=70000.0, qty=0.001,
+        )
+
+        # The placement must report failure
+        assert result.success is False
+        assert result.exchange_order_id is None
+        assert "rejected" in (result.error or "").lower()
+
+        # And critically: no new row in tb3_active_orders
+        after_count = len(repo.active_orders)
+        assert after_count == before_count, (
+            f"A rejected placement must not write a row. "
+            f"before={before_count}, after={after_count}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_rejection_in_populate_levels_doesnt_corrupt_db(self):
+        """End-to-end check: if a tick's _populate_levels hits one rejection,
+        the remaining placements still succeed and no orphan row appears.
+        """
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            orders_per_side=3, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+
+        # Reject the first limit placement during the tick.
+        exch.reject_next_limit = True
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Subsequent placements were not rejected → 5 limits land in DB
+        # (3 buys + 3 sells - 1 rejected = 5 successful). No row carries
+        # an empty exchange_order_id.
+        open_orders = await repo.get_open_active_orders()
+        assert all(o.exchange_order_id for o in open_orders), (
+            f"No row should have an empty exchange_order_id, got: "
+            f"{[(o.side, o.level_index, o.exchange_order_id) for o in open_orders]}"
+        )
+        # Exactly one fewer order than the rejection-free case
+        assert len(open_orders) == 5
 
 
 class TestFillAndOppositePlacement:

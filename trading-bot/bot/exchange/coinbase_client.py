@@ -249,6 +249,51 @@ class CoinbaseClient(ExchangeInterface):
         )
 
         data = await self._request("POST", "/api/v3/brokerage/orders", body)
+
+        # AUDIT-FIX A2: branch on the top-level "success" boolean BEFORE
+        # assuming success_response is populated. Coinbase returns
+        # HTTP 200 + {"success": false, "error_response": {...}} for
+        # placement-time rejections (post_only crossing the spread,
+        # insufficient funds, invalid size precision, etc).
+        # See the NewOrderFailureReason enum at
+        # https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/create-order
+        #
+        # Before this fix, a rejection silently produced an
+        # OrderResult(order_id=client_uuid, filled=False), which
+        # GridOrderManager._place_limit then inserted into
+        # tb3_active_orders as status='open' — an orphan row that
+        # never reconciled because Coinbase returns 404 on subsequent
+        # get_order(client_uuid) calls.
+        # Now we surface the rejection so the caller can skip
+        # insertion and emit a counter metric instead.
+        if data.get("success") is False:
+            err = data.get("error_response") or {}
+            failure_reason = err.get("new_order_failure_reason") or "UNKNOWN"
+            err_message = err.get("message") or err.get("error_details")
+            logger.warning(
+                "place_order_rejected",
+                side=side.value,
+                type=order_type.value,
+                size=str(size),
+                price=str(price) if price else None,
+                stop_price=str(stop_price) if stop_price else None,
+                post_only=post_only,
+                reduce_only=reduce_only,
+                failure_reason=failure_reason,
+                message=err_message,
+            )
+            return OrderResult(
+                order_id="",                # sentinel: caller checks `if not result.order_id`
+                side=side,
+                order_type=order_type,
+                size=size,
+                price=price,
+                stop_price=stop_price,
+                filled=False,
+                timestamp=datetime.now(timezone.utc),
+                raw_response=data,
+            )
+
         order_data = data.get("success_response", data)
 
         # H1: Coinbase returns these status values:
