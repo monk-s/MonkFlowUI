@@ -244,6 +244,14 @@ class GridOrderManager:
     async def recenter(self, *, new_range: GridRange, current_price: float) -> None:
         """Cancel ALL active grid orders + persist new range. The next
         tick() will populate the new grid. Pre-buy position is NOT touched.
+
+        AUDIT-FIX A4: after the cancel loop, re-query active orders. Any
+        pre-recenter row still showing status='open' is hard-marked
+        cancelled BEFORE the new range is written. Without this defensive
+        sweep, a cancel_order failure (network error, exchange race,
+        retryable failure_reason) would leave orphans from the prior
+        epoch alongside the new grid — which is exactly what produced
+        the 20 orphan rows observed in the 2026-05-27 live evidence.
         """
         logger.info(
             "grid_recenter_start",
@@ -251,18 +259,47 @@ class GridOrderManager:
             n_levels=new_range.n_levels,
         )
         open_orders = await self.repo.get_open_active_orders()
+        pre_recenter_ids = {o.exchange_order_id for o in open_orders}
         cancelled = 0
         for o in open_orders:
             ok = await self._cancel_order(o.exchange_order_id)
             if ok:
                 cancelled += 1
+
+        # AUDIT-FIX A4: belt-and-suspenders sweep — anything from the
+        # pre-recenter cohort still showing status='open' gets force-marked.
+        # The old row was definitely in the prior epoch (we listed it
+        # above, then tried to cancel); leaving it open under the NEW range
+        # would mean the bot keeps `_cancel_out_of_range` looping on a
+        # known-doomed row tick after tick, plus inflated dashboard counts.
+        still_open = await self.repo.get_open_active_orders()
+        force_cleaned = 0
+        for o in still_open:
+            if o.exchange_order_id in pre_recenter_ids:
+                await self.repo.mark_order_cancelled(o.exchange_order_id)
+                logger.warning(
+                    "recenter_force_close_orphan",
+                    order_id=o.exchange_order_id,
+                    side=o.side, level=o.level_index, level_price=o.level_price,
+                    note=(
+                        "row was in pre-recenter set but cancel did not "
+                        "succeed; force-marked cancelled to keep DB coherent"
+                    ),
+                )
+                force_cleaned += 1
+
         await self.repo.update_grid_state(
             current_range_low=new_range.low,
             current_range_high=new_range.high,
             num_levels=new_range.n_levels,
             last_recenter_at=datetime.now(timezone.utc),
         )
-        logger.info("grid_recenter_done", cancelled=cancelled)
+        logger.info(
+            "grid_recenter_done",
+            cancelled=cancelled,
+            force_cleaned=force_cleaned,
+            requested=len(pre_recenter_ids),
+        )
 
     # ─────────────────────────────────────────────────────────────────
     # Emergency exit (called by circuit breaker)
@@ -320,6 +357,22 @@ class GridOrderManager:
             if result is None:
                 continue
             if not result.filled:
+                # AUDIT-FIX A3: if the exchange moved this order to a
+                # non-FILLED terminal state (CANCELLED / EXPIRED / FAILED),
+                # reconcile the DB row instead of polling it forever.
+                # Without this, every Coinbase-side cancel (user UI
+                # cancel, exchange risk-engine cancel, listing change,
+                # post-listing-event expire) produces a permanent orphan
+                # in tb3_active_orders.
+                terminal = getattr(result, "terminal_status", None)
+                if terminal:
+                    await self.repo.mark_order_cancelled(o.exchange_order_id)
+                    logger.warning(
+                        "poll_terminal_status_marked_cancelled",
+                        order_id=o.exchange_order_id,
+                        terminal_status=terminal,
+                        side=o.side, level=o.level_index,
+                    )
                 continue
 
             # FILLED — apply
@@ -413,6 +466,23 @@ class GridOrderManager:
                 cap_per_level=float(self.capital_per_level),
             )
             return
+        # AUDIT-FIX C2: gate opposite-side sells with the same economic-positivity
+        # check as `_populate_levels`. Buys are always allowed (they reduce
+        # avg_cost or are below it, which is good); sells must clear fee +
+        # safety margin against current avg_cost.
+        if opposite_side == "sell":
+            economic_ok, eco_reason = self.position_manager.is_sell_economically_positive(
+                level_price=Decimal(str(opposite_price)),
+                qty=qty_dec,
+                maker_fee_pct=self.maker_fee_pct,
+            )
+            if not economic_ok:
+                logger.info(
+                    "opposite_sell_skipped_below_breakeven",
+                    level=opposite_idx, level_price=opposite_price,
+                    qty=float(qty_dec), reason=eco_reason,
+                )
+                return
         await self._place_limit(
             side=opposite_side,
             level_index=opposite_idx,
@@ -449,13 +519,22 @@ class GridOrderManager:
     ) -> None:
         """Ensure the N nearest buy levels below + N nearest sell levels above
         have open orders. Skips levels that already have an open order on
-        the appropriate side."""
+        the appropriate side, or that just filled and are waiting for the
+        adjacent-level opposite to complete the round-trip pair."""
         buys_needed = grid_range.buys_below(current_price, n=self.orders_per_side)
         sells_needed = grid_range.sells_above(current_price, n=self.orders_per_side)
 
         for idx, level_price in buys_needed:
             existing = await self.repo.get_open_orders_at_level(idx, side="buy")
             if existing:
+                continue
+            # AUDIT-FIX C1: skip placement if a buy at this level just filled
+            # and the pair-partner sell at level idx+1 is still pending.
+            if await self._is_pair_pending(idx, "buy", grid_range):
+                logger.info(
+                    "buy_skipped_pair_pending",
+                    level=idx, level_price=level_price,
+                )
                 continue
             qty_dec = _quantize_btc(self.capital_per_level / Decimal(str(level_price)))
             if qty_dec <= 0:
@@ -471,6 +550,17 @@ class GridOrderManager:
             existing = await self.repo.get_open_orders_at_level(idx, side="sell")
             if existing:
                 continue
+            # AUDIT-FIX C1: skip placement if a sell at this level just filled
+            # and the pair-partner buy at level idx-1 is still pending.
+            # This is the bleed-stop mechanism — without it, _populate_levels
+            # re-creates the same-side sell every tick while price chops just
+            # below the level, firing fill-after-fill at fee-rate loss.
+            if await self._is_pair_pending(idx, "sell", grid_range):
+                logger.info(
+                    "sell_skipped_pair_pending",
+                    level=idx, level_price=level_price,
+                )
+                continue
             qty_dec = _quantize_btc(self.capital_per_level / Decimal(str(level_price)))
             if qty_dec <= 0:
                 continue
@@ -479,12 +569,72 @@ class GridOrderManager:
             allowed, _reason = self.position_manager.can_sell(qty_dec)
             if not allowed:
                 continue
+            # AUDIT-FIX C2: skip placement if the level is structurally
+            # below the fee breakeven against current avg_cost. The grid
+            # range is derived from recent BTC highs/lows with no awareness
+            # of avg_cost, so a level can land just above avg_cost and
+            # produce guaranteed-loss lone sells. Live evidence: 4 sells
+            # at level 7 ($75,879) vs avg_cost $75,873.54 lost −$0.107
+            # each — caught by this check now.
+            economic_ok, eco_reason = self.position_manager.is_sell_economically_positive(
+                level_price=Decimal(str(level_price)),
+                qty=qty_dec,
+                maker_fee_pct=self.maker_fee_pct,
+            )
+            if not economic_ok:
+                logger.info(
+                    "sell_skipped_below_breakeven",
+                    level=idx, level_price=level_price,
+                    qty=float(qty_dec), reason=eco_reason,
+                )
+                continue
             await self._place_limit(
                 side="sell",
                 level_index=idx,
                 level_price=level_price,
                 qty=float(qty_dec),
             )
+
+    async def _is_pair_pending(
+        self, level_index: int, side: str, grid_range: GridRange,
+    ) -> bool:
+        """C1 pair-state check: True iff `side` just filled at `level_index`
+        and the pair-partner at the adjacent level is still open.
+
+        Canonical grid behavior: after a sell at level N fills, the bot
+        places a buy at level N-1 (the pair partner). The slot at level
+        N should NOT be re-engaged for same-side placement until the
+        pair-buy at N-1 fills, signaling the round-trip completed.
+
+        Without this gate, tight chop reopens the same-side at level N
+        every tick and bleeds at maker-fee rate — the 2026-05-27 live
+        evidence shows 4 sells at level 7 ($75,879) in 70 minutes
+        losing −$0.107 each because the buy at level 6 ($75,581)
+        never fired.
+
+        When the pair-partner is filled, cancelled, or never existed
+        (e.g., off-grid edge), returns False so normal placement
+        resumes. Cross-recenter is self-cleaning: any prior-epoch
+        pair-partner was cancelled by recenter(), so this check
+        permits placement again under the new epoch.
+        """
+        last_fill = await self.repo.get_most_recent_fill_at_level(
+            level_index, side=side
+        )
+        if last_fill is None:
+            return False
+        if side == "sell":
+            opposite_idx = level_index - 1
+            opposite_side = "buy"
+        else:
+            opposite_idx = level_index + 1
+            opposite_side = "sell"
+        if opposite_idx < 0 or opposite_idx >= grid_range.n_levels:
+            return False
+        opposite_orders = await self.repo.get_open_orders_at_level(
+            opposite_idx, side=opposite_side
+        )
+        return bool(opposite_orders)
 
     # ─────────────────────────────────────────────────────────────────
     # Low-level placement / cancellation
@@ -521,6 +671,25 @@ class GridOrderManager:
                 error=str(e),
             )
 
+        # AUDIT-FIX A2: An empty order_id means the exchange rejected the
+        # placement at submission (CoinbaseClient returns OrderResult with
+        # order_id="" when Coinbase responds with {"success": false, ...}).
+        # We must NOT insert a row into tb3_active_orders in this case —
+        # that produces an unreconcilable orphan row whose UUID Coinbase
+        # has never heard of, leaking forever.
+        if not result.order_id:
+            logger.warning(
+                "place_limit_rejected_by_exchange",
+                side=side, level=level_index, price=level_price, qty=qty,
+            )
+            return PlaceOrderResult(
+                success=False,
+                exchange_order_id=None,
+                side=side, level_index=level_index,
+                level_price=level_price, qty=qty,
+                error="exchange rejected placement at submission",
+            )
+
         # Persist (status='open')
         await self.repo.insert_active_order(
             exchange_order_id=result.order_id,
@@ -541,10 +710,27 @@ class GridOrderManager:
             level_price=level_price, qty=qty,
         )
 
+    # AUDIT-FIX A1: failure_reason values from Coinbase batch_cancel that mean
+    # "the order is definitively not open on the exchange" — these are
+    # terminal, so the DB row MUST be marked cancelled even though the
+    # cancel itself "failed." Without this, an order that fills (or
+    # cancels, or never existed) on Coinbase between our placement and
+    # our cancel attempt leaves an orphan row at status='open' that
+    # nothing else can clear (every subsequent _cancel_order call hits
+    # the same trap). Source: Coinbase Advanced Trade
+    # NewOrderFailureReason enum at
+    # https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/cancel-order
+    _TERMINAL_CANCEL_FAILURE_REASONS = frozenset({
+        "UNKNOWN_CANCEL_ORDER",     # exchange has no record of this id
+        "ORDER_IS_FULLY_FILLED",    # already filled — caller should re-poll
+        "DUPLICATE_CANCEL_REQUEST", # already cancelled
+    })
+
     async def _cancel_order(self, exchange_order_id: str) -> bool:
-        """Cancel one open order. Updates tb3_active_orders on success."""
+        """Cancel one open order. Updates tb3_active_orders on success or
+        on a terminal failure_reason (AUDIT-FIX A1)."""
         try:
-            ok = await self.exchange.cancel_order(exchange_order_id)
+            ok, failure_reason = await self.exchange.cancel_order(exchange_order_id)
         except Exception as e:
             logger.warning(
                 "cancel_order_exception",
@@ -553,7 +739,33 @@ class GridOrderManager:
             return False
         if ok:
             await self.repo.mark_order_cancelled(exchange_order_id)
-        return ok
+            return True
+        # AUDIT-FIX A1: if the exchange says the order is gone, our DB
+        # MUST reflect that. Mark the row cancelled and log loudly so we
+        # know the orphan was caught at cancel time (rather than silently
+        # leaking as before).
+        if failure_reason in self._TERMINAL_CANCEL_FAILURE_REASONS:
+            await self.repo.mark_order_cancelled(exchange_order_id)
+            logger.warning(
+                "cancel_terminal_failure_marked_cancelled",
+                order_id=exchange_order_id,
+                failure_reason=failure_reason,
+                note=(
+                    "exchange says this order is not open; DB row marked "
+                    "cancelled to keep state coherent"
+                ),
+            )
+            return True
+        # Retryable failure (e.g. INVALID_CANCEL_REQUEST,
+        # COMMANDER_REJECTED_CANCEL_ORDER, NOT_ALLOWED_TO_CANCEL,
+        # EMPTY_RESPONSE, EXCEPTION) — leave the row open and let the
+        # next cancel sweep try again.
+        logger.warning(
+            "cancel_retryable_failure_row_stays_open",
+            order_id=exchange_order_id,
+            failure_reason=failure_reason,
+        )
+        return False
 
     # ─────────────────────────────────────────────────────────────────
     # Diagnostics

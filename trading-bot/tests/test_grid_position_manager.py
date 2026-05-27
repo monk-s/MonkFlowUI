@@ -253,6 +253,271 @@ class TestLongOnlyFloor:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# is_sell_economically_positive — AUDIT-FIX C2
+# ─────────────────────────────────────────────────────────────────────────
+
+class TestSellEconomicallyPositive:
+    """Lone-sell breakeven check that catches the live fee-trap bleed.
+
+    The reference scenario (2026-05-27 production live data):
+      avg_cost = 75873.54, level_price = 75879, qty = 0.0043,
+      maker_fee_pct = 0.04 (paper). gross = $0.0235, fee = $0.1305.
+      Net = −$0.107 per lone sell. The check MUST reject this placement.
+    """
+
+    def test_returns_true_when_no_inventory(self):
+        """Empty inventory: no avg-cost basis to ground against → permissive."""
+        m = _mgr()
+        ok, reason = m.is_sell_economically_positive(
+            level_price=Decimal("80000"), qty=Decimal("0.01"),
+            maker_fee_pct=Decimal("0.04"),
+        )
+        assert ok is True
+        assert reason is None
+
+    def test_returns_true_when_avg_cost_zero(self):
+        """avg_cost==0 means no anchor — defer to the floor check."""
+        m = _mgr()
+        m.state.qty = Decimal("0.01")
+        m.state.avg_cost = Decimal("0")
+        ok, _ = m.is_sell_economically_positive(
+            level_price=Decimal("80000"), qty=Decimal("0.01"),
+            maker_fee_pct=Decimal("0.04"),
+        )
+        assert ok is True
+
+    def test_rejects_live_bleed_scenario(self):
+        """The exact scenario from 2026-05-27 production fills."""
+        m = _mgr()
+        m.state.qty = Decimal("0.0922")
+        m.state.avg_cost = Decimal("75873.54")
+        ok, reason = m.is_sell_economically_positive(
+            level_price=Decimal("75879"),
+            qty=Decimal("0.0043"),
+            maker_fee_pct=Decimal("0.04"),  # paper maker
+        )
+        assert ok is False
+        assert "lose money on a lone fill" in reason
+
+    def test_rejects_live_bleed_at_live_fee_too(self):
+        """Same scenario but at Coinbase INTX live maker fee (0.02%).
+        Bleed is slower in live but still strictly negative per fire."""
+        m = _mgr()
+        m.state.qty = Decimal("0.0922")
+        m.state.avg_cost = Decimal("75873.54")
+        ok, _ = m.is_sell_economically_positive(
+            level_price=Decimal("75879"),
+            qty=Decimal("0.0043"),
+            maker_fee_pct=Decimal("0.02"),  # live
+        )
+        assert ok is False
+
+    def test_accepts_level_one_full_step_above_avg(self):
+        """A sell one grid-step (~$298) above avg_cost is economically positive
+        even with the safety margin of 1.5."""
+        m = _mgr()
+        m.state.qty = Decimal("0.0922")
+        m.state.avg_cost = Decimal("75873.54")
+        ok, _ = m.is_sell_economically_positive(
+            level_price=Decimal("76172"),  # ~$298 above avg_cost
+            qty=Decimal("0.0043"),
+            maker_fee_pct=Decimal("0.04"),
+        )
+        assert ok is True
+
+    def test_rejects_level_below_avg_cost(self):
+        """Levels below avg_cost have negative gross — always rejected."""
+        m = _mgr()
+        m.state.qty = Decimal("0.05")
+        m.state.avg_cost = Decimal("80000")
+        ok, reason = m.is_sell_economically_positive(
+            level_price=Decimal("79000"),
+            qty=Decimal("0.01"),
+            maker_fee_pct=Decimal("0.04"),
+        )
+        assert ok is False
+        assert "75" not in reason  # sanity: reason mentions avg_cost
+        assert "80000" in reason
+
+    def test_strict_breakeven_at_margin_1(self):
+        """margin=1.0 = strict breakeven. A level exactly at gross==fee fails;
+        one penny above passes."""
+        m = _mgr()
+        m.state.qty = Decimal("0.01")
+        m.state.avg_cost = Decimal("80000")
+        # At maker_fee_pct=0.04%, on qty=0.01 at level $80,032:
+        #   gross = (80032 - 80000) * 0.01 = 0.32
+        #   fee   = 80032 * 0.01 * 0.0004  = 0.32013...
+        # → gross < fee → reject
+        ok, _ = m.is_sell_economically_positive(
+            level_price=Decimal("80032"),
+            qty=Decimal("0.01"),
+            maker_fee_pct=Decimal("0.04"),
+            margin=Decimal("1.0"),
+        )
+        assert ok is False
+        # At level $80,500 the gross dwarfs the fee → accept
+        ok2, _ = m.is_sell_economically_positive(
+            level_price=Decimal("80500"),
+            qty=Decimal("0.01"),
+            maker_fee_pct=Decimal("0.04"),
+            margin=Decimal("1.0"),
+        )
+        assert ok2 is True
+
+    def test_higher_margin_blocks_more_aggressively(self):
+        """margin=3.0 demands a wider edge — a level that passes at 1.0
+        may fail at 3.0."""
+        m = _mgr()
+        m.state.qty = Decimal("0.01")
+        m.state.avg_cost = Decimal("80000")
+        # gross = (80100 - 80000)*0.01 = 1.0; fee = 80100*0.01*0.0004 = 0.3204
+        # margin=1.0: 1.0 > 0.32 → True
+        # margin=3.0: 1.0 > 0.96 → True
+        # margin=5.0: 1.0 > 1.60 → False
+        assert m.is_sell_economically_positive(
+            level_price=Decimal("80100"), qty=Decimal("0.01"),
+            maker_fee_pct=Decimal("0.04"), margin=Decimal("1.0"),
+        )[0] is True
+        assert m.is_sell_economically_positive(
+            level_price=Decimal("80100"), qty=Decimal("0.01"),
+            maker_fee_pct=Decimal("0.04"), margin=Decimal("5.0"),
+        )[0] is False
+
+    def test_accepts_decimal_str_and_float_inputs(self):
+        """All inputs coerced via _to_decimal."""
+        m = _mgr()
+        m.state.qty = Decimal("0.01")
+        m.state.avg_cost = Decimal("80000")
+        # All three forms produce the same answer
+        a = m.is_sell_economically_positive(
+            level_price=80500, qty=0.01, maker_fee_pct=0.04,
+        )[0]
+        b = m.is_sell_economically_positive(
+            level_price="80500", qty="0.01", maker_fee_pct="0.04",
+        )[0]
+        c = m.is_sell_economically_positive(
+            level_price=Decimal("80500"), qty=Decimal("0.01"),
+            maker_fee_pct=Decimal("0.04"),
+        )[0]
+        assert a == b == c == True
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# effective_avg_cost — AUDIT-FIX C4
+# ─────────────────────────────────────────────────────────────────────────
+
+class TestEffectiveAvgCost:
+    """C4: P&L-adjusted breakeven floor that self-corrects as realized
+    losses (or profits) accumulate. Layers on top of C2's helper so a
+    bot that has already bled at a level becomes EVEN harder to fire
+    sells there.
+    """
+
+    def test_no_inventory_returns_raw_avg_cost(self):
+        m = _mgr()
+        m.state.qty = Decimal("0")
+        m.state.avg_cost = Decimal("80000")
+        m.state.realized_pnl_total = Decimal("-50")
+        # qty=0 → avoid div-by-zero; fall back to avg_cost
+        assert m.effective_avg_cost() == Decimal("80000")
+
+    def test_zero_realized_pnl_matches_avg_cost(self):
+        m = _mgr()
+        m.state.qty = Decimal("0.01")
+        m.state.avg_cost = Decimal("80000")
+        m.state.realized_pnl_total = Decimal("0")
+        # Fresh deploy (no realized P&L) → eff_avg == avg_cost
+        assert m.effective_avg_cost() == Decimal("80000")
+
+    def test_realized_losses_raise_effective_floor(self):
+        """Losses RAISE the effective cost basis — harder to sell at
+        levels just above raw avg_cost after losses have been booked."""
+        m = _mgr()
+        m.state.qty = Decimal("0.075")
+        m.state.avg_cost = Decimal("75873.54")
+        m.state.realized_pnl_total = Decimal("-0.43")
+        # eff_avg = 75873.54 - (-0.43 / 0.075) = 75873.54 + 5.7333... = 75879.27
+        eff = m.effective_avg_cost()
+        assert eff > Decimal("75873.54")
+        assert abs(eff - Decimal("75879.273")) < Decimal("0.01"), eff
+
+    def test_realized_profits_lower_effective_floor(self):
+        """Profits LOWER the effective cost basis — easier to sell at
+        levels marginally above raw avg_cost when the bot has earned
+        a buffer."""
+        m = _mgr()
+        m.state.qty = Decimal("0.05")
+        m.state.avg_cost = Decimal("80000")
+        m.state.realized_pnl_total = Decimal("100")
+        # eff_avg = 80000 - (100 / 0.05) = 80000 - 2000 = 78000
+        assert m.effective_avg_cost() == Decimal("78000")
+
+    def test_c4_blocks_relapse_at_previously_bled_level(self):
+        """The flagship C4 scenario: after losses have already accumulated
+        from sells at a level, re-engaging that level must be BLOCKED
+        even though the raw C2 check (against unmodified avg_cost) would
+        marginally allow it.
+
+        Walk: avg_cost $75,873.54, level $75,879, qty 0.0043, maker
+        fee 0.04%. Before any losses, the level is just barely below
+        breakeven and C2 already rejects (gross 0.0235 vs fee*1.5 =
+        0.196). After 4 lone-sells lost a total of $0.43 (the actual
+        2026-05-27 production state), the effective avg_cost rises
+        to ~$75,879.27 — meaning level 7 ($75,879) is now BELOW the
+        effective cost basis: gross is NEGATIVE, and the rejection
+        message reflects that.
+        """
+        m = _mgr()
+        m.state.qty = Decimal("0.0750")     # inventory after 4 lone sells
+        m.state.avg_cost = Decimal("75873.54")
+        m.state.realized_pnl_total = Decimal("-0.43")  # accumulated losses
+
+        ok, reason = m.is_sell_economically_positive(
+            level_price=Decimal("75879"),
+            qty=Decimal("0.0043"),
+            maker_fee_pct=Decimal("0.04"),
+        )
+        assert ok is False
+        # Reason mentions the P&L-adjusted floor so operators can see
+        # that C4 was the gating factor (not just C2).
+        assert "eff_avg" in reason
+        assert "realized_pnl_total" in reason
+
+    def test_c4_allows_sell_after_realized_profits_built_buffer(self):
+        """Mirror of the above: a level just above raw avg_cost that
+        C2 alone would reject becomes ALLOWED after the bot has built
+        up enough realized profit for the buffer."""
+        m = _mgr()
+        m.state.qty = Decimal("0.05")
+        m.state.avg_cost = Decimal("80000")
+        # Big realized profit drops eff_avg far below the level
+        m.state.realized_pnl_total = Decimal("50")  # eff_avg = 79000
+
+        ok, _ = m.is_sell_economically_positive(
+            level_price=Decimal("80050"),  # only $50 above raw avg
+            qty=Decimal("0.001"),
+            maker_fee_pct=Decimal("0.04"),
+        )
+        assert ok is True
+
+    def test_c4_zero_pnl_matches_c2_behavior(self):
+        """Regression: with realized_pnl_total=0, C4 must produce
+        identical decisions to vanilla C2. The 2026-05-27 baseline
+        scenario from the C2 tests must still reject."""
+        m = _mgr()
+        m.state.qty = Decimal("0.0922")
+        m.state.avg_cost = Decimal("75873.54")
+        m.state.realized_pnl_total = Decimal("0")
+        ok, _ = m.is_sell_economically_positive(
+            level_price=Decimal("75879"),
+            qty=Decimal("0.0043"),
+            maker_fee_pct=Decimal("0.04"),
+        )
+        assert ok is False  # same as the C2-only test
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Load from DB (boot path)
 # ─────────────────────────────────────────────────────────────────────────
 

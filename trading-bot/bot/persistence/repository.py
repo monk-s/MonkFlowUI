@@ -534,12 +534,83 @@ class Repository:
             fee_paid=fee_paid,
         )
 
-    async def mark_order_cancelled(self, exchange_order_id: str) -> None:
+    async def mark_order_cancelled(
+        self,
+        exchange_order_id: str,
+        *,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Mark an order as cancelled.
+
+        AUDIT-FIX A5: accepts an optional `reason` string for orphan-source
+        observability. When called from the bot-initiated cancel paths
+        (recenter, out-of-range sweep, stale sweep) the reason can be
+        omitted; when called from the orphan-recovery paths (terminal
+        failure_reason in A1, post-only rejection in A2, exchange-side
+        cancel in A3), populate it so downstream queries can split the
+        orphan-source distribution.
+        """
+        kwargs: dict = {"status": "cancelled", "cancelled_at": _utcnow()}
+        if reason is not None:
+            kwargs["cancel_reason"] = reason
+        await self.update_active_order(exchange_order_id, **kwargs)
+
+    async def mark_order_failed(
+        self,
+        exchange_order_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        """Mark an order as 'failed' — used when the exchange rejected the
+        placement at submission (AUDIT-FIX A2 path).
+
+        Use `reason` to record the new_order_failure_reason from Coinbase
+        (e.g. 'INVALID_LIMIT_PRICE_POST_ONLY', 'INSUFFICIENT_FUND').
+        """
         await self.update_active_order(
             exchange_order_id,
-            status="cancelled",
+            status="failed",
             cancelled_at=_utcnow(),
+            cancel_reason=reason,
         )
+
+    async def mark_order_expired(
+        self,
+        exchange_order_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        """Mark an order as 'expired' — used when the exchange terminated
+        the order behind our back (AUDIT-FIX A1 terminal failure_reason
+        and A3 poll-time terminal status both land here).
+
+        Use `reason` to record what surfaced from the exchange
+        (e.g. 'UNKNOWN_CANCEL_ORDER', 'ORDER_IS_FULLY_FILLED',
+        'CANCELLED', 'EXPIRED', 'FAILED').
+        """
+        await self.update_active_order(
+            exchange_order_id,
+            status="expired",
+            cancelled_at=_utcnow(),
+            cancel_reason=reason,
+        )
+
+    async def get_active_orders_by_status(
+        self, status: str,
+    ) -> list[GridActiveOrder]:
+        """Filter `tb3_active_orders` by a single status value.
+
+        AUDIT-FIX A5: lets dashboards / scripts split orphan-source
+        cohorts (e.g. `await repo.get_active_orders_by_status("failed")`
+        to count placement rejections).
+        """
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(GridActiveOrder)
+                .where(GridActiveOrder.status == status)
+                .order_by(GridActiveOrder.created_at.desc())
+            )
+            return list(result.scalars().all())
 
     async def get_active_order(
         self, exchange_order_id: str
@@ -655,6 +726,24 @@ class Repository:
                 .limit(limit)
             )
             return list(result.scalars().all())
+
+    async def get_most_recent_fill_at_level(
+        self, level_index: int, side: Optional[str] = None,
+    ) -> Optional[GridFill]:
+        """Return the newest fill at a given level (optionally filtered by side).
+
+        Used by the pair-state cooldown logic (AUDIT-FIX C1) to detect when
+        a level just filled on one side and the bot should hold off on
+        re-placing same-side orders there until the matching opposite-side
+        order at the adjacent level completes the round-trip.
+        """
+        async with self.session_factory() as session:
+            stmt = select(GridFill).where(GridFill.level_index == level_index)
+            if side is not None:
+                stmt = stmt.where(GridFill.side == side)
+            stmt = stmt.order_by(GridFill.created_at.desc()).limit(1)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
 
     # ------------------------------------------------------------------
     # tb3_grid_metrics (daily aggregates)

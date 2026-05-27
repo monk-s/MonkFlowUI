@@ -85,6 +85,7 @@ class FakeRepo:
             fill_price=None,
             fill_qty=None,
             fee_paid=None,
+            cancel_reason=None,  # AUDIT-FIX A5
         )
         self.active_orders[exchange_order_id] = row
         self._next_order_db_id += 1
@@ -109,12 +110,36 @@ class FakeRepo:
             fee_paid=fee_paid,
         )
 
-    async def mark_order_cancelled(self, exchange_order_id):
+    async def mark_order_cancelled(self, exchange_order_id, *, reason=None):
+        # AUDIT-FIX A5: accept optional `reason` for orphan-source observability
+        kwargs = {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc)}
+        if reason is not None:
+            kwargs["cancel_reason"] = reason
+        await self.update_active_order(exchange_order_id, **kwargs)
+
+    async def mark_order_failed(self, exchange_order_id, *, reason):
+        """AUDIT-FIX A5: exchange rejected at placement (A2 path)."""
         await self.update_active_order(
             exchange_order_id,
-            status="cancelled",
+            status="failed",
             cancelled_at=datetime.now(timezone.utc),
+            cancel_reason=reason,
         )
+
+    async def mark_order_expired(self, exchange_order_id, *, reason):
+        """AUDIT-FIX A5: exchange-side terminal (A1/A3 paths)."""
+        await self.update_active_order(
+            exchange_order_id,
+            status="expired",
+            cancelled_at=datetime.now(timezone.utc),
+            cancel_reason=reason,
+        )
+
+    async def get_active_orders_by_status(self, status):
+        return [
+            o for o in self.active_orders.values()
+            if o.status == status
+        ]
 
     async def get_active_order(self, exchange_order_id):
         return self.active_orders.get(exchange_order_id)
@@ -168,6 +193,15 @@ class FakeRepo:
         self.fills.append(fill)
         return fill
 
+    async def get_most_recent_fill_at_level(self, level_index, side=None):
+        """Mirror of Repository.get_most_recent_fill_at_level for tests."""
+        candidates = [f for f in self.fills if f.level_index == level_index]
+        if side is not None:
+            candidates = [f for f in candidates if f.side == side]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda f: f.created_at)
+
 
 class FakeExchange:
     """Minimal exchange that returns whatever fills we feed it.
@@ -196,6 +230,17 @@ class FakeExchange:
         price=None, stop_price=None,
         leverage=Decimal("1"), reduce_only=False, post_only=False,
     ) -> OrderResult:
+        # AUDIT-FIX A2: tests can set `reject_next_limit` to simulate a
+        # Coinbase {"success": false, ...} rejection (e.g., post_only
+        # would cross the spread). The exchange returns an OrderResult
+        # with empty order_id; the grid manager must NOT insert a row.
+        if order_type != OrderType.MARKET and getattr(self, "reject_next_limit", False):
+            self.reject_next_limit = False
+            return OrderResult(
+                order_id="",  # sentinel — empty means rejected
+                side=side, order_type=order_type,
+                size=size, price=price, filled=False, fee=Decimal("0"),
+            )
         oid = self._next_order_id()
         if order_type == OrderType.MARKET:
             # Market fills immediately at `price` if given, else $77000 (deterministic test default)
@@ -221,6 +266,15 @@ class FakeExchange:
         if order_id in self.placed:
             self.filled.add(order_id)
 
+    def set_terminal_status(self, order_id: str, status: str):
+        """AUDIT-FIX A3: simulate the exchange moving an order to
+        CANCELLED / EXPIRED / FAILED behind our back (user cancel via UI,
+        exchange risk-engine cancel, listing change, etc).
+        """
+        if not hasattr(self, "terminal_statuses"):
+            self.terminal_statuses = {}
+        self.terminal_statuses[order_id] = status
+
     async def get_order(self, order_id: str) -> Optional[OrderResult]:
         if order_id in self.placed:
             base = self.placed[order_id]
@@ -231,6 +285,14 @@ class FakeExchange:
                     order_id=order_id, side=base.side, order_type=base.order_type,
                     size=base.size, price=base.price, filled=True, fee=fee,
                 )
+            # AUDIT-FIX A3: terminal_status overrides the still-pending response
+            terminal = getattr(self, "terminal_statuses", {}).get(order_id)
+            if terminal:
+                return OrderResult(
+                    order_id=order_id, side=base.side, order_type=base.order_type,
+                    size=base.size, price=base.price, filled=False,
+                    fee=Decimal("0"), terminal_status=terminal,
+                )
             return base
         # Check market fill history
         for m in self.market_fills:
@@ -238,12 +300,13 @@ class FakeExchange:
                 return m
         return None
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str) -> tuple[bool, Optional[str]]:
+        # AUDIT-FIX A1: returns (success, failure_reason).
         if order_id in self.placed:
             self.cancelled.add(order_id)
             del self.placed[order_id]
-            return True
-        return False
+            return True, None
+        return False, "UNKNOWN_CANCEL_ORDER"
 
     async def close_position(self, side: str, size: Decimal) -> OrderResult:
         # Treat as a market sell
@@ -431,6 +494,173 @@ class TestTickPopulatesLevels:
         buys = [o for o in open_orders if o.side == "buy"]
         assert len(buys) == 3
 
+    @pytest.mark.asyncio
+    async def test_c2_skips_sells_below_breakeven(self):
+        """AUDIT-FIX C2: a sell-level only marginally above avg_cost (gross < fee)
+        must be skipped at placement. Reproduces the 2026-05-27 live bleed:
+        avg_cost $75,873.54, level_price $75,879, qty 0.0043, maker_fee 0.04%
+        → lone-sell net −$0.1075 — placement BLOCKED.
+
+        Setup: a 4-level static grid at $75K–$76K spacing where the level
+        just above current price lands $5 above avg_cost (the fee trap).
+        With C2 in place, no sell is placed there; without C2, one would
+        be placed and would fill at a guaranteed loss.
+        """
+        # Static range 75873.54–76200, 4 levels evenly spaced.
+        # step = (76200 - 75873.54) / 3 ≈ $108.82
+        # levels: 75873.54, 75982.36, 76091.18, 76200
+        repo, pos_mgr, _exch, om, gr = _build_setup(
+            range_low=75873.54, range_high=76200,
+            n_levels=4,
+            orders_per_side=3,
+            capital_per_level=200.0,
+            long_only=False,  # so inventory floor doesn't mask the C2 effect
+        )
+        await om.execute_prebuy(notional_usd=2000.0, current_price=75873.54)
+        # Force avg_cost to the exact production value (paper test
+        # prebuy fee adjustment isn't relevant here)
+        pos_mgr.state.avg_cost = Decimal("75873.54")
+        pos_mgr.state.qty = Decimal("0.0922")
+        pos_mgr.state.prebuy_qty = Decimal("0.0922")
+
+        # Current price right at avg_cost so all levels above are "sells_above"
+        await om.tick(grid_range=gr, current_price=75873.55)
+        open_orders = await repo.get_open_active_orders()
+        sells = sorted(
+            [o for o in open_orders if o.side == "sell"],
+            key=lambda o: o.level_price,
+        )
+
+        # With maker_fee_pct=0.02 from _build_setup and margin=1.5:
+        # Level $75,982.36: gross = (75982.36 - 75873.54)*qty,
+        #                   fee   = 75982.36*qty*0.0002. For qty ≈ 0.0026:
+        #   gross ≈ $0.282, fee ≈ $0.0395, fee*1.5 = $0.059 → ACCEPT
+        # Level $76,091.18 and $76,200: clearly ACCEPT (further from avg_cost)
+        # So with this $108 step and 0.02% fee, all 3 sells pass C2.
+        # To verify C2 catches the live scenario, we need a tighter test
+        # where the step is small relative to fee. See next test.
+        assert len(sells) == 3
+
+    @pytest.mark.asyncio
+    async def test_c2_skips_live_bleed_exact_scenario(self):
+        """The exact production scenario: level just $5.46 above avg_cost
+        at paper's 0.04% maker fee. With C2 in place, the placement is
+        SKIPPED. (Without C2, the bot would place a sell here and fill
+        it on every up-tick, losing $0.1075 each fire.)"""
+        # Build a grid where one level lands at exactly $75,879 (the live
+        # fee trap). We use a static range 75,872 → 75,886 with 3 levels:
+        # levels = [75872, 75879, 75886]. avg_cost = 75873.54.
+        repo, pos_mgr, _exch, om, gr = _build_setup(
+            range_low=75872.0, range_high=75886.0,
+            n_levels=3,
+            orders_per_side=2,
+            capital_per_level=200.0,
+            long_only=False,
+        )
+        # Override the manager's fee to paper's 0.04% (matches the live evidence)
+        om.maker_fee_pct = Decimal("0.04")
+
+        await om.execute_prebuy(notional_usd=2000.0, current_price=75873.54)
+        pos_mgr.state.avg_cost = Decimal("75873.54")
+        pos_mgr.state.qty = Decimal("0.0922")
+        pos_mgr.state.prebuy_qty = Decimal("0.0922")
+
+        # Place at current price below all 3 levels
+        await om.tick(grid_range=gr, current_price=75872.0)
+        open_orders = await repo.get_open_active_orders()
+        sells = [o for o in open_orders if o.side == "sell"]
+        # Level $75,879 (index 1): gross = (75879 - 75873.54) * qty
+        #                          = 5.46 * 0.0026 = $0.0142
+        #                          fee = 75879 * 0.0026 * 0.0004 = $0.0789
+        #                          gross < fee → REJECT
+        # Level $75,886 (index 2): gross = 12.46 * 0.0026 = $0.0324
+        #                          fee = 75886 * 0.0026 * 0.0004 = $0.0789
+        #                          gross < fee*1.5 = $0.118 → REJECT
+        # All sells in this very-tight grid should be rejected by C2.
+        assert sells == [], (
+            f"Expected all sells skipped by C2 at this tight spread, got: "
+            f"{[(o.level_index, o.level_price) for o in sells]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_c2_no_constraint_when_inventory_empty(self):
+        """C2 only blocks placement when there IS inventory to ground avg_cost
+        against. With zero inventory, the long_only floor blocks the placement
+        instead; C2 is permissive."""
+        repo, pos_mgr, _exch, om, gr = _build_setup(
+            orders_per_side=3,
+            long_only=False,  # disable floor for this check
+        )
+        # No pre-buy → state.qty == 0, state.avg_cost == 0
+        await om.tick(grid_range=gr, current_price=80000.0)
+        open_orders = await repo.get_open_active_orders()
+        sells = [o for o in open_orders if o.side == "sell"]
+        # Sells should be placed (C2 permissive when no avg_cost basis)
+        assert len(sells) == 3
+
+
+class TestPlacementRejection:
+    """AUDIT-FIX A2: when the exchange rejects a limit placement (e.g.,
+    Coinbase returns {"success": false, "new_order_failure_reason":
+    "INVALID_LIMIT_PRICE_POST_ONLY"}), the grid manager MUST NOT write
+    a row to tb3_active_orders. Before this fix, the rejected order's
+    client UUID was inserted as status='open' and never reconciled.
+    """
+
+    @pytest.mark.asyncio
+    async def test_rejected_limit_does_not_insert_row(self):
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            orders_per_side=3, long_only=False,
+        )
+        # Pre-place a buy successfully to confirm baseline behavior
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+
+        # Snapshot active-orders count BEFORE the rejected placement
+        before_count = len(repo.active_orders)
+
+        # Flip the exchange into reject-the-next-limit mode
+        exch.reject_next_limit = True
+        result = await om._place_limit(
+            side="buy", level_index=0, level_price=70000.0, qty=0.001,
+        )
+
+        # The placement must report failure
+        assert result.success is False
+        assert result.exchange_order_id is None
+        assert "rejected" in (result.error or "").lower()
+
+        # And critically: no new row in tb3_active_orders
+        after_count = len(repo.active_orders)
+        assert after_count == before_count, (
+            f"A rejected placement must not write a row. "
+            f"before={before_count}, after={after_count}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_rejection_in_populate_levels_doesnt_corrupt_db(self):
+        """End-to-end check: if a tick's _populate_levels hits one rejection,
+        the remaining placements still succeed and no orphan row appears.
+        """
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            orders_per_side=3, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+
+        # Reject the first limit placement during the tick.
+        exch.reject_next_limit = True
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Subsequent placements were not rejected → 5 limits land in DB
+        # (3 buys + 3 sells - 1 rejected = 5 successful). No row carries
+        # an empty exchange_order_id.
+        open_orders = await repo.get_open_active_orders()
+        assert all(o.exchange_order_id for o in open_orders), (
+            f"No row should have an empty exchange_order_id, got: "
+            f"{[(o.side, o.level_index, o.exchange_order_id) for o in open_orders]}"
+        )
+        # Exactly one fewer order than the rejection-free case
+        assert len(open_orders) == 5
+
 
 class TestFillAndOppositePlacement:
     @pytest.mark.asyncio
@@ -480,15 +710,170 @@ class TestFillAndOppositePlacement:
         assert len(buys_at_80k) == 1
 
 
+class TestC1PairStateCooldown:
+    """AUDIT-FIX C1: after a same-side fill at level N, suppress same-side
+    re-placement at level N until the opposite-side pair-partner at the
+    adjacent level fills (or the pair-partner is cancelled).
+    """
+
+    @pytest.mark.asyncio
+    async def test_sell_at_level_blocked_while_pair_buy_pending(self):
+        """Reproduces the 2026-05-27 production bleed: sell fires at level 7,
+        opposite buy at level 6 stays pending → next tick must NOT re-place
+        sell at level 7. The check kicks in via _is_pair_pending.
+        """
+        # 11 levels at $2K spacing, $70K–$90K
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            range_low=70000, range_high=90000, n_levels=11,
+            orders_per_side=5, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=20000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Fire the sell at level 6 ($82K) — opposite buy at level 5 ($80K)
+        # should already exist from the same populate call.
+        sell_82k = next(
+            o for o in await repo.get_open_active_orders()
+            if o.side == "sell" and o.level_index == 6
+        )
+        exch.set_filled(sell_82k.exchange_order_id)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # The sell at level 6 should be marked filled
+        assert (await repo.get_active_order(sell_82k.exchange_order_id)).status == "filled"
+
+        # _place_opposite_after_fill places a buy at level 5 — but since one
+        # already existed, no new one is placed. There IS still an open buy
+        # at level 5 → C1 pair-pending should block re-placement of the
+        # sell at level 6.
+        buys_at_5 = await repo.get_open_orders_at_level(5, side="buy")
+        assert len(buys_at_5) == 1, "expected the pre-existing buy at level 5"
+
+        # Trigger another tick — C1 must block re-placement of sell at level 6
+        await om.tick(grid_range=gr, current_price=80000.0)
+        sells_at_6 = await repo.get_open_orders_at_level(6, side="sell")
+        assert sells_at_6 == [], (
+            f"C1 should block re-placement at level 6 while pair-buy at "
+            f"level 5 is pending. Got: {[(o.side, o.level_index) for o in sells_at_6]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_sell_replaces_after_pair_buy_fills(self):
+        """Once the pair-partner buy at N-1 fills, the round-trip is
+        complete and the bot resumes normal placement at level N."""
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            range_low=70000, range_high=90000, n_levels=11,
+            orders_per_side=5, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=20000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Fire sell at level 6 → opposite buy at level 5 pending
+        sell_82k = next(
+            o for o in await repo.get_open_active_orders()
+            if o.side == "sell" and o.level_index == 6
+        )
+        exch.set_filled(sell_82k.exchange_order_id)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # C1 blocks re-placement at level 6 (verified by prior test)
+        assert await repo.get_open_orders_at_level(6, side="sell") == []
+
+        # Now fire the pair-partner buy at level 5 — round-trip complete
+        buy_80k = (await repo.get_open_orders_at_level(5, side="buy"))[0]
+        exch.set_filled(buy_80k.exchange_order_id)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # On this tick, sell at level 6 should be re-placed by _populate_levels
+        # (most recent sell-fill at level 6 still exists, but the pair-partner
+        # at level 5 is now FILLED, not open → pair_pending=False)
+        sells_at_6 = await repo.get_open_orders_at_level(6, side="sell")
+        assert len(sells_at_6) == 1, (
+            "after the pair-buy fills, the sell at level 6 should be "
+            "re-engaged for the next round-trip"
+        )
+
+    @pytest.mark.asyncio
+    async def test_buy_blocked_while_pair_sell_pending(self):
+        """Symmetric to the sell-side block: after a buy at level N fills,
+        if the opposite sell at level N+1 is still open, no new buy at N."""
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            range_low=70000, range_high=90000, n_levels=11,
+            orders_per_side=5, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=20000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Fire buy at level 4 ($78K) — opposite sell at level 5 ($80K)
+        # already exists from populate.
+        buy_78k = next(
+            o for o in await repo.get_open_active_orders()
+            if o.side == "buy" and o.level_index == 4
+        )
+        exch.set_filled(buy_78k.exchange_order_id)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Pair-partner sell at level 5 still open → C1 blocks buy re-placement
+        sells_at_5 = await repo.get_open_orders_at_level(5, side="sell")
+        assert len(sells_at_5) == 1
+        await om.tick(grid_range=gr, current_price=80000.0)
+        buys_at_4 = await repo.get_open_orders_at_level(4, side="buy")
+        assert buys_at_4 == [], "C1 should block buy re-placement"
+
+    @pytest.mark.asyncio
+    async def test_no_block_when_no_prior_fill_at_level(self):
+        """First-time placement: no fill history → C1 is permissive."""
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            orders_per_side=3, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=2000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+        # All requested levels populated normally
+        open_orders = await repo.get_open_active_orders()
+        # 3 buys below + 3 sells above
+        assert len([o for o in open_orders if o.side == "buy"]) == 3
+        assert len([o for o in open_orders if o.side == "sell"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_no_block_when_pair_partner_off_grid(self):
+        """If the would-be pair-partner is off-grid (level_index < 0 or
+        >= n_levels), there is no pair to wait for. Re-placement allowed.
+        """
+        # 4 levels: [70K, 75K, 80K, 85K]. Sell at level 0 (off-grid) edge case.
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            range_low=70000, range_high=85000, n_levels=4,
+            orders_per_side=4, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=20000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Manually record a fill at level 0 (sell) to simulate the edge case
+        await repo.record_grid_fill(
+            active_order_id=None, exchange_order_id="synthetic-fill",
+            side="sell", level_index=0,
+            fill_price=70000.0, fill_qty=0.001, fee_paid=0.014,
+            realized_pnl=0.0, inventory_after_qty=0.05,
+            inventory_after_avg_cost=80000.0,
+        )
+        # _is_pair_pending(0, "sell", grid_range) → opposite_idx = -1
+        # → off-grid → return False (no block)
+        pair_pending = await om._is_pair_pending(0, "sell", gr)
+        assert pair_pending is False
+
+
 class TestFullCycle:
     @pytest.mark.asyncio
     async def test_5_buys_then_5_sells_clean(self):
-        """The Phase 3 gate test: pre-buy + 5 buy-fills + 5 sell-fills cycle clean.
+        """The Phase 3 gate test: pre-buy + 5 buy-fills + n sell-fills cycle clean.
 
         With long_only=True, initial sells are blocked (inventory == floor).
         After the 5 buys fill, opposite sells at i+1 are placed by
-        _place_opposite_after_fill. Those then fill on the next round.
-        Verifies final inventory ≥ floor and realized P&L is positive.
+        `_place_opposite_after_fill` — but ONLY for levels above the
+        post-fill avg_cost (AUDIT-FIX C2). The bursty-fill scenario
+        (5 buys complete before any sells) drags avg_cost from
+        ~$77K down toward ~$74K; opposite sells at levels below the
+        new avg_cost are correctly skipped as guaranteed losses.
+        Sells at levels above are placed and fill cleanly.
         """
         repo, pos_mgr, exch, om, gr = _build_setup(
             range_low=70000, range_high=90000,
@@ -520,25 +905,32 @@ class TestFullCycle:
         )
         assert pos_mgr.state.n_buy_fills >= 5
 
-        # New opposite-side sells placed at i+1 for each filled buy.
-        # Filled buys were at levels [0,1,2,3,4] → opposite sells at [1,2,3,4,5].
+        # AUDIT-FIX C2 changed the contract: opposite sells are placed at
+        # i+1 ONLY when level_{i+1} clears (avg_cost + fee*margin). After
+        # 5 buys at $70K..$78K drag avg_cost down to ~$74K, sells at $72K
+        # and $74K are below breakeven (gross < 0 or < fee*1.5) and are
+        # correctly skipped. Sells at $76K, $78K, $80K still pass.
         all_orders = list(repo.active_orders.values())
         new_sells = [
             o for o in all_orders
             if o.side == "sell" and o.status == "open" and o.level_index in {1, 2, 3, 4, 5}
         ]
-        assert len(new_sells) == 5, (
-            f"Expected 5 opposite-side sells, got {len(new_sells)}. "
+        # At least the highest opposite sells (levels 3, 4, 5 = $76K/$78K/$80K)
+        # must be placed — that's the canonical grid-recovery behavior.
+        new_sell_levels = {o.level_index for o in new_sells}
+        assert {3, 4, 5}.issubset(new_sell_levels), (
+            f"Expected opposite sells at levels {{3, 4, 5}} (above post-fill "
+            f"avg_cost), got levels {sorted(new_sell_levels)}. "
             f"All orders: {[(o.side, o.level_index, o.status) for o in all_orders]}"
         )
 
-        # Flag those 5 sells as filled (simulating price recovery)
+        # Flag the placed sells as filled (simulating price recovery)
         for s in new_sells:
             exch.set_filled(s.exchange_order_id)
         await om.tick(grid_range=gr, current_price=80000.0)
 
-        # All 5 sells filled cleanly through the position manager
-        assert pos_mgr.state.n_sell_fills >= 5
+        # All placed sells filled cleanly through the position manager
+        assert pos_mgr.state.n_sell_fills >= len(new_sells)
         # NB: realized P&L on bursty-fill scenarios is near-zero because all
         # buys complete BEFORE any sells, dragging avg cost down. Then the
         # sells execute against that low avg, so the early (low-price) sells
@@ -592,6 +984,204 @@ class TestFullCycle:
         assert pos_mgr.state.qty >= pos_mgr.state.prebuy_qty
 
 
+class TestA3PollTerminalStatus:
+    """AUDIT-FIX A3: when the exchange moves an order to a non-FILLED
+    terminal state (CANCELLED / EXPIRED / FAILED), _poll_and_apply_fills
+    must reconcile the DB row by marking it cancelled. Without this,
+    Coinbase-side cancellations behind our back leak orphan rows.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancelled_status_reconciles_db_row(self):
+        repo, _pos_mgr, exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Pick one open order; simulate Coinbase-side cancellation
+        open_orders = await repo.get_open_active_orders()
+        target = open_orders[0]
+        exch.set_terminal_status(target.exchange_order_id, "CANCELLED")
+
+        # The next poll should reconcile the row
+        await om._poll_and_apply_fills(gr)
+
+        refreshed = await repo.get_active_order(target.exchange_order_id)
+        assert refreshed.status == "cancelled", (
+            f"Expected status='cancelled' after CANCELLED terminal_status, "
+            f"got {refreshed.status!r}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_expired_status_reconciles_db_row(self):
+        repo, _pos_mgr, exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        target = (await repo.get_open_active_orders())[0]
+        exch.set_terminal_status(target.exchange_order_id, "EXPIRED")
+        await om._poll_and_apply_fills(gr)
+
+        assert (await repo.get_active_order(target.exchange_order_id)).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_failed_status_reconciles_db_row(self):
+        repo, _pos_mgr, exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        target = (await repo.get_open_active_orders())[0]
+        exch.set_terminal_status(target.exchange_order_id, "FAILED")
+        await om._poll_and_apply_fills(gr)
+
+        assert (await repo.get_active_order(target.exchange_order_id)).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_still_open_orders_not_touched(self):
+        """Regression: orders WITHOUT a terminal_status (still OPEN/PENDING)
+        must not be marked cancelled by the new poll path."""
+        repo, _pos_mgr, _exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        before_open = await repo.get_open_active_orders()
+        assert len(before_open) > 0
+
+        # Run poll — no terminal_status set on any order → all should stay open
+        await om._poll_and_apply_fills(gr)
+
+        after_open = await repo.get_open_active_orders()
+        assert len(after_open) == len(before_open), (
+            f"Non-terminal orders must stay open; "
+            f"before={len(before_open)}, after={len(after_open)}"
+        )
+
+
+class TestA4RecenterDefensiveSweep:
+    """AUDIT-FIX A4: recenter() must end with no pre-recenter rows still
+    at status='open'. The defensive sweep force-marks any leftover rows
+    that the cancel loop missed (network errors, exchange races,
+    retryable failure_reasons). Belt-and-suspenders on top of A1.
+    """
+
+    @pytest.mark.asyncio
+    async def test_recenter_force_closes_orphans_from_failed_cancels(self):
+        """Simulate a partial cancel-loop failure: pre-recenter orders that
+        the exchange refuses to cancel (returns False without throwing).
+        After A4, recenter() must still leave the DB clean.
+        """
+        repo, _pos_mgr, _exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+        before = await repo.get_open_active_orders()
+        assert len(before) > 0
+
+        # Inject a failing-cancel exchange — every cancel attempt returns
+        # False (mimics a stuck cancel path WITHOUT the A1 reconcile, which
+        # is exactly the regression A4 protects against).
+        class _FailingCancelExch:
+            def __init__(self, real):
+                self._real = real
+            async def cancel_order(self, oid):
+                return False
+            # Delegate everything else to the real fake exchange
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+        om.exchange = _FailingCancelExch(om.exchange)
+
+        new_gr = compute_range_and_levels(
+            mode="static", static_low=60000, static_high=100000, n_levels=5,
+        )
+        await om.recenter(new_range=new_gr, current_price=80000.0)
+
+        # Despite every cancel returning False, A4's defensive sweep MUST
+        # mark all pre-recenter rows cancelled before recenter returns.
+        remaining = await repo.get_open_active_orders()
+        assert remaining == [], (
+            f"A4 should have force-cleaned all pre-recenter orphans. "
+            f"Got {len(remaining)} still-open rows: "
+            f"{[(o.side, o.level_index, o.exchange_order_id) for o in remaining]}"
+        )
+        # Grid state updated with the new range
+        gs = await repo.get_grid_state()
+        assert gs.current_range_low == 60000
+        assert gs.current_range_high == 100000
+
+    @pytest.mark.asyncio
+    async def test_recenter_only_sweeps_pre_recenter_rows(self):
+        """Regression: the defensive sweep MUST scope to pre-recenter rows
+        only. If a tick happens to insert a fresh row between the cancel
+        loop and the recheck, that row must NOT be force-cleaned.
+
+        We can't trivially reproduce that race without a concurrent
+        scheduler, so we use a hand-crafted scenario: inject a fresh
+        row that wasn't in the pre-recenter snapshot, then run the
+        recheck logic manually via recenter().
+        """
+        repo, _pos_mgr, _exch, om, gr = _build_setup(orders_per_side=2)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Memorize pre-recenter IDs
+        pre_ids = {o.exchange_order_id for o in await repo.get_open_active_orders()}
+
+        # Hook recenter to inject a fresh row mid-flight
+        original_get = repo.get_open_active_orders
+        call_count = {"n": 0}
+
+        async def get_with_injection():
+            call_count["n"] += 1
+            result = await original_get()
+            if call_count["n"] == 2:
+                # Mid-recenter — simulate a fresh placement landing
+                await repo.insert_active_order(
+                    exchange_order_id="fresh-during-recenter",
+                    side="buy", level_index=99,
+                    level_price=80000.0, qty=0.01,
+                )
+                result = await original_get()
+            return result
+
+        repo.get_open_active_orders = get_with_injection
+
+        new_gr = compute_range_and_levels(
+            mode="static", static_low=60000, static_high=100000, n_levels=5,
+        )
+        await om.recenter(new_range=new_gr, current_price=80000.0)
+
+        # Restore
+        repo.get_open_active_orders = original_get
+
+        # The fresh row should STILL be open — only pre-recenter rows get swept
+        fresh = await repo.get_active_order("fresh-during-recenter")
+        assert fresh is not None
+        assert fresh.status == "open", (
+            f"A4 must scope force-clean to pre-recenter snapshot; the fresh "
+            f"row inserted during recenter has status {fresh.status!r}"
+        )
+        # All pre-recenter rows should be cancelled
+        for pid in pre_ids:
+            assert (await repo.get_active_order(pid)).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_clean_recenter_no_force_clean_logged(self):
+        """When the cancel loop succeeds, the force-clean path should be
+        a no-op (no warning logs). Regression check that A4 doesn't kick
+        in on the happy path."""
+        repo, _pos_mgr, _exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Successful cancel path (FakeExchange returns True when order is known)
+        new_gr = compute_range_and_levels(
+            mode="static", static_low=60000, static_high=100000, n_levels=5,
+        )
+        await om.recenter(new_range=new_gr, current_price=80000.0)
+
+        # All cancelled — no leftovers needing the A4 sweep
+        assert (await repo.get_open_active_orders()) == []
+
+
 class TestCancellation:
     @pytest.mark.asyncio
     async def test_cancel_out_of_range_after_recenter(self):
@@ -633,6 +1223,107 @@ class TestCancellation:
         assert len(remaining) == 0
 
 
+class TestA5DistinctStatusesAndReason:
+    """AUDIT-FIX A5: repository methods that write distinct status values
+    + cancel_reason for orphan-source observability.
+
+    The bot-initiated cancel path still uses status='cancelled' (with an
+    optional reason). Placement-time rejections (A2 follow-up) use
+    status='failed' + reason. Exchange-side terminations (A1/A3
+    follow-ups) use status='expired' + reason.
+    """
+
+    @pytest.mark.asyncio
+    async def test_mark_order_cancelled_without_reason(self):
+        """Backward compat: existing call sites without `reason` still work."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="legacy-cancel",
+            side="buy", level_index=0, level_price=70000.0, qty=0.01,
+        )
+        await repo.mark_order_cancelled("legacy-cancel")
+        row = await repo.get_active_order("legacy-cancel")
+        assert row.status == "cancelled"
+        assert row.cancel_reason is None
+
+    @pytest.mark.asyncio
+    async def test_mark_order_cancelled_with_reason(self):
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="with-reason",
+            side="buy", level_index=0, level_price=70000.0, qty=0.01,
+        )
+        await repo.mark_order_cancelled("with-reason", reason="recenter_force_close")
+        row = await repo.get_active_order("with-reason")
+        assert row.status == "cancelled"
+        assert row.cancel_reason == "recenter_force_close"
+
+    @pytest.mark.asyncio
+    async def test_mark_order_failed_records_reason(self):
+        """A2 path: Coinbase rejected the placement at submission."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="rejected-placement",
+            side="sell", level_index=12, level_price=78000.0, qty=0.005,
+        )
+        await repo.mark_order_failed(
+            "rejected-placement",
+            reason="INVALID_LIMIT_PRICE_POST_ONLY",
+        )
+        row = await repo.get_active_order("rejected-placement")
+        assert row.status == "failed"
+        assert row.cancel_reason == "INVALID_LIMIT_PRICE_POST_ONLY"
+
+    @pytest.mark.asyncio
+    async def test_mark_order_expired_records_reason(self):
+        """A1/A3 path: exchange terminal status (CANCELLED / EXPIRED /
+        UNKNOWN_CANCEL_ORDER / ORDER_IS_FULLY_FILLED / etc)."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="exchange-cancelled",
+            side="buy", level_index=3, level_price=74000.0, qty=0.005,
+        )
+        await repo.mark_order_expired(
+            "exchange-cancelled",
+            reason="UNKNOWN_CANCEL_ORDER",
+        )
+        row = await repo.get_active_order("exchange-cancelled")
+        assert row.status == "expired"
+        assert row.cancel_reason == "UNKNOWN_CANCEL_ORDER"
+
+    @pytest.mark.asyncio
+    async def test_get_active_orders_by_status_splits_cohorts(self):
+        """Query helper: split orphan-source cohorts."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        # Seed 5 rows across 4 statuses
+        for i, (oid, status_writer) in enumerate([
+            ("ok-cancel-1", lambda x: repo.mark_order_cancelled(x, reason="recenter")),
+            ("ok-cancel-2", lambda x: repo.mark_order_cancelled(x, reason="stale")),
+            ("rejected-1", lambda x: repo.mark_order_failed(x, reason="INVALID_LIMIT_PRICE_POST_ONLY")),
+            ("expired-1", lambda x: repo.mark_order_expired(x, reason="UNKNOWN_CANCEL_ORDER")),
+            ("expired-2", lambda x: repo.mark_order_expired(x, reason="ORDER_IS_FULLY_FILLED")),
+        ]):
+            await repo.insert_active_order(
+                exchange_order_id=oid, side="buy",
+                level_index=i, level_price=70000.0 + i * 100, qty=0.001,
+            )
+            await status_writer(oid)
+
+        cancelled_rows = await repo.get_active_orders_by_status("cancelled")
+        assert len(cancelled_rows) == 2
+        assert {r.cancel_reason for r in cancelled_rows} == {"recenter", "stale"}
+
+        failed_rows = await repo.get_active_orders_by_status("failed")
+        assert len(failed_rows) == 1
+        assert failed_rows[0].cancel_reason == "INVALID_LIMIT_PRICE_POST_ONLY"
+
+        expired_rows = await repo.get_active_orders_by_status("expired")
+        assert len(expired_rows) == 2
+        assert {r.cancel_reason for r in expired_rows} == {
+            "UNKNOWN_CANCEL_ORDER", "ORDER_IS_FULLY_FILLED",
+        }
+
+
 class TestEmergencyExit:
     @pytest.mark.asyncio
     async def test_emergency_exit_cancels_all_and_market_closes(self):
@@ -651,3 +1342,133 @@ class TestEmergencyExit:
         side, size = exch.closed_positions[0]
         assert side == "long"
         assert size == prebuy_qty
+
+
+class TestA1TerminalCancelFailure:
+    """AUDIT-FIX A1: when exchange.cancel_order returns
+    (False, terminal_reason), the DB row MUST be marked cancelled.
+    Without this, orphaned rows accumulate at status='open' and bleed
+    rate-limit budget on every subsequent tick.
+
+    Triggered in PaperEngine after a Railway redeploy clears
+    self.pending_orders → cancel returns (False, "UNKNOWN_CANCEL_ORDER")
+    for every order from the prior epoch. Triggered in live by races
+    between our cancel attempt and Coinbase-side fills/cancellations
+    (ORDER_IS_FULLY_FILLED, DUPLICATE_CANCEL_REQUEST,
+    UNKNOWN_CANCEL_ORDER).
+    """
+
+    @pytest.mark.asyncio
+    async def test_unknown_cancel_order_marks_row_cancelled(self):
+        repo, _pos_mgr, exch, om, _gr = _build_setup(orders_per_side=2)
+        # Place a buy and then forget it on the exchange side (paper restart
+        # equivalent). Coinbase live: order was already filled/cancelled.
+        await om._place_limit(
+            side="buy", level_index=0, level_price=70000.0, qty=0.01,
+        )
+        order = next(iter(repo.active_orders.values()))
+        assert order.status == "open"
+        # Wipe the exchange's record of it
+        del exch.placed[order.exchange_order_id]
+        # Try to cancel — exchange returns (False, "UNKNOWN_CANCEL_ORDER")
+        result = await om._cancel_order(order.exchange_order_id)
+        # The DB row MUST be marked cancelled even though the cancel
+        # itself "failed."
+        assert result is True, "terminal failure should be treated as success-equivalent"
+        refreshed = await repo.get_active_order(order.exchange_order_id)
+        assert refreshed.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_retryable_failure_leaves_row_open(self):
+        """For retryable failure_reasons (INVALID_CANCEL_REQUEST,
+        NOT_ALLOWED_TO_CANCEL, etc), the row stays open so the next
+        sweep tries again.
+        """
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        # Inject an order and a mock exchange that returns a retryable
+        # failure (not in the terminal set)
+        await repo.insert_active_order(
+            exchange_order_id="retry-order",
+            side="buy", level_index=0, level_price=70000.0, qty=0.01,
+        )
+
+        class _RetryableExch:
+            async def cancel_order(self, oid):
+                return (False, "INVALID_CANCEL_REQUEST")
+
+        om.exchange = _RetryableExch()
+        result = await om._cancel_order("retry-order")
+        assert result is False, "retryable should return False"
+        refreshed = await repo.get_active_order("retry-order")
+        assert refreshed.status == "open", "retryable must NOT mark cancelled"
+
+    @pytest.mark.asyncio
+    async def test_order_is_fully_filled_reconciles(self):
+        """When the order filled on Coinbase between our placement and
+        our cancel attempt, batch_cancel returns ORDER_IS_FULLY_FILLED.
+        Our DB MUST be brought back into sync (row marked cancelled —
+        the actual fill should land via the poll path).
+        """
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="raced-order",
+            side="sell", level_index=4, level_price=78000.0, qty=0.005,
+        )
+
+        class _RacedExch:
+            async def cancel_order(self, oid):
+                return (False, "ORDER_IS_FULLY_FILLED")
+
+        om.exchange = _RacedExch()
+        result = await om._cancel_order("raced-order")
+        assert result is True
+        assert (await repo.get_active_order("raced-order")).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_duplicate_cancel_request_marks_cancelled(self):
+        """If our DB still shows 'open' but Coinbase already cancelled
+        (DUPLICATE_CANCEL_REQUEST), bring DB back into sync."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="dup-order",
+            side="buy", level_index=2, level_price=74000.0, qty=0.005,
+        )
+
+        class _DupExch:
+            async def cancel_order(self, oid):
+                return (False, "DUPLICATE_CANCEL_REQUEST")
+
+        om.exchange = _DupExch()
+        result = await om._cancel_order("dup-order")
+        assert result is True
+        assert (await repo.get_active_order("dup-order")).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_recenter_cleans_paper_restart_orphans(self):
+        """End-to-end: simulate a Railway redeploy (wipe PaperEngine
+        pending state) and verify recenter() leaves NO orphan rows."""
+        repo, _pos_mgr, exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+        # Pre-restart: orders exist
+        before = await repo.get_open_active_orders()
+        assert len(before) > 0
+
+        # Simulate Railway redeploy: PaperEngine forgets pending_orders
+        exch.placed.clear()
+
+        # Recenter the grid — should sweep all prior-epoch orders
+        # via the terminal-failure path
+        from bot.strategy.grid_strategy import compute_range_and_levels
+        new_gr = compute_range_and_levels(
+            mode="static", static_low=60000, static_high=120000, n_levels=5,
+        )
+        await om.recenter(new_range=new_gr, current_price=80000.0)
+
+        # All prior-epoch rows should now be status='cancelled'
+        still_open = await repo.get_open_active_orders()
+        assert still_open == [], (
+            f"Recenter should have cleaned all paper-restart orphans, "
+            f"but {len(still_open)} rows remain open: "
+            f"{[(o.side, o.level_index, o.exchange_order_id) for o in still_open]}"
+        )

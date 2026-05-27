@@ -37,7 +37,7 @@ def mock_exchange():
         filled=True,
         fee=Decimal("7.65"),
     )
-    ex.cancel_order.return_value = True
+    ex.cancel_order.return_value = (True, None)  # AUDIT-FIX A1: now a tuple
     return ex
 
 

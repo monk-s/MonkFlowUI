@@ -32,6 +32,12 @@ TIMEFRAME_MAP = {
 # Rate limiting: max 8 concurrent requests (under the 10/s limit)
 _semaphore = asyncio.Semaphore(8)
 
+# AUDIT-FIX A3: order statuses from /historical/{order_id} that mean
+# "this order is over and did NOT fill." Surfacing them lets the grid
+# caller reconcile the DB row instead of polling indefinitely. Set
+# rather than checking inline so the policy lives in one place.
+_TERMINAL_NOT_FILLED_STATUSES = frozenset({"CANCELLED", "EXPIRED", "FAILED"})
+
 
 class CoinbaseClient(ExchangeInterface):
     """Live Coinbase Advanced Trade API client."""
@@ -249,6 +255,51 @@ class CoinbaseClient(ExchangeInterface):
         )
 
         data = await self._request("POST", "/api/v3/brokerage/orders", body)
+
+        # AUDIT-FIX A2: branch on the top-level "success" boolean BEFORE
+        # assuming success_response is populated. Coinbase returns
+        # HTTP 200 + {"success": false, "error_response": {...}} for
+        # placement-time rejections (post_only crossing the spread,
+        # insufficient funds, invalid size precision, etc).
+        # See the NewOrderFailureReason enum at
+        # https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/create-order
+        #
+        # Before this fix, a rejection silently produced an
+        # OrderResult(order_id=client_uuid, filled=False), which
+        # GridOrderManager._place_limit then inserted into
+        # tb3_active_orders as status='open' — an orphan row that
+        # never reconciled because Coinbase returns 404 on subsequent
+        # get_order(client_uuid) calls.
+        # Now we surface the rejection so the caller can skip
+        # insertion and emit a counter metric instead.
+        if data.get("success") is False:
+            err = data.get("error_response") or {}
+            failure_reason = err.get("new_order_failure_reason") or "UNKNOWN"
+            err_message = err.get("message") or err.get("error_details")
+            logger.warning(
+                "place_order_rejected",
+                side=side.value,
+                type=order_type.value,
+                size=str(size),
+                price=str(price) if price else None,
+                stop_price=str(stop_price) if stop_price else None,
+                post_only=post_only,
+                reduce_only=reduce_only,
+                failure_reason=failure_reason,
+                message=err_message,
+            )
+            return OrderResult(
+                order_id="",                # sentinel: caller checks `if not result.order_id`
+                side=side,
+                order_type=order_type,
+                size=size,
+                price=price,
+                stop_price=stop_price,
+                filled=False,
+                timestamp=datetime.now(timezone.utc),
+                raw_response=data,
+            )
+
         order_data = data.get("success_response", data)
 
         # H1: Coinbase returns these status values:
@@ -319,17 +370,30 @@ class CoinbaseClient(ExchangeInterface):
             raw_response=data,
         )
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str) -> tuple[bool, Optional[str]]:
+        """Cancel via Coinbase batch_cancel. Returns (success, failure_reason).
+
+        AUDIT-FIX A1: previously returned bare bool, hiding the failure_reason
+        from callers. The grid manager could not distinguish terminal failures
+        (the order is gone — UNKNOWN_CANCEL_ORDER / ORDER_IS_FULLY_FILLED /
+        DUPLICATE_CANCEL_REQUEST) from retryable ones, and silently left DB
+        rows in `status='open'` whenever cancel returned False. See
+        https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/cancel-order
+        for the full failure_reason enum.
+        """
         try:
             body = {"order_ids": [order_id]}
             data = await self._request("POST", "/api/v3/brokerage/orders/batch_cancel", body)
             results = data.get("results", [])
             if results:
-                return results[0].get("success", False)
-            return False
+                res = results[0]
+                success = bool(res.get("success", False))
+                failure_reason = res.get("failure_reason") if not success else None
+                return success, failure_reason
+            return False, "EMPTY_RESPONSE"
         except Exception as e:
             logger.error("cancel_order_failed", order_id=order_id, error=str(e))
-            return False
+            return False, "EXCEPTION"
 
     async def get_order(self, order_id: str) -> Optional[OrderResult]:
         """Look up an order by Coinbase order_id.
@@ -372,6 +436,16 @@ class CoinbaseClient(ExchangeInterface):
         # → filled=False.
         status = (order.get("status") or "").upper()
         is_filled = status == "FILLED"
+        # AUDIT-FIX A3: non-FILLED terminal states need to flow back to the
+        # grid caller so it can reconcile the local DB row instead of
+        # polling forever. Previously these silently registered as
+        # "not filled, try again next tick" — producing permanent orphans
+        # in tb3_active_orders whenever Coinbase cancelled or expired an
+        # order behind our back (user cancel via UI, exchange risk-engine
+        # cancel, listing change, etc).
+        terminal_status: Optional[str] = (
+            status if status in _TERMINAL_NOT_FILLED_STATUSES else None
+        )
 
         # Extract size and prices. Coinbase response fields vary by order type;
         # try the common shapes.
@@ -434,6 +508,7 @@ class CoinbaseClient(ExchangeInterface):
             fee=fee,
             timestamp=datetime.now(timezone.utc),
             raw_response={"status": status, "order": order},
+            terminal_status=terminal_status,
         )
 
     async def get_positions(self) -> list[Position]:

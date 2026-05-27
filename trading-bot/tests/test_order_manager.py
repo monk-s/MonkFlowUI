@@ -41,7 +41,7 @@ class TestUpdateStopPlaceThenCancel:
     @pytest.mark.asyncio
     async def test_normal_path_places_new_then_cancels_old(self, om, exchange):
         exchange.place_order.return_value = _ok_result("new-stop-id")
-        exchange.cancel_order.return_value = True
+        exchange.cancel_order.return_value = (True, None)
 
         result = await om.update_stop(
             old_stop_order_id="old-stop-id",
@@ -76,7 +76,7 @@ class TestUpdateStopPlaceThenCancel:
     async def test_old_cancel_failure_after_new_placed_does_not_raise(self, om, exchange):
         """If new is placed but cancel-old fails, we still return success."""
         exchange.place_order.return_value = _ok_result("new-stop-id")
-        exchange.cancel_order.return_value = False  # cancel "failed"
+        exchange.cancel_order.return_value = (False, "UNKNOWN_CANCEL_ORDER")  # cancel "failed"
 
         result = await om.update_stop(
             old_stop_order_id="old-stop-id",
@@ -92,7 +92,7 @@ class TestCancelAllOrdersForTrade:
 
     @pytest.mark.asyncio
     async def test_all_succeed_returns_empty_failed_list(self, om, exchange):
-        exchange.cancel_order.return_value = True
+        exchange.cancel_order.return_value = (True, None)
         trade = SimpleNamespace(
             id="t1",
             stop_order_id="stop-id",
@@ -106,7 +106,9 @@ class TestCancelAllOrdersForTrade:
     async def test_partial_failure_returns_failed_ids(self, om, exchange):
         # First two succeed, third fails
         async def cancel_side(oid):
-            return oid != "entry-id"
+            if oid == "entry-id":
+                return (False, "UNKNOWN_CANCEL_ORDER")
+            return (True, None)
         exchange.cancel_order.side_effect = cancel_side
 
         trade = SimpleNamespace(
@@ -134,7 +136,7 @@ class TestCancelAllOrdersForTrade:
 
     @pytest.mark.asyncio
     async def test_failures_logged_to_repo_when_repo_passed(self, om, exchange):
-        exchange.cancel_order.return_value = False  # all fail
+        exchange.cancel_order.return_value = (False, "INVALID_CANCEL_REQUEST")  # all fail
         repo = AsyncMock()
 
         trade = SimpleNamespace(

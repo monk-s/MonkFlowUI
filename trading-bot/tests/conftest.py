@@ -107,7 +107,8 @@ def mock_exchange():
         filled=True,
         fee=Decimal("0.51"),
     )
-    exchange.cancel_order.return_value = True
+    # AUDIT-FIX A1: cancel_order now returns (success, failure_reason).
+    exchange.cancel_order.return_value = (True, None)
     return exchange
 
 

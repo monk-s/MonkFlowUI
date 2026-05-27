@@ -152,6 +152,90 @@ class GridPositionManager:
                 )
         return True, None
 
+    def effective_avg_cost(self) -> Decimal:
+        """P&L-adjusted effective cost basis of the current inventory.
+
+        AUDIT-FIX C4: realized losses booked from past sells raise the
+        effective cost of remaining inventory; realized profits lower it.
+        This makes the breakeven floor self-correcting — a level that
+        was marginally profitable before becomes unprofitable after
+        losses, blocking the bleed sooner.
+
+        Formula:
+            eff_avg = avg_cost - (realized_pnl_total / qty)
+
+        Sign convention:
+          - realized_pnl_total < 0 (losses) → eff_avg > avg_cost
+            (harder to sell, floor raises)
+          - realized_pnl_total > 0 (profits) → eff_avg < avg_cost
+            (easier to sell, floor lowers)
+          - realized_pnl_total == 0 (fresh deploy / break-even)
+            → eff_avg == avg_cost (no change)
+
+        Edge case: if inventory has dropped to zero, eff_avg is undefined.
+        Callers should gate on `state.qty > 0` before consulting this.
+        """
+        if self.state.qty <= 0:
+            return self.state.avg_cost
+        return self.state.avg_cost - (self.state.realized_pnl_total / self.state.qty)
+
+    def is_sell_economically_positive(
+        self,
+        *,
+        level_price,
+        qty,
+        maker_fee_pct,
+        margin: Decimal | float | str = Decimal("1.5"),
+    ) -> tuple[bool, Optional[str]]:
+        """Check if a lone sell at `level_price` for `qty` BTC would cover
+        its own exit fee — i.e. the sell IS profitable on its own even if
+        the matching buy at the next level down never fills.
+
+        Grid level prices are derived from BTC daily highs/lows
+        (`compute_dynamic_range`) and have no awareness of the bot's
+        avg_cost. When a level happens to land just above avg_cost, a
+        lone sell at that level loses money to fees (`gross_pnl < fee`)
+        — a structural fee trap. This check blocks placement at those
+        levels.
+
+        Formula: gross > fee * margin, where
+            gross = (level_price - effective_avg_cost) * qty
+            fee   = level_price * qty * (maker_fee_pct / 100)
+
+        AUDIT-FIX C4: `effective_avg_cost` incorporates realized P&L so
+        the breakeven floor self-corrects as losses (or profits) accrue.
+        See `effective_avg_cost()` for the formula.
+
+        `margin` is a safety multiplier above strict breakeven; the
+        default 1.5 means the level must clear fees by 50% before the
+        bot is willing to place. With margin=1.0 the check is strict
+        breakeven.
+
+        Returns (True, None) if the placement passes, (False, reason)
+        otherwise. If the bot holds no inventory yet (`state.qty <= 0`
+        or `state.avg_cost <= 0`), returns (True, None) — there is no
+        avg-cost basis to ground against, and the long_only floor
+        check (in `can_sell`) is the relevant guard.
+        """
+        if self.state.qty <= 0 or self.state.avg_cost <= 0:
+            return True, None
+        lvl = _to_decimal(level_price)
+        q = _to_decimal(qty)
+        fee_pct = _to_decimal(maker_fee_pct)
+        m = _to_decimal(margin)
+        eff_avg = self.effective_avg_cost()
+        gross = (lvl - eff_avg) * q
+        fee = lvl * q * (fee_pct / Decimal("100"))
+        if gross > fee * m:
+            return True, None
+        return False, (
+            f"sell at {lvl} (qty {q}) gross ${gross:.4f} ≤ fee ${fee:.4f} × "
+            f"margin {m} (eff_avg ${eff_avg:.4f}; "
+            f"avg_cost ${self.state.avg_cost}, "
+            f"realized_pnl_total ${self.state.realized_pnl_total}); "
+            f"placement would lose money on a lone fill"
+        )
+
     async def apply_fill(
         self,
         *,

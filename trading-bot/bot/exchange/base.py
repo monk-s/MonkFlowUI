@@ -37,6 +37,11 @@ class OrderResult:
     fee: Decimal = Decimal("0")
     timestamp: datetime = field(default_factory=datetime.utcnow)
     raw_response: Optional[dict] = None
+    # AUDIT-FIX A3: surfaced when get_order observes a non-FILLED terminal
+    # state on the exchange (CANCELLED / EXPIRED / FAILED). The grid
+    # caller uses this to mark the local DB row cancelled instead of
+    # polling indefinitely. None means "still active or filled normally."
+    terminal_status: Optional[str] = None
 
 
 @dataclass
@@ -97,8 +102,16 @@ class ExchangeInterface(ABC):
         ...
 
     @abstractmethod
-    async def cancel_order(self, order_id: str) -> bool:
-        """Cancel an order by ID. Returns True if cancelled."""
+    async def cancel_order(self, order_id: str) -> tuple[bool, Optional[str]]:
+        """Cancel an order by ID.
+
+        Returns (success, failure_reason). On success, failure_reason is None.
+        On failure, failure_reason is the exchange's reason code (e.g.
+        "UNKNOWN_CANCEL_ORDER", "ORDER_IS_FULLY_FILLED",
+        "DUPLICATE_CANCEL_REQUEST") so callers can distinguish terminal
+        failures (the order is definitively not open on the exchange) from
+        retryable ones (the order is still open and may be re-cancelled).
+        """
         ...
 
     @abstractmethod
