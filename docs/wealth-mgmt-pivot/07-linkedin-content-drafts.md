@@ -20,9 +20,10 @@
 I rebuilt MonkFlow this month around one thing: digital intake forms
 for independent advisor firms.
 
-Backstory: my one paying client when I started was a 4-advisor RIA in
-Dallas. Their pain was specific — new-client onboarding was a 45-minute
-paper-to-Redtail re-key for the ops manager, every single client.
+Backstory: my one paying client when I started was a 4-advisor RIA
+right here in Abilene. Their pain was specific — new-client
+onboarding was a 45-minute paper-to-Redtail re-key for the ops
+manager, every single client.
 
 We built the intake form, the Redtail auto-sync, the signed-PDF
 generation. 2 weeks. 45 min → under 5.
@@ -164,7 +165,7 @@ permission landing — see Plan §0.5).
 
 ```
 Just published the case study for Team Financial Strategies — the
-4-advisor RIA in Dallas where MonkFlow rebuilt new-client onboarding.
+4-advisor RIA in Abilene where MonkFlow rebuilt new-client onboarding.
 
 The numbers: 45 minutes → under 5. Built in 2 weeks. Custom intake
 form + Redtail auto-sync + signed-PDF generation.
@@ -172,7 +173,7 @@ form + Redtail auto-sync + signed-PDF generation.
 The honest section at the bottom — what we'd do differently — is the
 part I'm proudest of. The intake-form conditional logic was
 over-engineered in v1. We shipped 9 conditional branches when 4
-would have covered 95% of client types. Tom's ops manager flagged
+would have covered 95% of client types. Jody's ops manager flagged
 it during week 1; we collapsed branches the following week.
 
 The lesson: ship fewer branches, add only when clients actually hit
@@ -181,13 +182,14 @@ edge cases.
 Full case study at monkflow.io/case-studies/team-financial-strategies.
 
 If you're an advisor firm with a similar onboarding-bottleneck story,
-the productized tiers are public on monkflow.io/#wealth-intake. Or
+the productized tiers are public on monkflow.io/for-advisors. Or
 just DM me.
 ```
 
-*Note: don't post this until TFS publishes case study lands. If TFS
-declines named permission, rewrite as "a 4-advisor RIA in Dallas"
-and remove the firm-name specifics.*
+*Note: TFS permission was granted by Jody Team on 2026-04-29. Post is
+ready to publish once (a) Jody's testimonial wording lands, and (b) the
+published case study page is live at
+monkflow.io/case-studies/team-financial-strategies.*
 
 ---
 
@@ -213,7 +215,7 @@ What's in the video:
 If you've been wondering what "$7,500 productized intake build"
 actually delivers, this is exactly that.
 
-Full ladder + pricing: monkflow.io/#wealth-intake.
+Full ladder + pricing: monkflow.io/for-advisors.
 
 Open to questions in comments or DM.
 ```
@@ -231,7 +233,7 @@ no slides.*
 | 2 | Post 2 — 4 minutes | Tuesday 8am CT | Time-based observation, light data |
 | 3 | Post 3 — Redtail vs Wealthbox | Wednesday 8am CT | Comparative content gets shares |
 | 4 | Post 4 — Paper intake | Tuesday 8am CT | Slight contrarian — drives comments |
-| 5 | Post 5 — TFS case study | Thursday 8am CT (gates on TFS permission) | Link drop |
+| 5 | Post 5 — TFS case study | Thursday 8am CT | Link drop. **Permission granted by Jody Team 2026-04-29.** Post once Jody's testimonial wording lands and the published case study page is live. |
 | 6 | Post 6 — Loom walkthrough | Wednesday 8am CT | Video; longest dwell time |
 
 After week 6: cadence becomes "1 wealth-mgmt-automation observation
@@ -249,7 +251,7 @@ For every post:
 2. Replies should be substantive (2+ sentences, ideally with a follow-up
    question to keep the thread alive)
 3. DO NOT post a CTA in the post body. CTA goes in the FIRST COMMENT
-   from your account ("PS: ladder + pricing at monkflow.io/#wealth-intake")
+   from your account ("PS: ladder + pricing at monkflow.io/for-advisors")
    so LinkedIn's algorithm doesn't deprioritize the post for "external
    link in body"
 4. If a competitor or vendor comments, engage politely — never

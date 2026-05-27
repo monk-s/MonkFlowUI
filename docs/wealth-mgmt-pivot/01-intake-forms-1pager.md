@@ -21,10 +21,10 @@ That workflow is the single highest-leverage operational fix in a
 "it's not broken." It is broken. You're paying $40-80/hr ops time for
 a workflow that can run on rails.
 
-**Real result (Team Financial Strategies, 4-advisor RIA, Dallas):**
+**Real result (Team Financial Strategies, 4-advisor RIA, Abilene TX):**
 **45 minutes → under 5 minutes** per new-client onboarding. Built in 2
 weeks. Custom intake form + Redtail CRM auto-sync + signed-PDF
-generation. Tom Linder, founding partner, available for reference.
+generation. Jody Team, founding partner, available for reference.
 
 ---
 
@@ -103,7 +103,7 @@ that doesn't feel like 1998.
 ## How to engage
 
 Three productized tiers, public pricing, no discovery-dance. See
-**monkflow.io/#wealth-intake** for the full ladder.
+**monkflow.io/for-advisors** for the full ladder.
 
 **Quickest first step:** $1,500 Onboarding Audit. 7-day delivery.
 90-min Loom walkthrough of your current flow + written report on

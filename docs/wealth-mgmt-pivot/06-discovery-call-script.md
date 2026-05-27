@@ -146,7 +146,7 @@ Disqualify yourself from things you don't do or don't recommend:
 
 ### Pricing & next step (1 min)
 
-> "Pricing is on monkflow.io/#wealth-intake — public, fixed-fee.
+> "Pricing is on monkflow.io/for-advisors — public, fixed-fee.
 > For {firmName}, the {tier} at ${price} fits. {N}-day delivery from
 > kickoff.
 >

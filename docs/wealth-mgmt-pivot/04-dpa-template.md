@@ -141,7 +141,7 @@ to return or delete Customer Data.
 
 This DPA is governed by the laws of the State of Texas, without
 regard to its conflict-of-laws principles. Disputes shall be resolved
-in the state or federal courts located in Dallas County, Texas.
+in the state or federal courts located in Taylor County, Texas.
 
 ---
 

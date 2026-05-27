@@ -32,14 +32,14 @@
 ### TOP HALF: The TFS case study
 
 > **MonkFlow rebuilt onboarding for Team Financial Strategies**
-> *(4-advisor RIA, Dallas — real client, named with permission)*
+> *(4-advisor RIA, Abilene TX — real client, named with permission)*
 >
 > Custom digital intake form + Redtail CRM auto-sync + signed-PDF
 > generation. Built in 2 weeks.
 >
 > **Result: 45 min → under 5 min per new-client onboarding.**
 >
-> *Tom Linder, founding partner: "[testimonial pending permission]"*
+> *Jody Team, founding partner: [testimonial wording pending — will be inserted as soon as Jody's exact quote lands]*
 
 ### BOTTOM HALF: What I do for your clients (plus what you get)
 
@@ -92,7 +92,7 @@ Hey {firstName},
 
 I run MonkFlow — productized digital intake forms + CRM sync for
 independent advisor firms. Real result: 45 min → under 5 for a 4-advisor
-RIA in Dallas (Team Financial Strategies, named with permission).
+RIA in Abilene TX (Team Financial Strategies, named with permission).
 
 Quick partnership pitch: your RIA clients have a new-client onboarding
 bottleneck that's downstream of their website (where you do great
@@ -102,7 +102,7 @@ sync + signed PDFs.
 20% referral fee on $7,500 and $14,500 projects. Paid 30 days
 post-go-live. No MSA, no exclusivity, no co-selling overhead.
 
-Public ladder + the TFS case study at monkflow.io/#wealth-intake.
+Public ladder + the TFS case study at monkflow.io/for-advisors.
 
 Worth a 15-min coffee?
 
@@ -121,14 +121,14 @@ I build the form-to-Redtail (or form-to-Wealthbox) integration layer
 that most of your CRM-implementation clients will ask about within 90
 days of going live.
 
-Recent build: Team Financial Strategies, 4-advisor RIA in Dallas.
+Recent build: Team Financial Strategies, 4-advisor RIA in Abilene TX.
 Custom intake + Redtail auto-sync + signed-PDF gen. 2 weeks. 45 min →
-under 5 per onboarding. Tom's available for a reference call.
+under 5 per onboarding. Jody Team (founding partner) available for a reference call.
 
 You're great at the CRM setup. I'm the integration layer downstream.
 Different scopes, complementary, never overlapping.
 
-Productized tiers public at monkflow.io/#wealth-intake. 20% referral
+Productized tiers public at monkflow.io/for-advisors. 20% referral
 fee on $7,500 and $14,500 projects, 30-day net.
 
 Coffee?
@@ -145,14 +145,14 @@ Hey {firstName},
 
 Pivoting MonkFlow into a focused vertical: digital intake forms for
 independent advisor firms. Already have one named case study (a 4-advisor
-RIA in Dallas, real result: cut onboarding from 45 min to under 5).
+RIA in Abilene TX, real result: cut onboarding from 45 min to under 5).
 
 Two questions: (1) any RIAs in your network where new-client
 onboarding paperwork is the bottleneck? Even a "you should talk to
 my brother-in-law's firm" lead is gold. (2) if a referral closes, 20%
 fee structure or just buy you dinner — your call.
 
-Public pricing at monkflow.io/#wealth-intake.
+Public pricing at monkflow.io/for-advisors.
 
 Worth a 15-min call to brainstorm?
 

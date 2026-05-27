@@ -395,10 +395,12 @@ PROSPECT
 - Diagnosis gap: ${topGap}
 
 REAL CASE STUDY (use truthfully, never embellish):
-- Client: Team Financial Strategies, a 4-advisor RIA in Dallas
+- Client: Team Financial Strategies, a 4-advisor RIA in Abilene TX
+- Founding partner (named-permission case study contact): Jody Team
 - What we built: digital intake form + Redtail CRM auto-sync + signed-PDF generation
 - Outcome: cut new-client setup from 45 minutes to under 5
 - Built in: 2 weeks
+- Published case study URL: https://monkflow.io/case-studies/team-financial-strategies (you may include this URL in the FIRST DM but NEVER in the connect note — LinkedIn flags URLs in connect notes as spam)
 
 ${hookHint}
 
@@ -412,7 +414,7 @@ CONNECT NOTE — HARD RULES (≤${CONNECT_NOTE_MAX} chars${tighten ? ' — PREVI
 
 FIRST DM — HARD RULES (≤${FIRST_DM_MAX} chars${tighten ? ' — PREVIOUS ATTEMPT WAS TOO LONG, TIGHTEN' : ''}):
 - Thank them for connecting in 5 words max
-- Lead with the named case study + outcome: "Recently rebuilt new-client onboarding for Team Financial Strategies (4-advisor RIA in Dallas) — cut intake from 45 min to under 5 with Redtail auto-sync."
+- Lead with the named case study + outcome: "Recently rebuilt new-client onboarding for Team Financial Strategies (4-advisor RIA in Abilene TX) — cut intake from 45 min to under 5 with Redtail auto-sync."
 - ONE sentence connecting it to their firm — reference the diagnosis gap if applicable
 - Exactly ONE close-ended CTA on its own line: "Worth a 15-min look? Yes or no."
 - Sign "— Nate"

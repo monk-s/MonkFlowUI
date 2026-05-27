@@ -125,7 +125,7 @@ Honesty is the policy here. As of the engagement, MonkFlow is:
 To engage MonkFlow on a project, your firm's CCO can sign the DPA
 (separate document) and the engagement letter. No vendor questionnaire
 process required for state-registered RIAs in the productized tiers
-(see monkflow.io/#wealth-intake for tier definitions).
+(see monkflow.io/for-advisors for tier definitions).
 
 For SEC-registered firms or firms requiring a SIG Lite-or-equivalent
 vendor questionnaire: please contact Nathan to discuss timing.
