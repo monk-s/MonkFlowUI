@@ -485,6 +485,10 @@ class GridActiveOrder(Base):
     fill_price: Mapped[Optional[float]] = mapped_column(Numeric(20, 2), nullable=True)
     fill_qty: Mapped[Optional[float]] = mapped_column(Numeric(20, 8), nullable=True)
     fee_paid: Mapped[Optional[float]] = mapped_column(Numeric(20, 4), nullable=True)
+    # AUDIT-FIX A5: machine-readable reason populated when status moves
+    # to cancelled/failed/expired so operators can distinguish orphan
+    # sources (post_only rejection, exchange-side cancel, etc).
+    cancel_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("exchange_order_id", name="uq_grid_active_orders_exch_id"),

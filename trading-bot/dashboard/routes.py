@@ -420,6 +420,10 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
                     "status": o.status,
                     "created_at": o.created_at.isoformat() if o.created_at else None,
                     "last_polled_at": o.last_polled_at.isoformat() if o.last_polled_at else None,
+                    # AUDIT-FIX A5: surface cancel_reason on rows that
+                    # transitioned to a non-open terminal state. Open rows
+                    # have it as None (no reason to populate).
+                    "cancel_reason": getattr(o, "cancel_reason", None),
                 }
                 for o in active
             ],
