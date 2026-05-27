@@ -152,6 +152,56 @@ class GridPositionManager:
                 )
         return True, None
 
+    def is_sell_economically_positive(
+        self,
+        *,
+        level_price,
+        qty,
+        maker_fee_pct,
+        margin: Decimal | float | str = Decimal("1.5"),
+    ) -> tuple[bool, Optional[str]]:
+        """Check if a lone sell at `level_price` for `qty` BTC would cover
+        its own exit fee — i.e. the sell IS profitable on its own even if
+        the matching buy at the next level down never fills.
+
+        Grid level prices are derived from BTC daily highs/lows
+        (`compute_dynamic_range`) and have no awareness of the bot's
+        avg_cost. When a level happens to land just above avg_cost, a
+        lone sell at that level loses money to fees (`gross_pnl < fee`)
+        — a structural fee trap. This check blocks placement at those
+        levels.
+
+        Formula: gross > fee * margin, where
+            gross = (level_price - avg_cost) * qty
+            fee   = level_price * qty * (maker_fee_pct / 100)
+
+        `margin` is a safety multiplier above strict breakeven; the
+        default 1.5 means the level must clear fees by 50% before the
+        bot is willing to place. With margin=1.0 the check is strict
+        breakeven.
+
+        Returns (True, None) if the placement passes, (False, reason)
+        otherwise. If the bot holds no inventory yet (`state.qty <= 0`
+        or `state.avg_cost <= 0`), returns (True, None) — there is no
+        avg-cost basis to ground against, and the long_only floor
+        check (in `can_sell`) is the relevant guard.
+        """
+        if self.state.qty <= 0 or self.state.avg_cost <= 0:
+            return True, None
+        lvl = _to_decimal(level_price)
+        q = _to_decimal(qty)
+        fee_pct = _to_decimal(maker_fee_pct)
+        m = _to_decimal(margin)
+        gross = (lvl - self.state.avg_cost) * q
+        fee = lvl * q * (fee_pct / Decimal("100"))
+        if gross > fee * m:
+            return True, None
+        return False, (
+            f"sell at {lvl} (qty {q}) gross ${gross:.4f} ≤ fee ${fee:.4f} × "
+            f"margin {m} (avg_cost ${self.state.avg_cost}); "
+            f"placement would lose money on a lone fill"
+        )
+
     async def apply_fill(
         self,
         *,
