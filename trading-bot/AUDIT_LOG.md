@@ -1156,3 +1156,202 @@ database. Catch bugs that would only surface in production.
 - Medium recommendations logged: 3
 - Low recommendations logged: 1
 - Audit categories evaluated: 12 of 12 (A1-A12)
+
+---
+
+## Session: 2026-05-26 — active_orders count overflow audit
+
+> **⚠ HIGH severity — fix before next live deploy.** Read-only audit, no code
+> changes. The bot is currently in paper mode so there is no money at risk,
+> but the same code path will silently leak orphaned orders in live mode if
+> the process ever restarts mid-grid, which Railway does on every redeploy.
+
+### Symptom
+
+`GET /api/grid/state` reports **18 buys + 20 sells = 38 active orders**
+against a configured cap of `GRID_OPEN_ORDERS_PER_SIDE=10` (so 20 max).
+Reading the live JSON, the orders split cleanly into two cohorts by
+`created_at`:
+
+| Cohort | IDs | created_at window | count |
+|---|---|---|---|
+| Stale (pre-recenter) | 1–10, 12, 14–22 | 2026-05-26 18:53 – 19:48 | 22 |
+| Current (post-recenter) | 23–40 | 2026-05-27 00:32 – 00:37 | 17* |
+
+(*the API was returning 38 at audit time vs. 17+22=39 — one stale row had
+just been resolved between probes; the count drifts but the orphan
+population doesn't.)
+
+`gs.last_recenter_at = 2026-05-27T00:32:15Z`. Every row in the "stale"
+cohort was created BEFORE that recenter ran but still has `status='open'`.
+The two cohorts also use **incompatible level_index→price mappings** — e.g.
+row 22 has `level_index=17, level_price=$75,891` while row 39 has
+`level_index=17, level_price=$78,859` — proving they belong to two
+different grid epochs that got merged in the same table.
+
+### Hypothesis tested
+
+- **H1 — Stale rows in `tb3_active_orders`:** ✅ **CONFIRMED.** 22 of 38
+  rows pre-date the last recenter and have `level_price` outside (or
+  mismatched against) the current grid range — eight of them
+  (`level_price` $67,861–$73,482) are even strictly below
+  `current_range_low=$73,793`.
+- **H2 — `recenter()` didn't fully cancel the old grid:** ✅ **CONFIRMED —
+  this is the root cause.** See "Root cause" below.
+- **H3 — `_populate_levels` placed more than `orders_per_side`:** ❌ Ruled
+  out. [`bot/strategy/grid_strategy.py:55-73`](bot/strategy/grid_strategy.py)
+  caps both `buys_below` and `sells_above` with `out[:n]`, and
+  [`bot/execution/grid_order_manager.py:447-487`](bot/execution/grid_order_manager.py)
+  iterates exactly that list with a per-(level_index, side) idempotency
+  check via `get_open_orders_at_level()`. The post-recenter cohort
+  (IDs 23–39) is 7 buys + 10 sells — buys capped at 7 only because the
+  new range starts just above current price, leaving 7 levels below;
+  sells hit the configured 10. Per-side cap is respected within a single
+  populate call.
+- **H4 — `/api/grid/state` filter is wrong:** ◐ Contributing but not the
+  cause.
+  [`dashboard/routes.py:355`](dashboard/routes.py) and
+  [`bot/persistence/repository.py:555-563`](bot/persistence/repository.py)
+  both do `SELECT … WHERE status='open'` with no symbol, recenter-epoch,
+  or `level_price IN current_range` filter. That's a correct mirror of
+  the table — but because the table has corrupt state, the endpoint
+  surfaces it. The endpoint isn't the bug; it's the messenger.
+
+### Root cause
+
+`GridOrderManager._cancel_order()` silently fails to update the DB row
+when the exchange driver reports the order is unknown, and there is no
+state hydration on bot boot that would re-seat PaperEngine's in-memory
+order book from the DB.
+
+Exact code path:
+
+1. **PaperEngine state is in-memory only.**
+   [`bot/exchange/paper_engine.py:97-110`](bot/exchange/paper_engine.py)
+   initialises `self.pending_orders: dict[str, PaperOrder] = {}` fresh on
+   every `__init__`. There is no `load_from_db()` / hydration step.
+   Every Railway redeploy → fresh dict → all previously-placed
+   `paper-…` order IDs become unknown to the engine.
+2. **PaperEngine.cancel_order returns False for unknown IDs.**
+   [`bot/exchange/paper_engine.py:395-402`](bot/exchange/paper_engine.py)
+   returns `True` only when `order_id in self.pending_orders`; otherwise
+   `return False` with no log.
+3. **`_cancel_order` swallows the False without updating the DB.**
+   [`bot/execution/grid_order_manager.py:544-556`](bot/execution/grid_order_manager.py):
+   ```python
+   ok = await self.exchange.cancel_order(exchange_order_id)
+   if ok:
+       await self.repo.mark_order_cancelled(exchange_order_id)
+   return ok
+   ```
+   When `ok=False`, the row stays `status='open'` forever. No warning is
+   logged at this layer either.
+4. **`recenter()` doesn't notice partial-cancel failure.**
+   [`bot/execution/grid_order_manager.py:244-265`](bot/execution/grid_order_manager.py)
+   tallies a `cancelled` counter but never compares it against
+   `len(open_orders)` or aborts the range update on mismatch. It still
+   writes the new range to `tb3_grid_state` and logs
+   `grid_recenter_done cancelled=0`, then the next tick happily places
+   the new grid alongside the orphans.
+5. **The downstream sweepers can't recover either.**
+   [`_cancel_out_of_range`](bot/execution/grid_order_manager.py:423) and
+   [`_cancel_stale`](bot/execution/grid_order_manager.py:435) both call
+   the same `_cancel_order`, so they hit the same silent-False trap and
+   the orphans persist tick after tick. The orphans' `last_polled_at` does
+   update (via
+   [`touch_order_polled`](bot/execution/grid_order_manager.py:319) which
+   runs before the `result is None` check), so they look "alive" — and
+   that's exactly what the dashboard is showing.
+
+### Why this matters for live mode
+
+- **Live mode (CoinbaseClient.cancel_order):** the same `if ok:` pattern
+  applies. If Coinbase returns 404 (unknown order — already filled,
+  already cancelled, or expired), the driver returns False and the row
+  is never marked cancelled. So this isn't only a paper-mode artefact;
+  live mode has the same orphan-on-mismatch behaviour, just triggered by
+  exchange-side races instead of in-process restarts.
+- **Margin / sizing risk:** each orphan still represents committed
+  capital from the bot's perspective if any downstream code ever counts
+  `get_open_active_orders()` to compute exposure or available margin.
+  Today nothing in the audited path does that, but it's a latent footgun.
+- **Recenter spam risk:** orphans with `level_price` outside the new
+  range trigger `_cancel_out_of_range` every tick, generating a log line
+  + cancel attempt every 30s per orphan, forever.
+
+### Recommended fix (do not apply yet)
+
+Two-layer fix, smallest-blast-radius first:
+
+1. **Treat exchange "unknown order" as cancelled in the DB.** Change
+   `_cancel_order` in
+   [`bot/execution/grid_order_manager.py:544`](bot/execution/grid_order_manager.py:544)
+   so that when `exchange.cancel_order` returns False, the row is still
+   marked `cancelled` in the DB *with a distinct reason* (e.g.
+   `status='cancelled', cancelled_at=now, cancel_reason='exchange_unknown'`
+   — needs a new column or a fallback to the existing `cancelled` status).
+   Rationale: if the exchange doesn't know about the order, it can't be
+   open on the exchange, so it cannot be open in our books either. Pair
+   with a `logger.warning` so we don't lose the signal entirely. This
+   alone unblocks both the recenter path and the
+   out-of-range/stale sweepers.
+2. **Make `recenter()` defensive.** After the cancel loop, query
+   `get_open_active_orders()` again. If anything still has `status='open'`,
+   either (a) hard-mark those rows `cancelled` with reason
+   `recenter_force_close` and proceed, or (b) refuse to write the new
+   range and re-raise — the choice depends on whether you'd rather over-
+   trade or under-trade during reconciliation. Adds 1 DB round-trip per
+   recenter (14-day cadence), negligible cost.
+
+Optionally (Tier 2): hydrate `PaperEngine.pending_orders` from
+`tb3_active_orders WHERE status='open'` on boot. This eliminates the
+restart-induced orphan source entirely for paper mode and means the
+audit fixes above only get exercised in true exchange-side mismatch
+cases. Not strictly required if (1) is in place, but it'd make paper
+mode behave like a real exchange across restarts.
+
+Cleanup of the current orphans is a one-shot:
+```sql
+UPDATE tb3_active_orders
+SET status = 'cancelled',
+    cancelled_at = NOW()
+WHERE status = 'open'
+  AND created_at < (SELECT last_recenter_at FROM tb3_grid_state WHERE id = 1);
+```
+Run after deploying the code fix so a racing tick doesn't re-create the
+same condition.
+
+### Severity
+
+**HIGH.**
+
+- Data integrity bug: `tb3_active_orders.status` is no longer a reliable
+  view of "what's open on the exchange right now."
+- Affects both paper and live drivers (paper triggers on restart, live
+  triggers on exchange-side races).
+- Not currently CRITICAL because (a) the bot is in paper mode, (b)
+  nothing downstream uses the orphan count to make trading decisions,
+  and (c) the new grid still functions correctly — orphans are inert
+  noise. But it'd be CRITICAL the moment live mode is enabled with this
+  code, because the same path would corrupt the live order ledger over
+  any redeploy or exchange race.
+
+### Files referenced
+
+- [bot/execution/grid_order_manager.py:244-265](bot/execution/grid_order_manager.py) — `recenter()`
+- [bot/execution/grid_order_manager.py:447-487](bot/execution/grid_order_manager.py) — `_populate_levels`
+- [bot/execution/grid_order_manager.py:544-556](bot/execution/grid_order_manager.py) — `_cancel_order` (root cause)
+- [bot/exchange/paper_engine.py:97-110](bot/exchange/paper_engine.py) — in-memory state init
+- [bot/exchange/paper_engine.py:395-402](bot/exchange/paper_engine.py) — `cancel_order` returns False silently
+- [bot/persistence/repository.py:555-563](bot/persistence/repository.py) — `get_open_active_orders`
+- [dashboard/routes.py:349-390](dashboard/routes.py) — `/api/grid/state`
+
+### Evidence
+
+Live API output at audit time (2026-05-27T00:38Z):
+- `range_low=$73,793.01, range_high=$82,434.49, last_recenter_at=2026-05-27T00:32:15Z`
+- 8 orphan rows have `level_price < range_low` (IDs 3–10, prices $67,861–$73,482)
+- 1 orphan row has `level_price > range_high` (ID 21 at $83,118.78)
+- Row 22 (buy, level 17, $75,891) and row 39 (sell, level 17, $78,859)
+  share a `level_index` but disagree on `level_price` — direct proof of
+  two grid epochs coexisting in the table.
