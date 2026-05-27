@@ -618,6 +618,25 @@ class GridOrderManager:
                 error=str(e),
             )
 
+        # AUDIT-FIX A2: An empty order_id means the exchange rejected the
+        # placement at submission (CoinbaseClient returns OrderResult with
+        # order_id="" when Coinbase responds with {"success": false, ...}).
+        # We must NOT insert a row into tb3_active_orders in this case —
+        # that produces an unreconcilable orphan row whose UUID Coinbase
+        # has never heard of, leaking forever.
+        if not result.order_id:
+            logger.warning(
+                "place_limit_rejected_by_exchange",
+                side=side, level=level_index, price=level_price, qty=qty,
+            )
+            return PlaceOrderResult(
+                success=False,
+                exchange_order_id=None,
+                side=side, level_index=level_index,
+                level_price=level_price, qty=qty,
+                error="exchange rejected placement at submission",
+            )
+
         # Persist (status='open')
         await self.repo.insert_active_order(
             exchange_order_id=result.order_id,
