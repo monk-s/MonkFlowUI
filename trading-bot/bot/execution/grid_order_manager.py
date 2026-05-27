@@ -466,13 +466,22 @@ class GridOrderManager:
     ) -> None:
         """Ensure the N nearest buy levels below + N nearest sell levels above
         have open orders. Skips levels that already have an open order on
-        the appropriate side."""
+        the appropriate side, or that just filled and are waiting for the
+        adjacent-level opposite to complete the round-trip pair."""
         buys_needed = grid_range.buys_below(current_price, n=self.orders_per_side)
         sells_needed = grid_range.sells_above(current_price, n=self.orders_per_side)
 
         for idx, level_price in buys_needed:
             existing = await self.repo.get_open_orders_at_level(idx, side="buy")
             if existing:
+                continue
+            # AUDIT-FIX C1: skip placement if a buy at this level just filled
+            # and the pair-partner sell at level idx+1 is still pending.
+            if await self._is_pair_pending(idx, "buy", grid_range):
+                logger.info(
+                    "buy_skipped_pair_pending",
+                    level=idx, level_price=level_price,
+                )
                 continue
             qty_dec = _quantize_btc(self.capital_per_level / Decimal(str(level_price)))
             if qty_dec <= 0:
@@ -487,6 +496,17 @@ class GridOrderManager:
         for idx, level_price in sells_needed:
             existing = await self.repo.get_open_orders_at_level(idx, side="sell")
             if existing:
+                continue
+            # AUDIT-FIX C1: skip placement if a sell at this level just filled
+            # and the pair-partner buy at level idx-1 is still pending.
+            # This is the bleed-stop mechanism — without it, _populate_levels
+            # re-creates the same-side sell every tick while price chops just
+            # below the level, firing fill-after-fill at fee-rate loss.
+            if await self._is_pair_pending(idx, "sell", grid_range):
+                logger.info(
+                    "sell_skipped_pair_pending",
+                    level=idx, level_price=level_price,
+                )
                 continue
             qty_dec = _quantize_btc(self.capital_per_level / Decimal(str(level_price)))
             if qty_dec <= 0:
@@ -521,6 +541,47 @@ class GridOrderManager:
                 level_price=level_price,
                 qty=float(qty_dec),
             )
+
+    async def _is_pair_pending(
+        self, level_index: int, side: str, grid_range: GridRange,
+    ) -> bool:
+        """C1 pair-state check: True iff `side` just filled at `level_index`
+        and the pair-partner at the adjacent level is still open.
+
+        Canonical grid behavior: after a sell at level N fills, the bot
+        places a buy at level N-1 (the pair partner). The slot at level
+        N should NOT be re-engaged for same-side placement until the
+        pair-buy at N-1 fills, signaling the round-trip completed.
+
+        Without this gate, tight chop reopens the same-side at level N
+        every tick and bleeds at maker-fee rate — the 2026-05-27 live
+        evidence shows 4 sells at level 7 ($75,879) in 70 minutes
+        losing −$0.107 each because the buy at level 6 ($75,581)
+        never fired.
+
+        When the pair-partner is filled, cancelled, or never existed
+        (e.g., off-grid edge), returns False so normal placement
+        resumes. Cross-recenter is self-cleaning: any prior-epoch
+        pair-partner was cancelled by recenter(), so this check
+        permits placement again under the new epoch.
+        """
+        last_fill = await self.repo.get_most_recent_fill_at_level(
+            level_index, side=side
+        )
+        if last_fill is None:
+            return False
+        if side == "sell":
+            opposite_idx = level_index - 1
+            opposite_side = "buy"
+        else:
+            opposite_idx = level_index + 1
+            opposite_side = "sell"
+        if opposite_idx < 0 or opposite_idx >= grid_range.n_levels:
+            return False
+        opposite_orders = await self.repo.get_open_orders_at_level(
+            opposite_idx, side=opposite_side
+        )
+        return bool(opposite_orders)
 
     # ─────────────────────────────────────────────────────────────────
     # Low-level placement / cancellation
