@@ -413,6 +413,23 @@ class GridOrderManager:
                 cap_per_level=float(self.capital_per_level),
             )
             return
+        # AUDIT-FIX C2: gate opposite-side sells with the same economic-positivity
+        # check as `_populate_levels`. Buys are always allowed (they reduce
+        # avg_cost or are below it, which is good); sells must clear fee +
+        # safety margin against current avg_cost.
+        if opposite_side == "sell":
+            economic_ok, eco_reason = self.position_manager.is_sell_economically_positive(
+                level_price=Decimal(str(opposite_price)),
+                qty=qty_dec,
+                maker_fee_pct=self.maker_fee_pct,
+            )
+            if not economic_ok:
+                logger.info(
+                    "opposite_sell_skipped_below_breakeven",
+                    level=opposite_idx, level_price=opposite_price,
+                    qty=float(qty_dec), reason=eco_reason,
+                )
+                return
         await self._place_limit(
             side=opposite_side,
             level_index=opposite_idx,
@@ -478,6 +495,25 @@ class GridOrderManager:
             # floor — the position_manager would reject the fill anyway.
             allowed, _reason = self.position_manager.can_sell(qty_dec)
             if not allowed:
+                continue
+            # AUDIT-FIX C2: skip placement if the level is structurally
+            # below the fee breakeven against current avg_cost. The grid
+            # range is derived from recent BTC highs/lows with no awareness
+            # of avg_cost, so a level can land just above avg_cost and
+            # produce guaranteed-loss lone sells. Live evidence: 4 sells
+            # at level 7 ($75,879) vs avg_cost $75,873.54 lost −$0.107
+            # each — caught by this check now.
+            economic_ok, eco_reason = self.position_manager.is_sell_economically_positive(
+                level_price=Decimal(str(level_price)),
+                qty=qty_dec,
+                maker_fee_pct=self.maker_fee_pct,
+            )
+            if not economic_ok:
+                logger.info(
+                    "sell_skipped_below_breakeven",
+                    level=idx, level_price=level_price,
+                    qty=float(qty_dec), reason=eco_reason,
+                )
                 continue
             await self._place_limit(
                 side="sell",

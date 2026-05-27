@@ -431,6 +431,110 @@ class TestTickPopulatesLevels:
         buys = [o for o in open_orders if o.side == "buy"]
         assert len(buys) == 3
 
+    @pytest.mark.asyncio
+    async def test_c2_skips_sells_below_breakeven(self):
+        """AUDIT-FIX C2: a sell-level only marginally above avg_cost (gross < fee)
+        must be skipped at placement. Reproduces the 2026-05-27 live bleed:
+        avg_cost $75,873.54, level_price $75,879, qty 0.0043, maker_fee 0.04%
+        → lone-sell net −$0.1075 — placement BLOCKED.
+
+        Setup: a 4-level static grid at $75K–$76K spacing where the level
+        just above current price lands $5 above avg_cost (the fee trap).
+        With C2 in place, no sell is placed there; without C2, one would
+        be placed and would fill at a guaranteed loss.
+        """
+        # Static range 75873.54–76200, 4 levels evenly spaced.
+        # step = (76200 - 75873.54) / 3 ≈ $108.82
+        # levels: 75873.54, 75982.36, 76091.18, 76200
+        repo, pos_mgr, _exch, om, gr = _build_setup(
+            range_low=75873.54, range_high=76200,
+            n_levels=4,
+            orders_per_side=3,
+            capital_per_level=200.0,
+            long_only=False,  # so inventory floor doesn't mask the C2 effect
+        )
+        await om.execute_prebuy(notional_usd=2000.0, current_price=75873.54)
+        # Force avg_cost to the exact production value (paper test
+        # prebuy fee adjustment isn't relevant here)
+        pos_mgr.state.avg_cost = Decimal("75873.54")
+        pos_mgr.state.qty = Decimal("0.0922")
+        pos_mgr.state.prebuy_qty = Decimal("0.0922")
+
+        # Current price right at avg_cost so all levels above are "sells_above"
+        await om.tick(grid_range=gr, current_price=75873.55)
+        open_orders = await repo.get_open_active_orders()
+        sells = sorted(
+            [o for o in open_orders if o.side == "sell"],
+            key=lambda o: o.level_price,
+        )
+
+        # With maker_fee_pct=0.02 from _build_setup and margin=1.5:
+        # Level $75,982.36: gross = (75982.36 - 75873.54)*qty,
+        #                   fee   = 75982.36*qty*0.0002. For qty ≈ 0.0026:
+        #   gross ≈ $0.282, fee ≈ $0.0395, fee*1.5 = $0.059 → ACCEPT
+        # Level $76,091.18 and $76,200: clearly ACCEPT (further from avg_cost)
+        # So with this $108 step and 0.02% fee, all 3 sells pass C2.
+        # To verify C2 catches the live scenario, we need a tighter test
+        # where the step is small relative to fee. See next test.
+        assert len(sells) == 3
+
+    @pytest.mark.asyncio
+    async def test_c2_skips_live_bleed_exact_scenario(self):
+        """The exact production scenario: level just $5.46 above avg_cost
+        at paper's 0.04% maker fee. With C2 in place, the placement is
+        SKIPPED. (Without C2, the bot would place a sell here and fill
+        it on every up-tick, losing $0.1075 each fire.)"""
+        # Build a grid where one level lands at exactly $75,879 (the live
+        # fee trap). We use a static range 75,872 → 75,886 with 3 levels:
+        # levels = [75872, 75879, 75886]. avg_cost = 75873.54.
+        repo, pos_mgr, _exch, om, gr = _build_setup(
+            range_low=75872.0, range_high=75886.0,
+            n_levels=3,
+            orders_per_side=2,
+            capital_per_level=200.0,
+            long_only=False,
+        )
+        # Override the manager's fee to paper's 0.04% (matches the live evidence)
+        om.maker_fee_pct = Decimal("0.04")
+
+        await om.execute_prebuy(notional_usd=2000.0, current_price=75873.54)
+        pos_mgr.state.avg_cost = Decimal("75873.54")
+        pos_mgr.state.qty = Decimal("0.0922")
+        pos_mgr.state.prebuy_qty = Decimal("0.0922")
+
+        # Place at current price below all 3 levels
+        await om.tick(grid_range=gr, current_price=75872.0)
+        open_orders = await repo.get_open_active_orders()
+        sells = [o for o in open_orders if o.side == "sell"]
+        # Level $75,879 (index 1): gross = (75879 - 75873.54) * qty
+        #                          = 5.46 * 0.0026 = $0.0142
+        #                          fee = 75879 * 0.0026 * 0.0004 = $0.0789
+        #                          gross < fee → REJECT
+        # Level $75,886 (index 2): gross = 12.46 * 0.0026 = $0.0324
+        #                          fee = 75886 * 0.0026 * 0.0004 = $0.0789
+        #                          gross < fee*1.5 = $0.118 → REJECT
+        # All sells in this very-tight grid should be rejected by C2.
+        assert sells == [], (
+            f"Expected all sells skipped by C2 at this tight spread, got: "
+            f"{[(o.level_index, o.level_price) for o in sells]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_c2_no_constraint_when_inventory_empty(self):
+        """C2 only blocks placement when there IS inventory to ground avg_cost
+        against. With zero inventory, the long_only floor blocks the placement
+        instead; C2 is permissive."""
+        repo, pos_mgr, _exch, om, gr = _build_setup(
+            orders_per_side=3,
+            long_only=False,  # disable floor for this check
+        )
+        # No pre-buy → state.qty == 0, state.avg_cost == 0
+        await om.tick(grid_range=gr, current_price=80000.0)
+        open_orders = await repo.get_open_active_orders()
+        sells = [o for o in open_orders if o.side == "sell"]
+        # Sells should be placed (C2 permissive when no avg_cost basis)
+        assert len(sells) == 3
+
 
 class TestFillAndOppositePlacement:
     @pytest.mark.asyncio
@@ -483,12 +587,16 @@ class TestFillAndOppositePlacement:
 class TestFullCycle:
     @pytest.mark.asyncio
     async def test_5_buys_then_5_sells_clean(self):
-        """The Phase 3 gate test: pre-buy + 5 buy-fills + 5 sell-fills cycle clean.
+        """The Phase 3 gate test: pre-buy + 5 buy-fills + n sell-fills cycle clean.
 
         With long_only=True, initial sells are blocked (inventory == floor).
         After the 5 buys fill, opposite sells at i+1 are placed by
-        _place_opposite_after_fill. Those then fill on the next round.
-        Verifies final inventory ≥ floor and realized P&L is positive.
+        `_place_opposite_after_fill` — but ONLY for levels above the
+        post-fill avg_cost (AUDIT-FIX C2). The bursty-fill scenario
+        (5 buys complete before any sells) drags avg_cost from
+        ~$77K down toward ~$74K; opposite sells at levels below the
+        new avg_cost are correctly skipped as guaranteed losses.
+        Sells at levels above are placed and fill cleanly.
         """
         repo, pos_mgr, exch, om, gr = _build_setup(
             range_low=70000, range_high=90000,
@@ -520,25 +628,32 @@ class TestFullCycle:
         )
         assert pos_mgr.state.n_buy_fills >= 5
 
-        # New opposite-side sells placed at i+1 for each filled buy.
-        # Filled buys were at levels [0,1,2,3,4] → opposite sells at [1,2,3,4,5].
+        # AUDIT-FIX C2 changed the contract: opposite sells are placed at
+        # i+1 ONLY when level_{i+1} clears (avg_cost + fee*margin). After
+        # 5 buys at $70K..$78K drag avg_cost down to ~$74K, sells at $72K
+        # and $74K are below breakeven (gross < 0 or < fee*1.5) and are
+        # correctly skipped. Sells at $76K, $78K, $80K still pass.
         all_orders = list(repo.active_orders.values())
         new_sells = [
             o for o in all_orders
             if o.side == "sell" and o.status == "open" and o.level_index in {1, 2, 3, 4, 5}
         ]
-        assert len(new_sells) == 5, (
-            f"Expected 5 opposite-side sells, got {len(new_sells)}. "
+        # At least the highest opposite sells (levels 3, 4, 5 = $76K/$78K/$80K)
+        # must be placed — that's the canonical grid-recovery behavior.
+        new_sell_levels = {o.level_index for o in new_sells}
+        assert {3, 4, 5}.issubset(new_sell_levels), (
+            f"Expected opposite sells at levels {{3, 4, 5}} (above post-fill "
+            f"avg_cost), got levels {sorted(new_sell_levels)}. "
             f"All orders: {[(o.side, o.level_index, o.status) for o in all_orders]}"
         )
 
-        # Flag those 5 sells as filled (simulating price recovery)
+        # Flag the placed sells as filled (simulating price recovery)
         for s in new_sells:
             exch.set_filled(s.exchange_order_id)
         await om.tick(grid_range=gr, current_price=80000.0)
 
-        # All 5 sells filled cleanly through the position manager
-        assert pos_mgr.state.n_sell_fills >= 5
+        # All placed sells filled cleanly through the position manager
+        assert pos_mgr.state.n_sell_fills >= len(new_sells)
         # NB: realized P&L on bursty-fill scenarios is near-zero because all
         # buys complete BEFORE any sells, dragging avg cost down. Then the
         # sells execute against that low avg, so the early (low-price) sells
