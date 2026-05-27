@@ -262,58 +262,106 @@ async function refreshPositions() {
   el.innerHTML = parts.join('');
 }
 
-// Trade History
+// Trade History — shows both v1 trades AND grid fills (whatever the bot is producing)
 async function refreshHistory() {
-  const [d, overview] = await Promise.all([api('/api/trades'), api('/api/overview')]);
+  const [d, overview, gridFillsResp] = await Promise.all([
+    api('/api/trades'),
+    api('/api/overview'),
+    api('/api/grid/fills?limit=100'),
+  ]);
   if (!d) return;
   const el = document.getElementById('history-content');
   const statsEl = document.getElementById('history-stats');
 
-  // Card meta — five summary chips
-  if (d.stats && statsEl) {
-    statsEl.innerHTML = `
-      <span>Trades: <strong>${d.stats.total_trades || 0}</strong></span>
-      <span>Win Rate: <strong>${fmt(d.stats.win_rate || 0, 1)}%</strong></span>
-      <span>Avg R: <strong>${fmt(d.stats.avg_r || 0, 2)}</strong></span>
-      <span>Expectancy: <strong>$${fmt(d.stats.expectancy || 0)}</strong></span>
-      <span>PF: <strong>${fmt(d.stats.profit_factor || 0, 2)}</strong></span>
-    `;
-  } else if (statsEl) {
-    statsEl.textContent = '0 trades';
+  const v1Trades = d.trades || [];
+  const gridFills = (gridFillsResp && gridFillsResp.fills) || [];
+
+  // Aggregate grid stats from the fills we got back. Cheap on the frontend
+  // and avoids waiting for a backend roundtrip just to summarize.
+  const gridNet = gridFills.reduce(
+    (s, f) => s + (Number(f.realized_pnl) || 0) - (Number(f.fee_paid) || 0),
+    0,
+  );
+  const gridFees = gridFills.reduce((s, f) => s + (Number(f.fee_paid) || 0), 0);
+  const gridBuys = gridFills.filter(f => f.side === 'buy').length;
+  const gridSells = gridFills.filter(f => f.side === 'sell').length;
+
+  // Card meta — single line covering whichever engine has data
+  if (statsEl) {
+    const chips = [];
+    if (d.stats && d.stats.total_trades) {
+      chips.push(`<span>v1: <strong>${d.stats.total_trades}</strong> trades</span>`);
+      chips.push(`<span>Win Rate: <strong>${fmt(d.stats.win_rate || 0, 1)}%</strong></span>`);
+      chips.push(`<span>Expectancy: <strong>$${fmt(d.stats.expectancy || 0)}</strong></span>`);
+    }
+    if (gridFills.length) {
+      chips.push(`<span>Grid: <strong>${gridFills.length}</strong> fills</span>`);
+      chips.push(`<span>Net: <strong class="${pnlClass(gridNet)}">${pnlSign(gridNet)}$${fmt(Math.abs(gridNet))}</strong></span>`);
+    }
+    statsEl.innerHTML = chips.length ? chips.join('') : '<span class="muted">No activity yet</span>';
   }
 
   // Status banner
-  const wr = d.stats?.win_rate;
   _setStatusBanner('h', overview, {
     text: overview?.status === 'HALTED'
       ? `HALTED — ${overview.halt_reason || 'unknown reason'}`
-      : `Bot HEALTHY · ${(d.stats?.total_trades || 0)} lifetime trade${d.stats?.total_trades === 1 ? '' : 's'}`,
-    sub: wr != null
-      ? `Win rate ${fmt(wr, 1)}% · expectancy $${fmt(d.stats?.expectancy || 0)}`
-      : 'No closed trades yet',
+      : `Bot HEALTHY · ${v1Trades.length} v1 trade${v1Trades.length === 1 ? '' : 's'} · ${gridFills.length} grid fill${gridFills.length === 1 ? '' : 's'}`,
+    sub: gridFills.length
+      ? `Grid net (last ${gridFills.length} fills): ${pnlSign(gridNet)}$${fmt(Math.abs(gridNet))} · fees $${fmt(gridFees)}`
+      : (d.stats?.win_rate != null
+          ? `v1 win rate ${fmt(d.stats.win_rate, 1)}% · expectancy $${fmt(d.stats?.expectancy || 0)}`
+          : 'No closed trades yet'),
   });
 
-  if (!d.trades?.length) {
-    el.innerHTML = '<p class="empty-state">No trades yet. Trade history fills as v1 strategy signals close out; grid fills live in the Grid tab.</p>';
+  const parts = [];
+
+  // v1 trade history table (if any)
+  if (v1Trades.length) {
+    parts.push('<div class="subsection-title">Strategy trades (v1)</div>');
+    parts.push(`<table class="data-table"><thead><tr>
+      <th>Date</th><th>Strategy</th><th>Dir</th><th>Status</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">P&amp;L</th><th class="num">R</th>
+    </tr></thead><tbody>${v1Trades.map(t => {
+      const date = t.signal_at ? new Date(t.signal_at).toLocaleDateString() : '--';
+      const pnl = t.net_pnl;
+      return `<tr>
+        <td>${escapeHtml(date)}</td>
+        <td>${escapeHtml(t.strategy || '--')}</td>
+        <td class="${t.direction === 'long' ? 'green' : 'red'}"><strong>${escapeHtml((t.direction || '--').toUpperCase())}</strong></td>
+        <td>${escapeHtml(t.status)}</td>
+        <td class="num">${t.entry_price ? '$' + fmt(t.entry_price) : '--'}</td>
+        <td class="num">${t.exit_price ? '$' + fmt(t.exit_price) : '--'}</td>
+        <td class="num ${pnlClass(pnl || 0)}">${pnl != null ? pnlSign(pnl) + '$' + fmt(Math.abs(pnl)) : '--'}</td>
+        <td class="num">${t.r_multiple != null ? fmt(t.r_multiple, 1) + 'R' : '--'}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`);
+  }
+
+  // Grid fills table (if any). Shows the bot's actual trading activity in grid mode.
+  if (gridFills.length) {
+    parts.push(`<div class="subsection-title">Grid fills · ${gridBuys} buys / ${gridSells} sells</div>`);
+    parts.push(`<table class="data-table"><thead><tr>
+      <th>When</th><th>Side</th><th class="num">Lvl</th><th class="num">Price</th><th class="num">Qty</th><th class="num">Fee</th><th class="num">Net P&amp;L</th>
+    </tr></thead><tbody>${gridFills.map(f => {
+      const date = f.created_at ? new Date(f.created_at).toLocaleString() : '--';
+      const net = (Number(f.realized_pnl) || 0) - (Number(f.fee_paid) || 0);
+      return `<tr>
+        <td>${escapeHtml(date)}</td>
+        <td class="${f.side === 'buy' ? 'green' : 'red'}"><strong>${escapeHtml(f.side.toUpperCase())}</strong></td>
+        <td class="num">${f.level_index}</td>
+        <td class="num">$${fmt(f.fill_price, 0)}</td>
+        <td class="num">${fmt(f.fill_qty, 4)}</td>
+        <td class="num">$${fmt(f.fee_paid)}</td>
+        <td class="num ${pnlClass(net)}">${pnlSign(net)}$${fmt(Math.abs(net))}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`);
+  }
+
+  if (!parts.length) {
+    el.innerHTML = '<p class="empty-state">No trades yet. v1 strategy trades and grid fills will appear here as they happen.</p>';
     return;
   }
 
-  el.innerHTML = `<table class="data-table"><thead><tr>
-    <th>Date</th><th>Strategy</th><th>Dir</th><th>Status</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">P&amp;L</th><th class="num">R</th>
-  </tr></thead><tbody>${d.trades.map(t => {
-    const date = t.signal_at ? new Date(t.signal_at).toLocaleDateString() : '--';
-    const pnl = t.net_pnl;
-    return `<tr>
-      <td>${escapeHtml(date)}</td>
-      <td>${escapeHtml(t.strategy || '--')}</td>
-      <td class="${t.direction === 'long' ? 'green' : 'red'}"><strong>${escapeHtml((t.direction || '--').toUpperCase())}</strong></td>
-      <td>${escapeHtml(t.status)}</td>
-      <td class="num">${t.entry_price ? '$' + fmt(t.entry_price) : '--'}</td>
-      <td class="num">${t.exit_price ? '$' + fmt(t.exit_price) : '--'}</td>
-      <td class="num ${pnlClass(pnl || 0)}">${pnl != null ? pnlSign(pnl) + '$' + fmt(Math.abs(pnl)) : '--'}</td>
-      <td class="num">${t.r_multiple != null ? fmt(t.r_multiple, 1) + 'R' : '--'}</td>
-    </tr>`;
-  }).join('')}</tbody></table>`;
+  el.innerHTML = parts.join('');
 }
 
 // Equity Curve
@@ -792,15 +840,29 @@ document.getElementById('log-level').addEventListener('change', refreshLogs);
 document.getElementById('log-component').addEventListener('change', refreshLogs);
 
 // Initial load + auto-refresh
+//
+// Always-on (cheap endpoints, useful from any tab):
+//   - refreshOverview     (header badges + status, dashboard-wide context)
+//   - refreshPositions    (positions table)
+//   - refreshHistory      (trade history + grid fills — both visible in History tab)
+//   - refreshConfig       (rare changes, but cheap)
+//
+// Tab-gated (heavier or tab-specific renders, only when user is looking):
+//   - refreshGrid         (3 API calls + SVG render)
+//   - refreshEquity       (Chart.js redraw on 2 canvases)
+//   - refreshLogs         (potentially large payload depending on filters)
+function _isTabActive(name) {
+  return document.getElementById('tab-' + name)?.classList.contains('active');
+}
+
 async function refreshAll() {
   await refreshOverview();
   await refreshPositions();
   await refreshHistory();
   await refreshConfig();
-  // Only refresh grid if the tab is visible (saves bandwidth)
-  if (document.getElementById('tab-grid')?.classList.contains('active')) {
-    await refreshGrid();
-  }
+  if (_isTabActive('grid'))   await refreshGrid();
+  if (_isTabActive('equity')) await refreshEquity();
+  if (_isTabActive('logs'))   await refreshLogs();
 }
 
 refreshAll();
