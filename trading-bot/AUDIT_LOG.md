@@ -1355,3 +1355,885 @@ Live API output at audit time (2026-05-27T00:38Z):
 - Row 22 (buy, level 17, $75,891) and row 39 (sell, level 17, $78,859)
   share a `level_index` but disagree on `level_price` — direct proof of
   two grid epochs coexisting in the table.
+
+---
+
+## Session: 2026-05-26 — Grid execution audit (3 categories)
+
+> **🛑 CRITICAL — the bot is currently bleeding money in production.**
+> The live `tb3_grid_fills` log shows **4 lone-sell fills at level 7 ($75,879)
+> over ~70 minutes** (00:43, 00:45, 00:50, 01:49), each booking a realized
+> **−$0.1075** because the level sits only **$5.46 above avg cost
+> ($75,873.54)** — far below the per-leg fee of **$0.1305** at 0.04% maker.
+> Inventory dropped from 0.0922 → 0.0750 BTC in that window with **zero
+> replenishing buy fills**. Realized P&L went from −$0.376 to **−$0.4835**
+> and fees from $4.85 to **$4.98** in the audit window. This is the
+> Category C re-placement loop firing now, in paper, on real prices. **In
+> live mode the bleed direction is the same** (Coinbase maker fees are
+> ~0.02%, so the per-cycle loss shrinks to ~$0.04 — still mathematically
+> guaranteed negative on every fire). The bot must not be cut over to
+> live until C is fixed.
+
+**Scope:** read-only audit of three concerning patterns surfaced after
+the 2026-05-26 chop-tuning config went live (`GRID_PREBUY_PCT=70`,
+`GRID_OPEN_ORDERS_PER_SIDE=10`, relaxed floor, tighter range, force-recenter).
+**No code changes applied — findings + recommended fixes only.**
+
+This session is a comprehensive sibling to the two narrower audits
+already on file:
+- `audit/grid-active-orders-overflow` branch — single-finding deep dive
+  on Category A (root cause: `_cancel_order` silently swallows
+  exchange-False).
+- 2026-05-26 `PaperEngine fill semantics vs Coinbase Advanced Trade`
+  session — committed on branch `audit/paperengine-fill-semantics`
+  (open PR; not yet merged into `main` at the time this audit was
+  written) — Category B with 9 findings.
+
+Where this session re-covers the same ground, the same-pattern findings
+are cross-referenced rather than duplicated; **the net-new findings here
+are A2, A3, A5, C1, C2, C3, C4, plus the cross-cutting
+production-impact framing in the executive summary.**
+
+### Executive summary
+
+| Severity | Count | Where |
+|---|---|---|
+| **CRITICAL** | **3** | C1, C2, A2 |
+| HIGH | 5 | A1, A3, A4, C3, (B-restart-orphan, paper-only) |
+| MEDIUM | 3 | A5, C4, A-recenter-defensive |
+| LOW | 1 | Cat-A surfacing on `/api/grid/state` |
+| (Cross-ref to prior PaperEngine audit) | 9 | B1–B9 — not re-counted here |
+
+**Findings where paper > live (paper overstates):** the entire Category B
+block. **Findings where the bug is identical paper and live:** all of
+Category A and all of Category C.
+
+### Method
+
+Read the current code of these files end-to-end (no skimming):
+[`bot/execution/grid_order_manager.py`](bot/execution/grid_order_manager.py),
+[`bot/execution/grid_position_manager.py`](bot/execution/grid_position_manager.py),
+[`bot/exchange/paper_engine.py`](bot/exchange/paper_engine.py),
+[`bot/exchange/coinbase_client.py`](bot/exchange/coinbase_client.py),
+[`bot/strategy/grid_strategy.py`](bot/strategy/grid_strategy.py),
+[`bot/persistence/repository.py`](bot/persistence/repository.py),
+[`dashboard/routes.py`](dashboard/routes.py),
+[`bot/scheduler/grid_tick.py`](bot/scheduler/grid_tick.py),
+[`migrations/versions/002_v3_grid_schema.py`](migrations/versions/002_v3_grid_schema.py).
+
+Pulled live evidence from the public dashboard API:
+`GET /api/grid/state` (orders + state) and `GET /api/grid/fills?limit=20`
+(fill log). No prod-DB credentials were available in the environment at
+audit time, so `tb3_active_orders` raw rows are inferred from the
+`/api/grid/state` projection (which `dashboard/routes.py:355` populates
+verbatim from `repo.get_open_active_orders()`).
+
+Cross-referenced Coinbase Advanced Trade docs for the post-only
+rejection enum and `batch_cancel` failure-reason enum (search-based —
+the published reference at
+https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/cancel-order
+was reachable; the create-order reference was reachable via search but
+not direct fetch).
+
+---
+
+### CATEGORY A — Active orders count overflow
+
+**Live symptom (confirmed at audit time):** `GET /api/grid/state` returns
+**18 buys + 20 sells = 38 active orders, all `status='open'`**, against
+a configured cap of `GRID_OPEN_ORDERS_PER_SIDE=10` (so 20 ceiling). The
+orders split cleanly by `created_at` against `last_recenter_at`
+(`2026-05-27T00:32:15Z`):
+
+| Cohort | created_at | count | side breakdown | level_price range |
+|---|---|---|---|---|
+| **Pre-recenter (orphaned)** | 2026-05-26 18:53–19:48 | **20** | 11 buy + 9 sell | $67,861 – $83,119 |
+| Post-recenter (legitimate) | 2026-05-27 00:32–01:49 | 18 | 7 buy + 11 sell | $73,793 – $78,859 |
+
+The pre-recenter cohort uses the OLD grid epoch's `level_index→price`
+mapping — e.g. pre-recenter `level_index=7` sits at `level_price=$67,861`
+while post-recenter `level_index=7` sits at `$75,879`. Eight of the
+pre-recenter orphans have `level_price < $73,793` (today's range_low)
+— they are strictly outside the active range and should have been
+swept by `_cancel_out_of_range` on every tick since 00:32. They haven't
+been.
+
+This is `H1` (stale rows) and `H2` (recenter didn't fully cancel)
+from the prompt, both **CONFIRMED**. `H3` (`_populate_levels` over-caps)
+**RULED OUT** — see A-not-found below. `H4` (API filter wrong) is
+contributing in the sense that the endpoint surfaces the corruption
+faithfully, but the bug is upstream — see A-final below.
+
+---
+
+#### [CRITICAL] [A2] `CoinbaseClient.place_order` silently swallows `success:false` rejections and writes orphan rows to `tb3_active_orders`
+
+This is the live-mode-only Category A path that **does not exist in paper**
+(PaperEngine accepts every limit unconditionally; see B-prior-audit-[2]).
+It will fire on every live deploy the moment a post-only placement
+would have crossed the spread, an obvious-mistake price, or any other
+`new_order_failure_reason` from
+https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/create-order.
+
+- **File:** [`bot/exchange/coinbase_client.py:251-320`](bot/exchange/coinbase_client.py:251)
+  + [`bot/execution/grid_order_manager.py:493-542`](bot/execution/grid_order_manager.py:493)
+- **Symptom (live mode):** every rejected order placement creates a row
+  in `tb3_active_orders` with `status='open'` whose `exchange_order_id`
+  is the bot's locally-generated UUID (Coinbase never assigned an id
+  because the order never entered the book). The row never reconciles
+  because Coinbase returns 404 on subsequent `get_order(UUID)` polls,
+  the bot's `_request` raises HTTPStatusError, `get_order` catches it
+  (line 352-354) and returns None, and `_poll_and_apply_fills`
+  (line 320) treats `result is None` as "still pending, try next tick."
+  The row is also untouchable by `_cancel_order` because batch_cancel
+  on the bogus UUID returns `success: false`, hitting bug [A1] below.
+- **Root cause walk-through:**
+  ```python
+  # coinbase_client.py:251-263
+  data = await self._request("POST", "/api/v3/brokerage/orders", body)
+  order_data = data.get("success_response", data)
+  #   On rejection: data = {"success": false,
+  #                         "error_response": {
+  #                           "new_order_failure_reason": "INVALID_LIMIT_PRICE_POST_ONLY",
+  #                           ...},
+  #                         "order_configuration": {...}}
+  #   → data.get("success_response", data) falls back to `data` itself
+  status = (order_data.get("status") or "").upper()  # → ""
+  is_filled = status == "FILLED"                      # → False
+  ```
+  ```python
+  # coinbase_client.py:310-320
+  return OrderResult(
+      order_id=order_data.get("order_id", client_order_id),  # → client UUID
+      filled=is_filled,                                      # → False
+      ...
+  )
+  ```
+  ```python
+  # grid_order_manager.py:524-531 (in _place_limit)
+  # `result.filled == False` is normal for a queued limit, so no check.
+  # `result.order_id` could be a real Coinbase id OR a client UUID —
+  # no distinction is made.
+  await self.repo.insert_active_order(
+      exchange_order_id=result.order_id,
+      side=side, level_index=..., level_price=..., qty=qty,
+  )
+  ```
+  The `data["success"]` boolean is never read anywhere in the file.
+- **Coinbase doc reference:** the create-order response shape is
+  `{"success": bool, "success_response": {...}, "error_response": {
+  "message", "error_details", "new_order_failure_reason"}}`. Possible
+  `new_order_failure_reason` values relevant here include
+  `INVALID_LIMIT_PRICE_POST_ONLY` (post_only would cross),
+  `INSUFFICIENT_FUND`, `UNTRADABLE_PRODUCT`, `PRODUCT_TRADING_HALTED`,
+  `INVALID_SIZE_PRECISION`, `INVALID_PRICE_PRECISION`. Any of these
+  produces an orphan row in our DB.
+- **Live impact:**
+  - **Frequency:** every post-only rejection. The grid's stated invariant
+    is "all entries are LIMIT with post_only=True" — so any time the
+    grid recenters during a price move, OR a sell-level is placed
+    near a moving best-bid (which the dynamic grid does explicitly
+    near current price), there is a non-trivial chance the limit
+    would cross at placement and get rejected. Estimated 1–5% of
+    placements in choppy hours.
+  - **Per-occurrence:** one orphan row that lives forever, plus a
+    log line at "INFO" (`limit_placed`) that misleadingly claims
+    success. No "order_rejected" log line is emitted.
+  - **Compounding:** every orphan triggers a wasted `_cancel_order`
+    call in `_cancel_out_of_range` and `_cancel_stale` on every
+    subsequent tick (one Coinbase round-trip per orphan per 30s),
+    contributing latent rate-limit pressure.
+- **Proposed fix (one paragraph):** In
+  `CoinbaseClient.place_order`, after `data = await self._request(...)`,
+  branch on `data.get("success")` first. On `success=False`, log
+  `place_order_rejected` with the full `error_response.new_order_failure_reason`
+  and `error_response.message`, and return an `OrderResult` with
+  `order_id=None, filled=False` (or raise a new
+  `OrderRejectedError`). In `grid_order_manager._place_limit`, treat
+  `result.order_id is None` (or the new exception) as a non-fatal
+  rejection: don't insert into `tb3_active_orders`, emit a counter
+  metric, and return `PlaceOrderResult(success=False, error=reason)`.
+  This single change eliminates the post-only-rejection orphan class
+  without changing any other path.
+- **Test that would catch it:** unit test for
+  `CoinbaseClient.place_order` with a mocked `_request` returning
+  `{"success": false, "error_response": {"new_order_failure_reason":
+  "INVALID_LIMIT_PRICE_POST_ONLY", "message": "...", "error_details":
+  "..."}}`. Assert that the returned `OrderResult.order_id is None`
+  (or that an exception is raised), and that `insert_active_order`
+  is NOT called by the caller.
+
+---
+
+#### [HIGH] [A1] `_cancel_order` does not mark the DB row cancelled when the exchange returns False (already documented; restated for completeness)
+
+This is the same finding that lives in
+[`audit/grid-active-orders-overflow`](https://github.com/monk-s/MonkFlowUI/tree/audit/grid-active-orders-overflow)
+(see commit b3a8983). Restated here because it's load-bearing for the
+post-recenter cleanup and for the A2 orphan recovery path.
+
+- **File:** [`bot/execution/grid_order_manager.py:544-556`](bot/execution/grid_order_manager.py:544)
+  ```python
+  async def _cancel_order(self, exchange_order_id: str) -> bool:
+      try:
+          ok = await self.exchange.cancel_order(exchange_order_id)
+      except Exception as e:
+          logger.warning("cancel_order_exception", ...)
+          return False
+      if ok:
+          await self.repo.mark_order_cancelled(exchange_order_id)
+      return ok
+  ```
+- **Symptom:** if `exchange.cancel_order` returns `False` for any reason,
+  the DB row stays `status='open'` forever. `recenter()`,
+  `_cancel_out_of_range`, `_cancel_stale`, and `emergency_exit` all
+  call this method and all hit the same trap.
+- **Coinbase API truth:** per the official
+  https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/cancel-order,
+  `batch_cancel` returns `{"results": [{"success": bool,
+  "failure_reason": string, "order_id": string}]}` with possible
+  `failure_reason` values including `UNKNOWN_CANCEL_ORDER`,
+  `ORDER_IS_FULLY_FILLED`, `DUPLICATE_CANCEL_REQUEST`,
+  `INVALID_CANCEL_REQUEST`, `COMMANDER_REJECTED_CANCEL_ORDER`,
+  `NOT_ALLOWED_TO_CANCEL`. Of these:
+  - `UNKNOWN_CANCEL_ORDER` and `ORDER_IS_FULLY_FILLED` and
+    `DUPLICATE_CANCEL_REQUEST` are **terminal** — the order CANNOT be
+    open on the exchange — so the DB row should be marked cancelled.
+  - `INVALID_CANCEL_REQUEST` / `COMMANDER_REJECTED_CANCEL_ORDER` /
+    `NOT_ALLOWED_TO_CANCEL` are retryable; the DB row should stay
+    open.
+  - `CoinbaseClient.cancel_order` at
+    [`bot/exchange/coinbase_client.py:322-332`](bot/exchange/coinbase_client.py:322)
+    reads `results[0].get("success", False)` and ignores
+    `failure_reason` entirely, so the caller has no way to distinguish
+    terminal from retryable.
+- **Paper-mode trigger:** every Railway redeploy → `PaperEngine.__init__`
+  initializes `self.pending_orders = {}` empty → every previously-placed
+  paper-XXX order id is now unknown → `cancel_order(oid)` returns False
+  → all in-flight orders become orphans on the very first tick after
+  redeploy. This is exactly the mechanism that produced the 20-orphan
+  cohort observed in the live evidence; the bot was redeployed at some
+  point on 2026-05-26 between 18:53 and 19:48.
+- **Live impact:** same DB-vs-exchange divergence, triggered by the
+  reasons above (already-filled at race-time, etc).
+- **Proposed fix (one paragraph):** Two layers.
+  (1) `CoinbaseClient.cancel_order` should return a richer result —
+  e.g. `tuple[bool, Optional[str]]` of (success, failure_reason).
+  (2) `GridOrderManager._cancel_order` should, on `success=False`,
+  examine `failure_reason`: for the terminal set
+  (`UNKNOWN_CANCEL_ORDER`, `ORDER_IS_FULLY_FILLED`,
+  `DUPLICATE_CANCEL_REQUEST`), call `repo.mark_order_cancelled` with
+  a distinct `cancel_reason` ('exchange_unknown' / 'already_filled' /
+  'duplicate'); for the retryable set, log a warning and leave the row
+  open. For PaperEngine specifically, `cancel_order` already returns
+  False for unknown ids (line 395-402); we treat that as
+  `UNKNOWN_CANCEL_ORDER` equivalent and mark the row cancelled.
+- **Test that would catch it:** integration test where a placed
+  PaperEngine order is "forgotten" (engine restart simulated by
+  `paper_engine.pending_orders.clear()`), then `_cancel_order` is
+  invoked — assert the DB row's status is `cancelled` afterward.
+
+---
+
+#### [HIGH] [A3] `CoinbaseClient.get_order` doesn't surface CANCELLED / EXPIRED / FAILED to the caller; `_poll_and_apply_fills` treats non-FILLED as "still open"
+
+Distinct from A1 (which is about the cancel path). This is the **poll
+path** — separate code, separate trigger, same orphan outcome.
+
+- **File:** [`bot/exchange/coinbase_client.py:369-374`](bot/exchange/coinbase_client.py:369)
+  + [`bot/execution/grid_order_manager.py:306-323`](bot/execution/grid_order_manager.py:306)
+- **`get_order` extract:**
+  ```python
+  status = (order.get("status") or "").upper()
+  is_filled = status == "FILLED"
+  # ...
+  return OrderResult(
+      ...
+      filled=is_filled,                         # only True for FILLED
+      raw_response={"status": status, "order": order},
+  )
+  ```
+- **`_poll_and_apply_fills` extract:**
+  ```python
+  result = await self.exchange.get_order(o.exchange_order_id)
+  await self.repo.touch_order_polled(o.exchange_order_id)
+  if result is None:
+      continue
+  if not result.filled:
+      continue
+  ```
+- **Symptom:** when Coinbase's `/historical/{order_id}` returns
+  `status="CANCELLED"` (or `EXPIRED` or `FAILED`) — i.e. the order
+  resolved to a non-FILLED terminal state without the bot calling
+  cancel — the bot loops past it forever. `touch_order_polled` keeps
+  bumping `last_polled_at`, so dashboards show the row as "actively
+  watched" even though Coinbase considers it dead. `_cancel_stale`
+  fires after `GRID_ORDER_STALE_MINUTES=1440` (24h) but immediately
+  hits A1 (cancel-False trap), so the row still doesn't clear.
+- **Concrete triggers in live mode:**
+  - Coinbase expires the order (rare for GTC limits but possible).
+  - User cancels the order manually in the Coinbase UI.
+  - Risk-engine cancel from Coinbase side (e.g., post-listing change
+    or price-collar adjustment).
+  - Cascade from A2: any rejected placement that somehow still got an
+    `order_id` issued (post-only is checked AFTER initial acceptance
+    in some Coinbase code paths — verify before relying on A2 alone).
+- **Live impact:** every Coinbase-side terminal-not-FILLED transition
+  produces a permanent orphan in `tb3_active_orders`. Frequency is
+  low in steady state but spikes during any market event Coinbase
+  responds to (collar adjustments, halts, etc).
+- **Proposed fix (one paragraph):** Change `get_order` to surface
+  terminal-non-FILLED states distinctly. Either widen `OrderResult`
+  with a `terminal_status: Optional[str]` field, or split the return
+  into a small union. Then in `_poll_and_apply_fills`, after the
+  `if not result.filled: continue` line, add `if result.terminal_status
+  in {'CANCELLED', 'EXPIRED', 'FAILED'}: await
+  self.repo.mark_order_cancelled(o.exchange_order_id); continue`.
+- **Test that would catch it:** mock `coinbase_client.get_order` to
+  return an `OrderResult` with the new terminal-status field set to
+  `"CANCELLED"`; assert the DB row is marked cancelled after one
+  `_poll_and_apply_fills` invocation.
+
+---
+
+#### [HIGH] [A4] `recenter()` doesn't verify each cancel succeeded before writing the new range (already documented; restated)
+
+- **File:** [`bot/execution/grid_order_manager.py:244-265`](bot/execution/grid_order_manager.py:244)
+- **Symptom:** `recenter()` iterates open orders, calls `_cancel_order`
+  on each, counts successes into a local `cancelled` counter, then
+  unconditionally writes the new range and logs
+  `grid_recenter_done cancelled=N`. If the cancel-False trap (A1)
+  swallowed any orders, the new grid epoch starts on top of orphan
+  rows from the old epoch — exactly what the live evidence shows.
+- **Live impact:** every recenter that finds a False-cancel order
+  leaves orphans. With A1 fixed, A4 becomes redundant; without A1
+  fixed, A4 is the proximate cause of the observed 20-orphan cohort.
+- **Proposed fix (one paragraph):** After the cancel loop, re-query
+  `get_open_active_orders()`. If any rows still have `status='open'`
+  AND were created before this recenter call, hard-mark them
+  `status='cancelled'` with `cancel_reason='recenter_force_close'`
+  before writing the new range. Adds one DB round-trip per recenter
+  (cadence: 14 days), negligible.
+- **Test that would catch it:** call `recenter()` after injecting a
+  cancel-False open row (e.g., via PaperEngine state reset); assert
+  no `status='open'` rows from the pre-recenter epoch remain after
+  `recenter()` returns.
+
+---
+
+#### [MEDIUM] [A5] `tb3_active_orders.status` schema allows `'failed'` and `'expired'`; the code never uses them
+
+- **File:** [`migrations/versions/002_v3_grid_schema.py:79-82`](migrations/versions/002_v3_grid_schema.py:79)
+  ```python
+  sa.CheckConstraint(
+      "status IN ('open', 'filled', 'cancelled', 'failed', 'expired')",
+      name="ck_grid_active_orders_status",
+  ),
+  ```
+- **Symptom:** schema is ahead of code. Every cancel path lands on
+  `'cancelled'` and every fill on `'filled'`; `'failed'` and `'expired'`
+  are defined but never written. That's not a bug per se — it's a
+  signal that the original schema design anticipated more states than
+  the code uses. Once A1/A2/A3 fixes land, those distinct lifecycle
+  endings naturally want distinct status values for queryability
+  ('failed' for placement rejections, 'expired' for Coinbase-side
+  terminations).
+- **Live impact:** none today; observability cost ongoing — you can't
+  query the population of orphans-by-cause without distinct statuses.
+- **Proposed fix (one paragraph):** When A2 lands, write rejected
+  placements with `status='failed'` and `cancel_reason='post_only_cross'`
+  (etc). When A3 lands, write Coinbase-side terminations with
+  `status='expired'` and `cancel_reason='exchange_cancelled'`. No
+  schema change needed.
+
+---
+
+#### [LOW] [A-final] `/api/grid/state` surfaces the corruption but isn't the bug
+
+- **File:** [`dashboard/routes.py:349-390`](dashboard/routes.py:349)
+- The endpoint does `repo.get_open_active_orders()` which is just
+  `WHERE status='open' ORDER BY level_index`. This is a faithful
+  mirror of the table state; the endpoint isn't filtering wrong, the
+  table contents are wrong. Once A1+A4 are fixed, this endpoint
+  reports correctly without modification.
+- **Defer:** consider a hardening pass after A1/A4 to also exclude
+  rows with `level_price NOT BETWEEN current_range_low AND
+  current_range_high` from the count, as a belt-and-suspenders surface
+  in case future bugs reintroduce orphans.
+
+---
+
+#### [A — not found] Hypothesis H3 (`_populate_levels` over-caps) ruled out
+
+[`bot/strategy/grid_strategy.py:55-73`](bot/strategy/grid_strategy.py:55)
+caps both `buys_below` and `sells_above` via `out[:n]`. The
+[`bot/execution/grid_order_manager.py:447-487`](bot/execution/grid_order_manager.py:447)
+loop iterates exactly that capped list with a per-(level_index, side)
+idempotency check via
+[`get_open_orders_at_level()`](bot/persistence/repository.py:581). The
+post-recenter cohort in the live evidence is 7 buys + 11 sells
+— well under 10 per side (10 sells from the recenter populate +
+1 sell at level 7 placed later by the same `_populate_levels` after
+the level-7 fill cleared its slot; see Category C). Per-side cap is
+respected within a single populate call.
+
+---
+
+### CATEGORY B — PaperEngine fill semantics vs Coinbase live
+
+The dedicated 2026-05-26 audit on branch
+`audit/paperengine-fill-semantics` (open PR, not yet on main) covered
+this in depth across 8 categories + 1 bonus (1 CRITICAL, 3 HIGH,
+3 MEDIUM, 2 LOW). **That set is incorporated by reference; not
+re-litigated here.** The
+audit prompt's 8 hypotheses (touch-vs-cross, post_only ignored, gap
+handling, partial fills, maker fee, TIF, cancel/fill race, latency)
+map 1:1 to that prior audit's findings [1]–[8].
+
+This session adds the **production-impact framing** that the prior
+audit was missing:
+
+#### [B-restatement] The CRITICAL-from-prior-audit (post_only ignored in paper) becomes load-bearing the moment Category C fires in paper
+
+- **Linkage:** Category C produces a tight chop loop that places a
+  sell at level N when current price < level_N_price. In paper, every
+  such placement is accepted; in live, every placement made while
+  current_ask >= level_N_price would be REJECTED with
+  `INVALID_LIMIT_PRICE_POST_ONLY`. The paper-mode observation that
+  "level 7 is filling 4× in 70 minutes losing $0.43 total" is
+  **structurally different** from what live would do: live would
+  reject the cross-the-spread re-placements outright, the row would
+  hit A2's orphan path, and the per-cycle loss would be **zero
+  realized fills + accumulating orphan rows** instead of realized
+  −$0.107.
+- **Direction:** paper's reported Category-C loss UNDERSTATES the
+  live blast-radius in one dimension (paper makes the loss visible
+  in `realized_pnl_total`; live makes it invisible by hiding it as
+  orphan rows) and OVERSTATES it in another (paper's actual dollar
+  bleed is real; live's would be ~0 because the orders don't fill).
+  Both modes are broken, just differently.
+
+#### [B-cancel-trap] PaperEngine's restart-clears-pending behavior is the trigger for A1 in paper mode
+
+This was already noted in the orders-overflow audit, but it's worth
+restating here because it's the *only* mechanism by which the audit
+prompt's "live state" — 38 active orders observed in paper — could
+exist. Paper-mode-only finding:
+
+- **File:** [`bot/exchange/paper_engine.py:97-110`](bot/exchange/paper_engine.py:97)
+- `self.pending_orders: dict[str, PaperOrder] = {}` initialized fresh
+  on every `__init__`. No DB hydration of in-flight orders on boot.
+- Railway redeploys recreate the engine. Every previously-placed
+  paper-XXX order id is then unknown to the engine.
+- `cancel_order(unknown_id)` returns False (line 395-402) → A1 trap →
+  DB row stays open → orphan.
+- **Live equivalence:** CoinbaseClient has the opposite problem (the
+  exchange remembers everything; the bot remembers nothing extra), so
+  this specific mechanism doesn't apply. Live's A1 trigger is
+  exchange-side races and Coinbase-side cancels (see A1).
+- **Proposed fix (one paragraph):** in `PaperEngine.__init__`, after
+  initializing `self.pending_orders = {}`, expose an optional
+  `hydrate_from_repo(repo)` method that the bot's startup wires in to
+  re-load the open `tb3_active_orders` rows back into
+  `self.pending_orders`. Even a coarse implementation (re-create
+  `PaperOrder` objects with `created_at` from DB, set `_order_price_min`
+  and `_order_price_max` to current price) is enough to make
+  `cancel_order` succeed on the next tick. Combined with A1's fix this
+  becomes redundant for correctness, but it keeps PaperEngine behaving
+  like a real exchange across restarts.
+
+(All other B findings — touch-vs-cross, gap handling, fee doubling,
+partial fills, cancel-fill race, legacy `check_pending_orders` charging
+taker fee on limits — are in the prior audit. No new B findings in this
+session.)
+
+---
+
+### CATEGORY C — Grid level re-placement loop
+
+**Live evidence (already quoted above; recapped):** 4 sells at level 7
+($75,879), all filling 0.0043 BTC at the same price, all losing
+−$0.1075, no buys at level 6 ($75,581) firing. Inventory dropped
+0.0922 → 0.0750 BTC over ~70 minutes purely from the lone-sell side.
+
+#### [CRITICAL] [C1] `_populate_levels` has no pair-state tracking — every tick re-places same-side orders at any "open slot," and the just-filled level reopens as soon as price retreats one tick
+
+This is the biggest bug in the file. It is firing right now, in production.
+
+- **File:** [`bot/execution/grid_order_manager.py:447-487`](bot/execution/grid_order_manager.py:447)
+  ```python
+  async def _populate_levels(self, grid_range, current_price):
+      buys_needed = grid_range.buys_below(current_price, n=self.orders_per_side)
+      sells_needed = grid_range.sells_above(current_price, n=self.orders_per_side)
+
+      for idx, level_price in buys_needed:
+          existing = await self.repo.get_open_orders_at_level(idx, side="buy")
+          if existing:
+              continue
+          # ... place buy ...
+
+      for idx, level_price in sells_needed:
+          existing = await self.repo.get_open_orders_at_level(idx, side="sell")
+          if existing:
+              continue
+          # ... place sell ...
+  ```
+- **Canonical grid behavior** that this code violates: after a sell at
+  level N fills, the level-N slot should be considered "occupied by a
+  pending opposite at level N-1" — no new sell should be placed at
+  level N until that buy fills (returning inventory and signaling the
+  round-trip completed). The current code's only idempotency check is
+  "is there an open ORDER at (level_index, same_side)?" — it doesn't
+  consider the opposite-side pending or the recent fill at this level.
+- **The exact loop, traced against the live fills log:**
+  1. 00:32:40 — recenter populate creates buys at lvls 0–6 and sells
+     at lvls 8–17. Level 7 has no order on either side because
+     `current_price ≈ $75,879 ≈ level_7_price` (neither
+     `buys_below`/`sells_above` includes it; both are strict).
+  2. Some moment later — price ticks down below $75,879 → next tick's
+     `_populate_levels` sees `sells_above` now includes level 7 →
+     places sell at level 7 (the line we never see in the active
+     orders snapshot because it fired and cleared).
+  3. Price ticks back up to $75,879 → sell at level 7 fills.
+     `_place_opposite_after_fill` tries to place a buy at level 6 —
+     but the recenter already placed one. `if existing: return` skips
+     it. **No replenishing buy is scheduled** (the slot is already
+     full from the recenter's `_populate_levels`).
+  4. Next tick — price has retreated below $75,879 again →
+     `_populate_levels` sees `sells_above` includes level 7 → no open
+     sell at level 7 → **places another sell at level 7**.
+  5. Goto 3. Each loop costs $0.1075 of realized loss and reduces
+     inventory by 0.0043 BTC. Live data shows 4 loops in 70 minutes;
+     a fifth one's sell at level 7 is now resting (the row
+     `created_at=2026-05-27T01:49:02.951137`, placed 0.7s after the
+     4th fill cleared, observed in the post-recenter cohort).
+- **Why the buy at level 6 never fires:** price isn't dropping a full
+  step ($298) below $75,879 in the chop. The grid bot's profitability
+  story is "round-trip every chop" — but it has no awareness that the
+  current chop amplitude is below one step. It bleeds the up-side
+  half of the chop indefinitely.
+- **Live impact:** ongoing right now. Realized P&L is −$0.4835 and
+  rising. At the current 4-fires-per-70-minutes rate, **−$2.65/day
+  net realized loss** on top of paper fees. Inventory floor
+  (0.0461 BTC = 0.5 × prebuy_qty) will be hit in ~80 hours at this
+  rate, at which point the bot transitions to "long_only floor"
+  rejections of further sells and bleeds end — but ~$5 of realized
+  loss is locked in before that brake catches. In live with 0.02%
+  maker fee, the per-fire loss shrinks to ~$0.041 instead of $0.107,
+  so the bleed rate is ~38% of paper — still strictly negative on
+  every fire, just slower to hit the floor.
+- **Proposed fix (one paragraph):** in `_populate_levels`, before
+  placing a sell at level N, ALSO check "is there an open buy at level
+  N-1?" — if yes, AND the most recent fill at this exchange_order_id's
+  history shows a sell at level N within the last K seconds (or
+  equivalently: the buy at N-1 was created/refreshed after the last
+  sell at N filled), THEN skip placing the new sell. Symmetric for
+  buys. This implements pair-state: a level is "fresh" for same-side
+  re-placement only when its opposite has filled. Alternative
+  implementation: add a `tb3_active_orders.paired_with` self-FK or a
+  separate `tb3_grid_pairs` table to make the relationship explicit;
+  smallest-blast-radius is the implicit "is the opposite at the
+  adjacent level still open" check.
+- **Test that would catch it:** integration test: place a sell at
+  level 7; PaperEngine fills it; assert that the next `tick()` does
+  NOT call `_place_limit(side='sell', level_index=7, ...)` even if
+  current_price < level_7_price. (Fails today; passes after fix.)
+
+---
+
+#### [CRITICAL] [C2] No economic-positivity check at sell placement — a sell whose `level_price` is below `avg_cost + per-leg-fee` is placed and fills at a guaranteed loss
+
+C1 is the proximate cause of the loop; C2 is what makes each loop iteration unprofitable. Either fix alone would stop the live bleed; both together is robust.
+
+- **Files:** [`bot/execution/grid_order_manager.py:470-487`](bot/execution/grid_order_manager.py:470)
+  + [`bot/execution/grid_position_manager.py:138-153`](bot/execution/grid_position_manager.py:138)
+  + [`bot/execution/grid_position_manager.py:284-296`](bot/execution/grid_position_manager.py:284)
+- **The math:** `_apply_sell` computes
+  `realized = (price - avg_cost) * qty - fee` (line 286). For the
+  live fills:
+  ```
+  price       = 75879.00
+  avg_cost    = 75873.54
+  qty         = 0.0043
+  fee         = qty * price * 0.0004 = 0.1305
+  realized    = (75879 - 75873.54) * 0.0043 - 0.1305
+              = 5.46 * 0.0043 - 0.1305
+              = 0.0235 - 0.1305
+              = -0.1070
+  ```
+  At paper's 0.04% maker, the structural breakeven sell-only level is
+  `level_price > avg_cost * (1 + 0.0004) = 75,903.89`. Level 7 at
+  $75,879 is **$24.89 short** of that threshold. The bot will lose
+  money on EVERY sell at this level, even ignoring the missing
+  round-trip buy. There is no code path that prevents this — the only
+  `can_sell()` check at line 138 is the long_only inventory floor;
+  there is no `is_economically_positive()` check.
+- **At live (0.02% maker):** structural breakeven sell-only level is
+  `level_price > avg_cost * 1.0002 = 75,888.71`. Level 7 at $75,879 is
+  still below it by $9.71. Bleed direction is the same in live; rate
+  is slower.
+- **Why this happens to land at level 7 right above avg cost:** the
+  grid range is derived from recent daily BTC highs/lows
+  (`compute_dynamic_range` in
+  [`bot/strategy/grid_strategy.py:76-106`](bot/strategy/grid_strategy.py:76))
+  with no awareness of the bot's avg_cost. Levels are evenly spaced
+  through `[range_low, range_high]`. If avg_cost happens to land
+  ~$5 below a level boundary, that level becomes a fee-trap. With
+  GRID_NUM_LEVELS=30 and a $8,641-wide range, the level spacing is
+  $298, so this near-miss can happen anywhere along the range.
+  **It will happen again on every recenter where avg_cost shifts.**
+- **Live impact:** for as long as avg_cost is within ~`level_step *
+  fee_pct / step_pct` of any grid level, lone-sell bleed continues.
+  At step=$298 and fee=0.02% live, that's a $15-wide unprofitable
+  band per level — 30 levels × $15 = $450 of the $8,641 range, or
+  ~5%, where any sell that fills loses money. Compounded by C1, the
+  re-placement loop can fire indefinitely within that band.
+- **Proposed fix (one paragraph):** add `is_sell_economically_positive`
+  helper on `GridPositionManager`:
+  ```python
+  def is_sell_economically_positive(self, level_price: Decimal,
+                                    qty: Decimal,
+                                    maker_fee_pct: Decimal) -> bool:
+      # Sell-only positive: gross_profit > exit_fee
+      # Round-trip positive (preferred): (level - level_below) > 2 * fee
+      fee = level_price * qty * (maker_fee_pct / 100)
+      gross = (level_price - self.state.avg_cost) * qty
+      return gross > fee * MARGIN  # MARGIN ~= 1.5 for safety
+  ```
+  Wire it into `_populate_levels` (line 478, just after the
+  `allowed, _reason = self.position_manager.can_sell(qty_dec)` check):
+  if not positive, skip placement and emit
+  `place_skipped_below_breakeven` log. Symmetric considerations
+  apply to buys (a buy at a level above current avg_cost is always
+  positive on its own; round-trip positivity is the same condition).
+- **Test that would catch it:** unit test for `_populate_levels` with
+  avg_cost=$75,873.54, level_price=$75,879, qty=0.0043,
+  maker_fee_pct=0.04 — assert that `_place_limit` is NOT called for
+  this level.
+
+---
+
+#### [HIGH] [C3] `_place_opposite_after_fill` doesn't mark the just-filled level as in-cooldown — its only effect is "place the opposite" and the same-side reopens immediately on the next tick
+
+- **File:** [`bot/execution/grid_order_manager.py:376-421`](bot/execution/grid_order_manager.py:376)
+- The function does exactly two things: (1) compute opposite_idx
+  (`+1` for buy, `-1` for sell), (2) place opposite-side limit there
+  if no opposite-side order already exists. It does NOT:
+  - Mark `tb3_active_orders.level_index=N, side=just_filled_side` as
+    "paired, cooldown until opposite_idx fills"
+  - Schedule a delay before the same-side can re-place at level N
+  - Store any per-level "last fill timestamp" the next
+    `_populate_levels` could consult
+- **Why this matters separately from C1:** even with a strict
+  pair-state fix, you want defense-in-depth: the simplest
+  pair-state mechanism is "after fill at level N, write a row to a
+  `tb3_grid_pairs` table linking N to N±1 with an `opened_at`
+  timestamp; `_populate_levels` skips level N if a row exists where
+  `level_paired_with` includes it and the paired side is still
+  pending." This is what C3 surfaces as missing.
+- **Live impact:** same as C1 — the C1 fix subsumes C3. If C1 is
+  implemented via the "is opposite open at adjacent level" check, C3
+  becomes implicit. If C1 is implemented via timed cooldown
+  ("don't re-place at level N within K seconds of a fill at N"), C3
+  becomes a separate fix. Recommend bundling them.
+
+---
+
+#### [MEDIUM] [C4] `avg_cost` doesn't shift on sells, so realized losses don't raise the effective breakeven threshold for subsequent placements
+
+- **File:** [`bot/execution/grid_position_manager.py:284-296`](bot/execution/grid_position_manager.py:284)
+  ```python
+  realized = (price - avg_cost) * qty - fee
+  new_qty = self.state.qty - qty
+  # Avg cost stays the same on partial exits (FIFO/weighted convention)
+  # If we go to zero, reset avg to 0 for cleanliness.
+  new_avg = avg_cost if new_qty > 0 else Decimal("0")
+  ```
+- **Symptom:** after 4 sells losing $0.43 + 4 × $0.131 fee = $0.95
+  total cash outflow against the inventory (now 0.0750 BTC), the
+  effective avg cost of holding (cost basis - sales receipts +
+  fees, divided by remaining qty) is `(0.0922 × 75873.54 - 4 × 0.0043
+  × 75879 + 0.0235 × 4) / 0.0750 ≈ $75,861` — actually slightly
+  LOWER than the reported $75,873.54 because the sells were net
+  positive on gross terms (just fee-negative). But the C2 "is this
+  level positive" check uses the reported avg_cost which doesn't
+  reflect realized fee losses. As realized P&L compounds negative,
+  the gap widens.
+- **Live impact:** for the first ~100 lone-sell fills the discrepancy
+  is small (<$1 on a $76K base). It becomes meaningful only after
+  the bot has been losing for hours. Lower priority than C1 + C2.
+- **Proposed fix (one paragraph):** when C2's
+  `is_sell_economically_positive` lands, anchor it on a P&L-adjusted
+  effective cost: `eff_avg = avg_cost - realized_pnl_total / qty`
+  (so realized losses raise the effective cost basis). This makes
+  the breakeven floor self-correcting as losses accumulate.
+- **Defer:** consider together with C2. Lower-severity than the other
+  C findings.
+
+---
+
+### Cross-category interaction map
+
+```
+                   Paper-mode trigger          Live-mode trigger
+                   ──────────────────          ─────────────────
+   A1 (cancel-     PaperEngine restart        Coinbase races / user
+       False trap)                            cancel / exchange expire
+       │                                       │
+       └─── leaves orphan rows in tb3_active_orders ───┐
+                                                       │
+   A2 (rejected-                                       │
+       place orphan) ←── NEW: post_only             │
+                          rejection on live          │
+                                                     │
+   A3 (poll-                                         │
+       CANCELLED                                     │
+       blind)         ←── live-only             │
+                                                     │
+              ─→ Net effect: tb3_active_orders ←──────┘
+                 corrupted; `/api/grid/state` returns
+                 inflated count; `_cancel_out_of_range`
+                 and `_cancel_stale` keep hitting A1 trap
+                 for the orphans, wasting Coinbase
+                 round-trips on every tick
+
+   C1 (no pair    ←── Visible in paper as            ←── Invisible in
+       state)         realized −$0.107/cycle             live as orphans
+                                                         (because B-prior
+                                                          [2] would
+                                                          REJECT the
+                                                          re-placement
+                                                          at the live
+                                                          spread)
+       │
+   C2 (no             ──── Same math both             ──── Same math but
+       breakeven           sides; paper visible            paper $0.107 →
+       check)              loss is real                    live $0.041
+       │
+   C3 (no cooldown    ──── enables C1 to fire         ──── (rejection
+       on filled            every tick                       blocks the
+       level)                                                fire — see B)
+```
+
+The Category B cross-references explain why **paper-mode tells you
+about C, live-mode tells you about A**. You can't trust either alone.
+
+---
+
+### Recommended fix order
+
+This is sequenced so that each PR is independently shippable and the
+production bleed stops as soon as possible.
+
+1. **[CRITICAL] C2 — economic-positivity check at sell placement.**
+   Smallest blast-radius fix that stops the live bleed today. ~30 lines
+   of code in `_populate_levels` + new helper in
+   `GridPositionManager`. Add a unit test. Deploy. The bleed stops
+   within one 30s tick.
+
+2. **[CRITICAL] C1 — pair-state in `_populate_levels`.** Goes hand-in-hand
+   with C2 — C2 stops the per-fire loss; C1 stops the re-placement
+   that would resume if avg_cost ever shifts above the level.
+   Implementation: add the "opposite open at adjacent level" check.
+
+3. **[CRITICAL] A2 — `place_order` checks `data["success"]`.** Required
+   before any live-mode work. Without this, every post-only rejection
+   in live silently writes an orphan row.
+
+4. **[HIGH] A1 — `_cancel_order` surfaces failure_reason.** Pairs with
+   the A2 fix; without A1, A2 leaves a tail of unrecoverable rows
+   (the existing 20 orphans + any future restart trigger).
+
+5. **[HIGH] A3 — `get_order` surfaces CANCELLED/EXPIRED.** Closes the
+   poll-side orphan path. Once 1–4 land, A3 catches the rare cases
+   that slip past the placement and cancel paths.
+
+6. **[HIGH] A4 — `recenter()` defensive recheck.** Belt-and-suspenders
+   on top of A1 + A3. Cheap (one DB query per 14 days).
+
+7. **[MEDIUM] C4 — avg_cost-adjusted breakeven in C2's helper.** Once
+   C2 is in, this is a one-line change to use
+   `(avg_cost - realized_pnl_total/qty)` as the effective floor.
+
+8. **[MEDIUM] A5 — use distinct `'failed'` / `'expired'` statuses.**
+   Pure observability. Lands after 1–6.
+
+9. **[LOW] A-final — `/api/grid/state` filter belt-and-suspenders.**
+   Optional; defer.
+
+10. **One-shot cleanup query for the existing 20 orphans:**
+    ```sql
+    UPDATE tb3_active_orders
+    SET status = 'cancelled',
+        cancelled_at = NOW()
+    WHERE status = 'open'
+      AND created_at < (SELECT last_recenter_at FROM tb3_grid_state WHERE id = 1);
+    ```
+    Run this AFTER fixes 4+ are deployed so a racing tick doesn't
+    re-create the same condition.
+
+---
+
+### Open questions / things I couldn't determine without running the live system
+
+1. **Does Coinbase actually return HTTP 200 + `success: false` for
+   post-only rejections, or HTTP 400?** I'm 95% confident in 200 based
+   on the structure of the documented `error_response` (which suggests
+   the response is meant to be parsed, not raised); the bot's
+   `_request` would re-raise a 4xx, so if Coinbase returned 400,
+   `_place_limit` would catch the exception at line 511-522 and
+   correctly NOT insert a row. Verifying which behavior is live would
+   require sending a deliberately-cross-the-spread post-only order in
+   a test live environment. **Recommend confirming before relying on
+   A2's exact fix shape.**
+
+2. **Is there a configured `GRID_FORCE_RECENTER_ON_FLOOR` or similar
+   path that would clean orphans when inventory crosses the floor?**
+   Searched; didn't find one. Manual `/api/admin/force-recenter`
+   hits the same `recenter()` and therefore the same A1+A4 traps.
+   No automated cleanup exists today.
+
+3. **What's the actual distribution of rejected vs successful
+   placements over the past ~24 hours?** A2 requires the bot to log
+   `place_order_rejected` to estimate this; today the rejection is
+   silently swallowed, so no data. **Recommend adding the log line as
+   the very first sub-PR before A2's full fix, so the next session
+   has a frequency estimate.**
+
+4. **Confirm the live Coinbase INTX maker fee.** The prior PaperEngine
+   audit (line 1390) notes 0.02% as the canonical Intro tier but
+   couldn't directly verify against Coinbase's published fee schedule
+   due to Cloudflare. Same limitation here. **Verify before deploying
+   any fix that depends on a specific fee constant.**
+
+### Verification (none performed)
+
+No tests run. No code modified. Branch
+`audit/grid-execution-comprehensive` contains only this `AUDIT_LOG.md`
+entry.
+
+### Next session priority
+
+1. **Implement C2** as a hot-patch and deploy. This is the single
+   highest-value fix in the audit; it stops the production bleed
+   within ~30 seconds of deploy.
+2. Then **C1**, then **A2**, then **A1 + A4** as a bundle, then the
+   rest in order.
+3. Re-run this audit's evidence-collection script after each fix:
+   - `curl /api/grid/state` — confirm active_orders_count drops to
+     ≤ 2 × orders_per_side
+   - `curl /api/grid/fills?limit=20` — confirm no new lone-sell fills
+     with `realized_pnl < 0` at the same level
+
+### Metrics
+
+- Files read end-to-end: 9 (grid_order_manager, grid_position_manager,
+  paper_engine, coinbase_client, repository, grid_strategy, routes,
+  grid_tick, 002_v3_grid_schema)
+- Files modified: 1 (this `AUDIT_LOG.md` only — no code changed)
+- New findings this session: 11 (3 CRITICAL, 5 HIGH, 3 MEDIUM, 1 LOW)
+- Findings cross-referenced to prior audits: 10 (1 from
+  `audit/grid-active-orders-overflow`, 9 from PaperEngine fill-semantics)
+- Live API probes: 2 (`/api/grid/state`, `/api/grid/fills`)
+- External doc lookups: 4 (Coinbase create-order, cancel-order, FAQ, search)
+- Bugs fixed: 0 (audit-only — no code changes; fixes proposed for next session)
