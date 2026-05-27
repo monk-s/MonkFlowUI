@@ -392,14 +392,23 @@ class PaperEngine(ExchangeInterface):
         logger.info("funding_applied", total=str(total_funding), rate=str(funding_info.rate))
         return total_funding
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str) -> tuple[bool, Optional[str]]:
+        """Cancel a pending paper order. Returns (success, failure_reason).
+
+        AUDIT-FIX A1: on unknown order_id (commonly after a Railway redeploy
+        wipes `self.pending_orders`), returns
+        ``(False, "UNKNOWN_CANCEL_ORDER")`` to mirror the Coinbase live
+        response shape. This lets GridOrderManager._cancel_order treat it
+        as terminal and mark the DB row cancelled, preventing orphan
+        accumulation across restarts.
+        """
         if order_id in self.pending_orders:
             del self.pending_orders[order_id]
             self._order_price_min.pop(order_id, None)
             self._order_price_max.pop(order_id, None)
             logger.info("paper_order_cancelled", order_id=order_id)
-            return True
-        return False
+            return True, None
+        return False, "UNKNOWN_CANCEL_ORDER"
 
     async def get_order(self, order_id: str) -> Optional[OrderResult]:
         """Look up an order. Simulates fills for pending grid limits.

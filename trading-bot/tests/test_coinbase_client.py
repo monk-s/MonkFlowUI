@@ -137,3 +137,74 @@ class TestPartialFillAutoClose:
         assert result.filled is False
         # Only ONE request — no auto-close attempted on reduce_only partials
         assert client._request.call_count == 1
+
+
+class TestCancelOrderReturnShape:
+    """AUDIT-FIX A1: cancel_order returns (success, failure_reason) so the
+    caller can distinguish terminal failures (the order is gone, DB must
+    reconcile) from retryable ones (still open, try again next tick).
+    """
+
+    @pytest.mark.asyncio
+    async def test_successful_cancel_returns_true_and_none(self, client):
+        client._request = AsyncMock(return_value={
+            "results": [{"success": True, "order_id": "abc-123"}],
+        })
+        success, failure_reason = await client.cancel_order("abc-123")
+        assert success is True
+        assert failure_reason is None
+
+    @pytest.mark.asyncio
+    async def test_unknown_cancel_order_returns_reason(self, client):
+        client._request = AsyncMock(return_value={
+            "results": [{
+                "success": False,
+                "failure_reason": "UNKNOWN_CANCEL_ORDER",
+                "order_id": "abc-123",
+            }],
+        })
+        success, failure_reason = await client.cancel_order("abc-123")
+        assert success is False
+        assert failure_reason == "UNKNOWN_CANCEL_ORDER"
+
+    @pytest.mark.asyncio
+    async def test_order_is_fully_filled_returns_reason(self, client):
+        """Race scenario: the order filled on Coinbase between our placement
+        and our cancel attempt."""
+        client._request = AsyncMock(return_value={
+            "results": [{
+                "success": False,
+                "failure_reason": "ORDER_IS_FULLY_FILLED",
+                "order_id": "abc-123",
+            }],
+        })
+        success, failure_reason = await client.cancel_order("abc-123")
+        assert success is False
+        assert failure_reason == "ORDER_IS_FULLY_FILLED"
+
+    @pytest.mark.asyncio
+    async def test_duplicate_cancel_request_returns_reason(self, client):
+        client._request = AsyncMock(return_value={
+            "results": [{
+                "success": False,
+                "failure_reason": "DUPLICATE_CANCEL_REQUEST",
+                "order_id": "abc-123",
+            }],
+        })
+        success, failure_reason = await client.cancel_order("abc-123")
+        assert success is False
+        assert failure_reason == "DUPLICATE_CANCEL_REQUEST"
+
+    @pytest.mark.asyncio
+    async def test_empty_results_returns_empty_response(self, client):
+        client._request = AsyncMock(return_value={"results": []})
+        success, failure_reason = await client.cancel_order("abc-123")
+        assert success is False
+        assert failure_reason == "EMPTY_RESPONSE"
+
+    @pytest.mark.asyncio
+    async def test_exception_returns_exception_sentinel(self, client):
+        client._request = AsyncMock(side_effect=RuntimeError("network"))
+        success, failure_reason = await client.cancel_order("abc-123")
+        assert success is False
+        assert failure_reason == "EXCEPTION"

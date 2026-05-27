@@ -319,17 +319,30 @@ class CoinbaseClient(ExchangeInterface):
             raw_response=data,
         )
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str) -> tuple[bool, Optional[str]]:
+        """Cancel via Coinbase batch_cancel. Returns (success, failure_reason).
+
+        AUDIT-FIX A1: previously returned bare bool, hiding the failure_reason
+        from callers. The grid manager could not distinguish terminal failures
+        (the order is gone — UNKNOWN_CANCEL_ORDER / ORDER_IS_FULLY_FILLED /
+        DUPLICATE_CANCEL_REQUEST) from retryable ones, and silently left DB
+        rows in `status='open'` whenever cancel returned False. See
+        https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/cancel-order
+        for the full failure_reason enum.
+        """
         try:
             body = {"order_ids": [order_id]}
             data = await self._request("POST", "/api/v3/brokerage/orders/batch_cancel", body)
             results = data.get("results", [])
             if results:
-                return results[0].get("success", False)
-            return False
+                res = results[0]
+                success = bool(res.get("success", False))
+                failure_reason = res.get("failure_reason") if not success else None
+                return success, failure_reason
+            return False, "EMPTY_RESPONSE"
         except Exception as e:
             logger.error("cancel_order_failed", order_id=order_id, error=str(e))
-            return False
+            return False, "EXCEPTION"
 
     async def get_order(self, order_id: str) -> Optional[OrderResult]:
         """Look up an order by Coinbase order_id.

@@ -541,10 +541,27 @@ class GridOrderManager:
             level_price=level_price, qty=qty,
         )
 
+    # AUDIT-FIX A1: failure_reason values from Coinbase batch_cancel that mean
+    # "the order is definitively not open on the exchange" — these are
+    # terminal, so the DB row MUST be marked cancelled even though the
+    # cancel itself "failed." Without this, an order that fills (or
+    # cancels, or never existed) on Coinbase between our placement and
+    # our cancel attempt leaves an orphan row at status='open' that
+    # nothing else can clear (every subsequent _cancel_order call hits
+    # the same trap). Source: Coinbase Advanced Trade
+    # NewOrderFailureReason enum at
+    # https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/cancel-order
+    _TERMINAL_CANCEL_FAILURE_REASONS = frozenset({
+        "UNKNOWN_CANCEL_ORDER",     # exchange has no record of this id
+        "ORDER_IS_FULLY_FILLED",    # already filled — caller should re-poll
+        "DUPLICATE_CANCEL_REQUEST", # already cancelled
+    })
+
     async def _cancel_order(self, exchange_order_id: str) -> bool:
-        """Cancel one open order. Updates tb3_active_orders on success."""
+        """Cancel one open order. Updates tb3_active_orders on success or
+        on a terminal failure_reason (AUDIT-FIX A1)."""
         try:
-            ok = await self.exchange.cancel_order(exchange_order_id)
+            ok, failure_reason = await self.exchange.cancel_order(exchange_order_id)
         except Exception as e:
             logger.warning(
                 "cancel_order_exception",
@@ -553,7 +570,33 @@ class GridOrderManager:
             return False
         if ok:
             await self.repo.mark_order_cancelled(exchange_order_id)
-        return ok
+            return True
+        # AUDIT-FIX A1: if the exchange says the order is gone, our DB
+        # MUST reflect that. Mark the row cancelled and log loudly so we
+        # know the orphan was caught at cancel time (rather than silently
+        # leaking as before).
+        if failure_reason in self._TERMINAL_CANCEL_FAILURE_REASONS:
+            await self.repo.mark_order_cancelled(exchange_order_id)
+            logger.warning(
+                "cancel_terminal_failure_marked_cancelled",
+                order_id=exchange_order_id,
+                failure_reason=failure_reason,
+                note=(
+                    "exchange says this order is not open; DB row marked "
+                    "cancelled to keep state coherent"
+                ),
+            )
+            return True
+        # Retryable failure (e.g. INVALID_CANCEL_REQUEST,
+        # COMMANDER_REJECTED_CANCEL_ORDER, NOT_ALLOWED_TO_CANCEL,
+        # EMPTY_RESPONSE, EXCEPTION) — leave the row open and let the
+        # next cancel sweep try again.
+        logger.warning(
+            "cancel_retryable_failure_row_stays_open",
+            order_id=exchange_order_id,
+            failure_reason=failure_reason,
+        )
+        return False
 
     # ─────────────────────────────────────────────────────────────────
     # Diagnostics
