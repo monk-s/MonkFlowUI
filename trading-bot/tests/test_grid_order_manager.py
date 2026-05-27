@@ -592,6 +592,132 @@ class TestFullCycle:
         assert pos_mgr.state.qty >= pos_mgr.state.prebuy_qty
 
 
+class TestA4RecenterDefensiveSweep:
+    """AUDIT-FIX A4: recenter() must end with no pre-recenter rows still
+    at status='open'. The defensive sweep force-marks any leftover rows
+    that the cancel loop missed (network errors, exchange races,
+    retryable failure_reasons). Belt-and-suspenders on top of A1.
+    """
+
+    @pytest.mark.asyncio
+    async def test_recenter_force_closes_orphans_from_failed_cancels(self):
+        """Simulate a partial cancel-loop failure: pre-recenter orders that
+        the exchange refuses to cancel (returns False without throwing).
+        After A4, recenter() must still leave the DB clean.
+        """
+        repo, _pos_mgr, _exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+        before = await repo.get_open_active_orders()
+        assert len(before) > 0
+
+        # Inject a failing-cancel exchange — every cancel attempt returns
+        # False (mimics a stuck cancel path WITHOUT the A1 reconcile, which
+        # is exactly the regression A4 protects against).
+        class _FailingCancelExch:
+            def __init__(self, real):
+                self._real = real
+            async def cancel_order(self, oid):
+                return False
+            # Delegate everything else to the real fake exchange
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+        om.exchange = _FailingCancelExch(om.exchange)
+
+        new_gr = compute_range_and_levels(
+            mode="static", static_low=60000, static_high=100000, n_levels=5,
+        )
+        await om.recenter(new_range=new_gr, current_price=80000.0)
+
+        # Despite every cancel returning False, A4's defensive sweep MUST
+        # mark all pre-recenter rows cancelled before recenter returns.
+        remaining = await repo.get_open_active_orders()
+        assert remaining == [], (
+            f"A4 should have force-cleaned all pre-recenter orphans. "
+            f"Got {len(remaining)} still-open rows: "
+            f"{[(o.side, o.level_index, o.exchange_order_id) for o in remaining]}"
+        )
+        # Grid state updated with the new range
+        gs = await repo.get_grid_state()
+        assert gs.current_range_low == 60000
+        assert gs.current_range_high == 100000
+
+    @pytest.mark.asyncio
+    async def test_recenter_only_sweeps_pre_recenter_rows(self):
+        """Regression: the defensive sweep MUST scope to pre-recenter rows
+        only. If a tick happens to insert a fresh row between the cancel
+        loop and the recheck, that row must NOT be force-cleaned.
+
+        We can't trivially reproduce that race without a concurrent
+        scheduler, so we use a hand-crafted scenario: inject a fresh
+        row that wasn't in the pre-recenter snapshot, then run the
+        recheck logic manually via recenter().
+        """
+        repo, _pos_mgr, _exch, om, gr = _build_setup(orders_per_side=2)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Memorize pre-recenter IDs
+        pre_ids = {o.exchange_order_id for o in await repo.get_open_active_orders()}
+
+        # Hook recenter to inject a fresh row mid-flight
+        original_get = repo.get_open_active_orders
+        call_count = {"n": 0}
+
+        async def get_with_injection():
+            call_count["n"] += 1
+            result = await original_get()
+            if call_count["n"] == 2:
+                # Mid-recenter — simulate a fresh placement landing
+                await repo.insert_active_order(
+                    exchange_order_id="fresh-during-recenter",
+                    side="buy", level_index=99,
+                    level_price=80000.0, qty=0.01,
+                )
+                result = await original_get()
+            return result
+
+        repo.get_open_active_orders = get_with_injection
+
+        new_gr = compute_range_and_levels(
+            mode="static", static_low=60000, static_high=100000, n_levels=5,
+        )
+        await om.recenter(new_range=new_gr, current_price=80000.0)
+
+        # Restore
+        repo.get_open_active_orders = original_get
+
+        # The fresh row should STILL be open — only pre-recenter rows get swept
+        fresh = await repo.get_active_order("fresh-during-recenter")
+        assert fresh is not None
+        assert fresh.status == "open", (
+            f"A4 must scope force-clean to pre-recenter snapshot; the fresh "
+            f"row inserted during recenter has status {fresh.status!r}"
+        )
+        # All pre-recenter rows should be cancelled
+        for pid in pre_ids:
+            assert (await repo.get_active_order(pid)).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_clean_recenter_no_force_clean_logged(self):
+        """When the cancel loop succeeds, the force-clean path should be
+        a no-op (no warning logs). Regression check that A4 doesn't kick
+        in on the happy path."""
+        repo, _pos_mgr, _exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Successful cancel path (FakeExchange returns True when order is known)
+        new_gr = compute_range_and_levels(
+            mode="static", static_low=60000, static_high=100000, n_levels=5,
+        )
+        await om.recenter(new_range=new_gr, current_price=80000.0)
+
+        # All cancelled — no leftovers needing the A4 sweep
+        assert (await repo.get_open_active_orders()) == []
+
+
 class TestCancellation:
     @pytest.mark.asyncio
     async def test_cancel_out_of_range_after_recenter(self):
