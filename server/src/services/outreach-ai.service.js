@@ -36,7 +36,7 @@ const CASE_STUDIES = [
     // reference-call permission is for prospect-call use, not "DM Jody."
     contact_name: 'Jody Team',
     contact_role: 'founding partner',
-    case_study_url: 'https://monkflow.io/#case-study-tfs',
+    case_study_url: 'https://monkflow.io/case-studies/team-financial-strategies',
     permission_granted_at: '2026-04-29',
   },
 ];

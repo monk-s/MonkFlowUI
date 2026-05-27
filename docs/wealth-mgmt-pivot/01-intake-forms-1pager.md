@@ -103,7 +103,7 @@ that doesn't feel like 1998.
 ## How to engage
 
 Three productized tiers, public pricing, no discovery-dance. See
-**monkflow.io/#wealth-intake** for the full ladder.
+**monkflow.io/for-advisors** for the full ladder.
 
 **Quickest first step:** $1,500 Onboarding Audit. 7-day delivery.
 90-min Loom walkthrough of your current flow + written report on

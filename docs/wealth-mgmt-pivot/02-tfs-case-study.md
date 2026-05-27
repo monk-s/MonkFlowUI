@@ -116,7 +116,7 @@ add only when clients actually hit edge cases.
 ### Want this for your firm?
 
 We took the same scope MonkFlow built for TFS and packaged it into
-three productized tiers — see **monkflow.io/#wealth-intake** for
+three productized tiers — see **monkflow.io/for-advisors** for
 public pricing.
 
 **Or talk to Nathan directly:** monkflow.io/#schedule (15-min intro

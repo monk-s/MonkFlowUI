@@ -102,7 +102,7 @@ sync + signed PDFs.
 20% referral fee on $7,500 and $14,500 projects. Paid 30 days
 post-go-live. No MSA, no exclusivity, no co-selling overhead.
 
-Public ladder + the TFS case study at monkflow.io/#wealth-intake.
+Public ladder + the TFS case study at monkflow.io/for-advisors.
 
 Worth a 15-min coffee?
 
@@ -128,7 +128,7 @@ under 5 per onboarding. Jody Team (founding partner) available for a reference c
 You're great at the CRM setup. I'm the integration layer downstream.
 Different scopes, complementary, never overlapping.
 
-Productized tiers public at monkflow.io/#wealth-intake. 20% referral
+Productized tiers public at monkflow.io/for-advisors. 20% referral
 fee on $7,500 and $14,500 projects, 30-day net.
 
 Coffee?
@@ -152,7 +152,7 @@ onboarding paperwork is the bottleneck? Even a "you should talk to
 my brother-in-law's firm" lead is gold. (2) if a referral closes, 20%
 fee structure or just buy you dinner — your call.
 
-Public pricing at monkflow.io/#wealth-intake.
+Public pricing at monkflow.io/for-advisors.
 
 Worth a 15-min call to brainstorm?
 

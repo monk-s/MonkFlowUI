@@ -39,7 +39,7 @@ part of the wealth-mgmt vertical pivot.
   Figma + branded template once revenue justifies it.
 - **Web pages:** files 01-03 + 08 are good candidates for live HTML
   on monkflow.io. The wealth-intake offer page already on the public
-  site (`#wealth-intake`) covers offer ladder; the rest can be
+  site (`/for-advisors`) covers offer ladder; the rest can be
   static pages reachable via /case-studies/... or /security/... routes.
 - **Branding consistency:** all artifacts should match monkflow.io
   — same accent color (`var(--accent)` ≈ #00cc6a), same font

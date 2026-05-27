@@ -182,7 +182,7 @@ edge cases.
 Full case study at monkflow.io/case-studies/team-financial-strategies.
 
 If you're an advisor firm with a similar onboarding-bottleneck story,
-the productized tiers are public on monkflow.io/#wealth-intake. Or
+the productized tiers are public on monkflow.io/for-advisors. Or
 just DM me.
 ```
 
@@ -215,7 +215,7 @@ What's in the video:
 If you've been wondering what "$7,500 productized intake build"
 actually delivers, this is exactly that.
 
-Full ladder + pricing: monkflow.io/#wealth-intake.
+Full ladder + pricing: monkflow.io/for-advisors.
 
 Open to questions in comments or DM.
 ```
@@ -251,7 +251,7 @@ For every post:
 2. Replies should be substantive (2+ sentences, ideally with a follow-up
    question to keep the thread alive)
 3. DO NOT post a CTA in the post body. CTA goes in the FIRST COMMENT
-   from your account ("PS: ladder + pricing at monkflow.io/#wealth-intake")
+   from your account ("PS: ladder + pricing at monkflow.io/for-advisors")
    so LinkedIn's algorithm doesn't deprioritize the post for "external
    link in body"
 4. If a competitor or vendor comments, engage politely — never

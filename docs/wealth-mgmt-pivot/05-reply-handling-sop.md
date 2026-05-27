@@ -44,7 +44,7 @@ firms. The TFS case study at the bottom is the closest analog to
 same architecture).
 
 If anything in there resonates, here's a 90-min Onboarding Audit at
-$1,500 — refundable against any project tier. monkflow.io/#wealth-intake
+$1,500 — refundable against any project tier. monkflow.io/for-advisors
 
 Or just reply with questions. No pressure.
 
@@ -74,7 +74,7 @@ Happy to. Two quick things:
 If you want to dig into specifics, $1,500 Onboarding Audit gets you
 a 90-min Loom walkthrough of your current flow + a written report on
 the 3 highest-ROI fixes. Refundable against any project. Book at
-monkflow.io/#wealth-intake.
+monkflow.io/for-advisors.
 
 Or just reply with whatever questions surface. No pressure.
 
@@ -98,7 +98,7 @@ Public pricing on the page — three tiers:
 
 Founding-partner option (May 2026 only): Tier 3 at $5,000 in exchange
 for a written case study + 30-min joint testimonial + reference-call
-permission. monkflow.io/#wealth-intake
+permission. monkflow.io/for-advisors
 
 Want a 15-min call to figure out which tier fits {firmName}?
 monkflow.io/#schedule

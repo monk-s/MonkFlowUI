@@ -628,15 +628,76 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-// ── Hash route handler (for direct links like #schedule) ──
+// ── Client-side router ────────────────────────────────────
+// Pathname-based dispatch for top-level pages (landing, /for-advisors,
+// /case-studies/...). Hash routes are reserved for IN-PAGE actions
+// (e.g. #schedule auto-opens the scheduling modal). Clean URLs require
+// the catch-all rewrite in vercel.json — every non-/api/* path serves
+// /index.html, and this router decides what to render.
+
+// Map a pathname → the render function that fills #landing-container.
+// Returns null if no page-level route matches (caller renders the
+// default landing page in that case).
+function resolvePageRoute(pathname) {
+  if (pathname === '/for-advisors') return renderForAdvisorsPage;
+  if (pathname === '/case-studies/team-financial-strategies') return renderTfsCaseStudyPage;
+  return null;
+}
+
+// Navigate to a path without a full page reload. Uses history.pushState
+// so back/forward work natively; the popstate listener below re-runs
+// route dispatch when the user hits the browser back button.
+function navigateTo(path) {
+  if (window.location.pathname === path && !window.location.hash) return;
+  window.history.pushState({}, '', path);
+  // Scroll to top — replaces the default scroll-restoration the
+  // browser would do on a hard navigation.
+  window.scrollTo(0, 0);
+  // Re-dispatch as if a fresh visit landed on this URL.
+  dispatchLandingRoute();
+}
+
+// Decide which renderer fills #landing-container based on the current
+// pathname. Called from showLanding() on initial load AND from
+// navigateTo() / popstate after each route change.
+function dispatchLandingRoute() {
+  const renderer = resolvePageRoute(window.location.pathname);
+  if (renderer) {
+    renderer();
+  } else {
+    renderLandingPage();
+  }
+}
+
+// Back/forward button handling. Without this, history.pushState would
+// change the URL but the page wouldn't re-render on browser back.
+window.addEventListener('popstate', () => {
+  // Only re-dispatch when we're showing the landing/public surface —
+  // auth-container and app-container have their own state.
+  if (!document.getElementById('landing-container').classList.contains('hidden')) {
+    dispatchLandingRoute();
+  }
+});
+
+// ── Hash route handler (for in-page actions only) ─────────
+// Backward-compat: legacy hash links #case-study-tfs and #wealth-intake
+// are migrated to clean URLs (/case-studies/... and /for-advisors). The
+// shim in handleHashRoute() catches old links and redirects so external
+// references that haven't been updated (LinkedIn posts already shared,
+// emails already sent) don't break.
 function handleHashRoute() {
   const hash = window.location.hash;
   if (hash === '#schedule') {
     // Auto-open scheduling modal when visiting monkflow.io/#schedule
     setTimeout(() => showSchedulingModal(), 300);
   } else if (hash === '#case-study-tfs') {
-    // Replace landing page with the dedicated TFS case study page
-    renderTfsCaseStudyPage();
+    // Legacy URL — migrate to the clean URL
+    window.history.replaceState({}, '', '/case-studies/team-financial-strategies');
+    dispatchLandingRoute();
+  } else if (hash === '#wealth-intake') {
+    // Legacy URL — migrate to /for-advisors
+    window.history.replaceState({}, '', '/for-advisors');
+    dispatchLandingRoute();
   }
 }
 window.addEventListener('hashchange', handleHashRoute);
@@ -646,14 +707,11 @@ function showLanding() {
   document.getElementById('auth-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
   document.getElementById('landing-container').classList.remove('hidden');
-  // Dispatch on hash so a direct visit to monkflow.io/#case-study-tfs
-  // renders the case study page instead of the standard landing.
-  if (window.location.hash === '#case-study-tfs') {
-    renderTfsCaseStudyPage();
-  } else {
-    renderLandingPage();
-  }
-  // Check for hash routes (e.g. #schedule auto-opens scheduling modal)
+  // Pathname dispatch: visiting /for-advisors directly renders that
+  // page, visiting /case-studies/... renders the case study, anything
+  // else renders the default landing.
+  dispatchLandingRoute();
+  // Check for hash routes (in-page actions: #schedule modal, legacy URL migration)
   handleHashRoute();
 }
 
@@ -895,7 +953,7 @@ function renderLandingPage() {
         <p class="landing-hero-subtitle">MonkFlow builds the new-client onboarding stack for independent RIAs. Cut intake from 45 minutes to under 5. CRM populates automatically. Compliance-friendly signed PDFs out of the box.</p>
         <div class="hero-actions">
           <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Book a 15-min Intro Call</button>
-          <button class="btn btn-secondary btn-lg" onclick="event.preventDefault();window.location.hash='#wealth-intake';">${icons.eye} View the $1,500 Audit →</button>
+          <button class="btn btn-secondary btn-lg" onclick="navigateTo('/for-advisors')">${icons.eye} View the $1,500 Audit →</button>
         </div>
         <div class="landing-hero-stats">
           <div class="landing-stat"><div class="landing-stat-val">45→5 min</div><div class="landing-stat-label">Onboarding time (TFS, real client)</div></div>
@@ -975,7 +1033,7 @@ function renderLandingPage() {
             </div>
           </div>
           <div style="margin-top:24px;">
-            <a href="#case-study-tfs" onclick="event.preventDefault();window.location.hash='#case-study-tfs';" style="font-size:14px;color:var(--accent);text-decoration:underline;">Read the full case study →</a>
+            <a href="/case-studies/team-financial-strategies" onclick="event.preventDefault();navigateTo('/case-studies/team-financial-strategies');" style="font-size:14px;color:var(--accent);text-decoration:underline;">Read the full case study →</a>
           </div>
         </div>
       </div>
@@ -1018,79 +1076,26 @@ function renderLandingPage() {
       </div>
     </section>
 
-    <!-- Productized Offer Ladder — Wealth-Mgmt Intake Forms -->
-    <section id="wealth-intake" class="landing-section">
-      <div class="landing-section-inner">
-        <div class="section-header">
-          <div class="hero-badge">Productized Offers · Public Pricing</div>
-          <h2 class="section-title">Fixed-Fee Tiers — Pick the Scope That Fits</h2>
-          <p class="section-subtitle">No discovery dance. No "let's hop on a call to scope it." Public pricing, fixed delivery windows, refundable audit anchor.</p>
-        </div>
-        <div class="grid-3" style="max-width:1100px;margin:0 auto;gap:16px;">
-          <!-- Tier 1: Audit -->
-          <div class="card" style="padding:28px;">
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 1 · Entry</div>
-            <h3 style="margin:8px 0 6px;font-size:22px;">Onboarding Audit</h3>
-            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$1,500</div>
-            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">7-day delivery</div>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
-              90-min Loom walkthrough of your current new-client onboarding flow + written report on the 3 highest-ROI fixes for your firm's stack.<br/><br/>
-              <strong style="color:var(--text-primary);">Refundable</strong> against any project tier booked within 30 days.
-            </div>
-            <button class="btn btn-secondary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book audit call</button>
-          </div>
-          <!-- Tier 2: Intake Pro (highlighted) -->
-          <div class="card" style="padding:28px;border:1px solid var(--accent);position:relative;">
-            <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;padding:4px 12px;border-radius:12px;font-size:11px;font-weight:700;">MOST POPULAR</div>
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 2 · Core</div>
-            <h3 style="margin:8px 0 6px;font-size:22px;">Intake Pro</h3>
-            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$7,500</div>
-            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">14-day delivery</div>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
-              Digital intake form + one CRM sync (Redtail, Wealthbox, or Salesforce FSC).<br/><br/>
-              Includes document upload, e-signature, conditional logic, automated CRM record creation, custodian-of-record form pre-fill.
-            </div>
-            <button class="btn btn-primary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book intro call</button>
-          </div>
-          <!-- Tier 3: Onboarding System -->
-          <div class="card" style="padding:28px;">
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 3 · Full</div>
-            <h3 style="margin:8px 0 6px;font-size:22px;">Onboarding System</h3>
-            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$14,500</div>
-            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">28-day delivery</div>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
-              The full TFS scope: intake + CRM sync + contract auto-population + signed-PDF generation + reminder sequences + financial-profile sync.<br/><br/>
-              The same system that took TFS from 45 min to under 5 per onboarding.
-            </div>
-            <button class="btn btn-secondary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book intro call</button>
-          </div>
-        </div>
-        <!-- Optional retainer -->
-        <div style="max-width:1100px;margin:24px auto 0;padding:20px 28px;background:var(--bg-secondary);border-radius:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-          <div>
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Optional add-on</div>
-            <div style="font-size:18px;font-weight:600;margin-top:4px;">Care Retainer · $750/mo</div>
-            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">Bug fixes, minor changes (≤4 hrs/mo), CRM custom-field additions. Cancel anytime.</div>
-          </div>
-        </div>
-        <!-- Founding Partner tier -->
-        <div style="max-width:1100px;margin:24px auto 0;padding:24px 28px;border:2px dashed var(--accent);border-radius:12px;background:rgba(0,204,106,0.05);">
-          <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;font-weight:700;">Founding Partner Tier · May 2026 Only</div>
-          <h3 style="margin:8px 0 6px;font-size:20px;">Onboarding System at $5,000 (vs $14,500 list)</h3>
-          <div style="font-size:14px;color:var(--text-secondary);line-height:1.7;">
-            First 2 RIA firms to engage in May 2026 get the full Tier 3 build at <strong style="color:var(--text-primary);">$5,000</strong> in exchange for: written case study with logo + advisor name, 30-min joint video testimonial, and 2–4 reference calls per quarter to future MonkFlow prospects.
-            <br/><br/>
-            <em>Not a discount — a partnership. We build the case-study evidence base together.</em>
-          </div>
-          <button class="btn btn-primary" style="margin-top:16px;" onclick="showSchedulingModal()">Apply for Founding Partner</button>
-        </div>
-        <div style="text-align:center;margin-top:32px;">
-          <button class="btn btn-secondary btn-lg" onclick="showSchedulingModal()">${icons.clock} Schedule a 15-min intro call</button>
-        </div>
+    <!-- Advisor offer-ladder teaser — full ladder lives at /for-advisors -->
+    <section class="landing-section">
+      <div class="landing-section-inner" style="text-align:center;">
+        <div class="hero-badge">For Independent Advisor Firms</div>
+        <h2 class="section-title">Three productized tiers. Public pricing.</h2>
+        <p class="section-subtitle" style="max-width:720px;margin:0 auto 28px;">
+          Onboarding Audit · Intake Pro · Onboarding System.<br/>
+          Refundable audit anchor. Fixed-fee delivery. Founder-led builds for RIAs on Redtail, Wealthbox, or Salesforce FSC.
+        </p>
+        <button class="btn btn-primary btn-lg" onclick="navigateTo('/for-advisors')">
+          ${icons.eye} See pricing + offer ladder →
+        </button>
       </div>
     </section>
 
-    <!-- Legacy id alias so #landing-pricing nav anchor still works -->
+    <!-- Legacy id aliases so #wealth-intake and #landing-pricing anchors from
+         external links (LinkedIn posts, emails already sent) still land on a
+         reasonable place. The handleHashRoute shim above will catch
+         #wealth-intake specifically and redirect to /for-advisors. -->
+    <span id="wealth-intake"></span>
     <span id="landing-pricing"></span>
 
     <!-- Schedule CTA -->
@@ -1120,9 +1125,9 @@ function renderLandingPage() {
         <div class="landing-footer-links">
           <div>
             <h4>Offers</h4>
-            <a href="#" onclick="event.preventDefault();document.getElementById('wealth-intake').scrollIntoView({behavior:'smooth'})">Onboarding Audit · $1,500</a>
-            <a href="#" onclick="event.preventDefault();document.getElementById('wealth-intake').scrollIntoView({behavior:'smooth'})">Intake Pro · $7,500</a>
-            <a href="#" onclick="event.preventDefault();document.getElementById('wealth-intake').scrollIntoView({behavior:'smooth'})">Onboarding System · $14,500</a>
+            <a href="/for-advisors" onclick="event.preventDefault();navigateTo('/for-advisors')">Onboarding Audit · $1,500</a>
+            <a href="/for-advisors" onclick="event.preventDefault();navigateTo('/for-advisors')">Intake Pro · $7,500</a>
+            <a href="/for-advisors" onclick="event.preventDefault();navigateTo('/for-advisors')">Onboarding System · $14,500</a>
             <a href="#" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">All services</a>
           </div>
           <div>
@@ -1148,7 +1153,7 @@ function renderLandingPage() {
 // ============================================================
 // PUBLISHED CASE STUDY — Team Financial Strategies
 // ============================================================
-// Reachable at monkflow.io/#case-study-tfs. Permission to publish
+// Reachable at monkflow.io/case-studies/team-financial-strategies. Permission to publish
 // granted by Jody Team (founding partner) on 2026-04-29 — full case
 // study draft is in docs/wealth-mgmt-pivot/02-tfs-case-study.md and
 // must be kept in sync with this page. The "What Jody said"
@@ -1159,12 +1164,12 @@ function renderTfsCaseStudyPage() {
   container.innerHTML = `
     <nav class="landing-nav">
       <div class="landing-nav-inner">
-        <div class="landing-nav-logo" onclick="window.location.hash='';showLanding()" style="cursor:pointer;">
+        <div class="landing-nav-logo" onclick="navigateTo('/')" style="cursor:pointer;">
           <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
           <div class="logo-text">Monk<span>Flow</span></div>
         </div>
         <div class="landing-nav-actions">
-          <button class="btn btn-ghost" onclick="window.location.hash='';showLanding()">← Back to MonkFlow</button>
+          <button class="btn btn-ghost" onclick="navigateTo('/')">← Back to MonkFlow</button>
           <button class="btn btn-primary btn-sm" onclick="showSchedulingModal()">Schedule a Call</button>
         </div>
       </div>
@@ -1228,7 +1233,7 @@ function renderTfsCaseStudyPage() {
       <div style="margin-top:48px;padding:32px;background:var(--bg-secondary);border-radius:12px;text-align:center;">
         <h3 style="font-family:-apple-system,sans-serif;font-size:22px;margin:0 0 12px;">Want this for your firm?</h3>
         <p style="margin:0 0 20px;color:var(--text-secondary);">We took the same scope MonkFlow built for TFS and packaged it into three productized tiers. Public pricing. Fixed delivery windows. Refundable audit anchor.</p>
-        <button class="btn btn-primary btn-lg" onclick="window.location.hash='';showLanding();setTimeout(()=>document.getElementById('wealth-intake').scrollIntoView({behavior:'smooth'}),100);">View the offer ladder →</button>
+        <button class="btn btn-primary btn-lg" onclick="navigateTo('/for-advisors')">View the offer ladder →</button>
         <button class="btn btn-secondary btn-lg" style="margin-left:12px;" onclick="showSchedulingModal()">Or book a 15-min call</button>
       </div>
 
@@ -1236,6 +1241,229 @@ function renderTfsCaseStudyPage() {
         Jody Team, Founding Partner · Team Financial Strategies · Abilene, TX
       </div>
     </article>
+
+    <footer class="landing-footer">
+      <div class="landing-footer-inner">
+        <div class="landing-footer-bottom">
+          <span>&copy; 2026 MonkFlow. All rights reserved.</span>
+        </div>
+      </div>
+    </footer>
+  `;
+}
+
+// ============================================================
+// FOR ADVISORS — Custom CRM extensions umbrella page
+// ============================================================
+// Reachable at monkflow.io/for-advisors. The deep partnership-friendly
+// page that the Wealthbox/Redtail playbook references — this is the URL
+// in cold outreach, LinkedIn DMs, and the partner pitch deck. Sections:
+// hero (CRM-extensions framing), product matrix (4 rows), built-around
+// CRM strip (text-as-logo to stay on safe ground for nominative fair use),
+// TFS case study summary card, offer ladder (relocated from the landing
+// page's #wealth-intake section), security teaser, CTA.
+function renderForAdvisorsPage() {
+  const container = document.getElementById('landing-container');
+  container.innerHTML = `
+    <nav class="landing-nav">
+      <div class="landing-nav-inner">
+        <div class="landing-nav-logo" onclick="navigateTo('/')" style="cursor:pointer;">
+          <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
+          <div class="logo-text">Monk<span>Flow</span></div>
+        </div>
+        <div class="landing-nav-actions">
+          <button class="btn btn-ghost" onclick="navigateTo('/')">← Back to MonkFlow</button>
+          <button class="btn btn-primary btn-sm" onclick="showSchedulingModal()">Schedule a Call</button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="landing-hero">
+      <div class="landing-hero-content">
+        <div class="hero-badge">Custom CRM extensions for independent advisors</div>
+        <h1 class="landing-hero-title">Make your Wealthbox<br/>or Redtail <span class="text-accent">fit your practice</span></h1>
+        <p class="landing-hero-subtitle">Your CRM does what it's built to do. We build the layer above it — digital intake, signed-PDF generation, custodian-of-record automation, client portals — that turns your CRM into the new-client onboarding system your firm actually needs. Real result: 45 min → under 5 min per onboarding for Team Financial Strategies (Abilene TX).</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Book a 15-min intro call</button>
+          <button class="btn btn-secondary btn-lg" onclick="navigateTo('/case-studies/team-financial-strategies')">${icons.eye} Read the TFS case study →</button>
+        </div>
+      </div>
+      <div class="hero-glow"></div>
+    </section>
+
+    <!-- Product matrix -->
+    <section class="landing-section">
+      <div class="landing-section-inner">
+        <div class="section-header">
+          <div class="hero-badge">What we build</div>
+          <h2 class="section-title">Forms · Portals · Automations · Deployments</h2>
+          <p class="section-subtitle">Four buckets. Everything we ship sits inside one of them.</p>
+        </div>
+        <div class="grid-2" style="max-width:1100px;margin:0 auto;gap:16px;">
+          <div class="card" style="padding:28px;">
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Forms</div>
+            <h3 style="margin:8px 0 10px;font-size:22px;">Digital intake + signed PDFs</h3>
+            <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0;">New-client intake forms with conditional logic, document upload, e-signature. Custodian-of-record paperwork pre-filled and bulk-signed. Forms write directly to your CRM — no re-typing, no NIGO rework.</p>
+          </div>
+          <div class="card" style="padding:28px;">
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Portals</div>
+            <h3 style="margin:8px 0 10px;font-size:22px;">Branded client portals</h3>
+            <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0;">Secure document vaults, signed-agreement archives, quarterly review prep, beneficiary updates. Branded to your firm. Clients sign in once and see everything that matters in one place.</p>
+          </div>
+          <div class="card" style="padding:28px;">
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Automations</div>
+            <h3 style="margin:8px 0 10px;font-size:22px;">CRM workflow automation</h3>
+            <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0;">Reminder sequences, household-relationship sync, risk-tolerance scoring, IPS draft generation. Built on your CRM's API — extends what you bought, doesn't replace it.</p>
+          </div>
+          <div class="card" style="padding:28px;">
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Deployments</div>
+            <h3 style="margin:8px 0 10px;font-size:22px;">Implementation + ongoing care</h3>
+            <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0;">We handle the build, the deploy, the training, and the bug-fix calls. Founder-led — direct line to the person who wrote the code. No ticket queues, no offshore teams, no "your CSM will get back to you in 48 hours."</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Built around (CRM logo strip — text-as-logo for nominative fair use) -->
+    <section class="landing-section landing-section-alt">
+      <div class="landing-section-inner">
+        <div class="section-header">
+          <div class="hero-badge">Built around your stack</div>
+          <h2 class="section-title">We work where your firm already works</h2>
+          <p class="section-subtitle">We don't sell a new CRM. We extend the one you've already invested in.</p>
+        </div>
+        <div style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;max-width:1000px;margin:0 auto;">
+          ${['Wealthbox', 'Redtail', 'Salesforce FSC', 'eMoney', 'RightCapital', 'MoneyGuidePro', 'Schwab Advisor Center', 'Fidelity AdvisorChannel'].map(name => `
+            <div style="padding:12px 20px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;font-size:14px;font-weight:600;color:var(--text-primary);">${name}</div>
+          `).join('')}
+        </div>
+        <p style="text-align:center;margin-top:24px;font-size:12px;color:var(--text-tertiary);max-width:700px;margin-left:auto;margin-right:auto;">
+          Don't see your stack? We've integrated with ten-plus advisor-platform APIs. If it has an API, we can build to it.
+        </p>
+      </div>
+    </section>
+
+    <!-- TFS case study summary -->
+    <section class="landing-section">
+      <div class="landing-section-inner">
+        <div class="section-header">
+          <div class="hero-badge">Proof</div>
+          <h2 class="section-title">One real client. One real number.</h2>
+        </div>
+        <div class="card" style="max-width:900px;margin:0 auto;padding:36px;">
+          <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:center;">
+            <div style="flex:1;min-width:280px;">
+              <div style="font-size:13px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Team Financial Strategies · 4 advisors, Abilene TX</div>
+              <h3 style="margin:0 0 12px;font-size:24px;">45 minutes → under 5 minutes per new-client onboarding</h3>
+              <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0 0 20px;">Custom intake form + Redtail CRM auto-sync + signed-PDF generation. Built in two weeks. Jody Team (founding partner) available for reference calls to serious prospects.</p>
+              <button class="btn btn-primary" onclick="navigateTo('/case-studies/team-financial-strategies')">Read the full case study →</button>
+            </div>
+            <div style="flex:0 0 auto;text-align:center;">
+              <div style="font-size:48px;font-weight:700;color:var(--accent);line-height:1;">9×</div>
+              <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px;">faster onboarding</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Offer ladder (relocated from landing page #wealth-intake) -->
+    <section class="landing-section landing-section-alt">
+      <div class="landing-section-inner">
+        <div class="section-header">
+          <div class="hero-badge">Productized offers · Public pricing</div>
+          <h2 class="section-title">Fixed-fee tiers — pick the scope that fits</h2>
+          <p class="section-subtitle">No discovery dance. No "let's hop on a call to scope it." Public pricing, fixed delivery windows, refundable audit anchor.</p>
+        </div>
+        <div class="grid-3" style="max-width:1100px;margin:0 auto;gap:16px;">
+          <!-- Tier 1: Audit -->
+          <div class="card" style="padding:28px;">
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 1 · Entry</div>
+            <h3 style="margin:8px 0 6px;font-size:22px;">Onboarding Audit</h3>
+            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$1,500</div>
+            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">7-day delivery</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
+              90-min Loom walkthrough of your current new-client onboarding flow + written report on the 3 highest-ROI fixes for your firm's stack.<br/><br/>
+              <strong style="color:var(--text-primary);">Refundable</strong> against any project tier booked within 30 days.
+            </div>
+            <button class="btn btn-secondary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book audit call</button>
+          </div>
+          <!-- Tier 2: Intake Pro (highlighted) -->
+          <div class="card" style="padding:28px;border:1px solid var(--accent);position:relative;">
+            <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;padding:4px 12px;border-radius:12px;font-size:11px;font-weight:700;">MOST POPULAR</div>
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 2 · Core</div>
+            <h3 style="margin:8px 0 6px;font-size:22px;">Intake Pro</h3>
+            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$7,500</div>
+            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">14-day delivery</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
+              Digital intake form + one CRM sync (Redtail, Wealthbox, or Salesforce FSC).<br/><br/>
+              Includes document upload, e-signature, conditional logic, automated CRM record creation, custodian-of-record form pre-fill.
+            </div>
+            <button class="btn btn-primary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book intro call</button>
+          </div>
+          <!-- Tier 3: Onboarding System -->
+          <div class="card" style="padding:28px;">
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 3 · Full</div>
+            <h3 style="margin:8px 0 6px;font-size:22px;">Onboarding System</h3>
+            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$14,500</div>
+            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">28-day delivery</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
+              The full TFS scope: intake + CRM sync + contract auto-population + signed-PDF generation + reminder sequences + financial-profile sync.<br/><br/>
+              The same system that took TFS from 45 min to under 5 per onboarding.
+            </div>
+            <button class="btn btn-secondary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book intro call</button>
+          </div>
+        </div>
+        <!-- Optional retainer -->
+        <div style="max-width:1100px;margin:24px auto 0;padding:20px 28px;background:var(--bg-secondary);border-radius:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+          <div>
+            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Optional add-on</div>
+            <div style="font-size:18px;font-weight:600;margin-top:4px;">Care Retainer · $750/mo</div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">Bug fixes, minor changes (≤4 hrs/mo), CRM custom-field additions. Cancel anytime.</div>
+          </div>
+        </div>
+        <!-- Founding Partner tier -->
+        <div style="max-width:1100px;margin:24px auto 0;padding:24px 28px;border:2px dashed var(--accent);border-radius:12px;background:rgba(0,204,106,0.05);">
+          <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;font-weight:700;">Founding Partner Tier · May 2026 Only</div>
+          <h3 style="margin:8px 0 6px;font-size:20px;">Onboarding System at $5,000 (vs $14,500 list)</h3>
+          <div style="font-size:14px;color:var(--text-secondary);line-height:1.7;">
+            First 2 RIA firms to engage in May 2026 get the full Tier 3 build at <strong style="color:var(--text-primary);">$5,000</strong> in exchange for: written case study with logo + advisor name, 30-min joint video testimonial, and 2–4 reference calls per quarter to future MonkFlow prospects.
+            <br/><br/>
+            <em>Not a discount — a partnership. We build the case-study evidence base together.</em>
+          </div>
+          <button class="btn btn-primary" style="margin-top:16px;" onclick="showSchedulingModal()">Apply for Founding Partner</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Compliance / security teaser -->
+    <section class="landing-section">
+      <div class="landing-section-inner">
+        <div class="section-header">
+          <div class="hero-badge">Security posture</div>
+          <h2 class="section-title">What happens to client PII?</h2>
+        </div>
+        <div style="max-width:820px;margin:0 auto;font-size:15px;color:var(--text-secondary);line-height:1.7;text-align:center;">
+          <p>MonkFlow is a workflow layer, not a data store. Client information moves directly into your CRM — we don't persist PII or financial data on our infrastructure beyond the implementation window. TLS in transit, AES-256 at rest, single-operator access with 2FA. Cyber liability insurance and DPA on file.</p>
+          <p style="font-size:13px;color:var(--text-tertiary);margin-top:24px;">Full security overview available on request for CCO review.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="landing-section landing-section-alt">
+      <div class="landing-section-inner">
+        <div class="landing-cta">
+          <h2>Ready to extend your CRM?</h2>
+          <p>Two ways to start. Both honest. Both fixed-fee. Both refundable against the next tier up.</p>
+          <div class="landing-cta-actions">
+            <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Book a 15-min intro call</button>
+            <button class="btn btn-secondary btn-lg" onclick="showSchedulingModal()">${icons.eye} Book the $1,500 Audit</button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <footer class="landing-footer">
       <div class="landing-footer-inner">
