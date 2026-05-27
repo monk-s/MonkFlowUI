@@ -67,9 +67,23 @@ class GridPositionManager:
         *,
         repository,             # bot.persistence.repository.Repository
         long_only: bool = True,
+        floor_fraction: Decimal | float | str = Decimal("0.5"),
     ) -> None:
+        """
+        floor_fraction: floor for the long-only check, expressed as a
+        fraction of `prebuy_qty`. A value of 1.0 (legacy default) means
+        the grid cannot sell unless inventory exceeds the entire prebuy,
+        which blocks bidirectional chop trading. 0.5 (current default)
+        keeps the lean-long bias while giving the grid headroom to
+        pre-place all its sell orders.
+        """
         self.repo = repository
         self.long_only = long_only
+        self.floor_fraction = _to_decimal(floor_fraction)
+        if self.floor_fraction < 0 or self.floor_fraction > 1:
+            raise ValueError(
+                f"floor_fraction must be in [0, 1], got {self.floor_fraction}"
+            )
         self.state = GridInventoryState()
 
     # ----- public API -----
@@ -108,6 +122,19 @@ class GridPositionManager:
             fees_paid_total=float(fee),
         )
 
+    @property
+    def inventory_floor(self) -> Decimal:
+        """The effective inventory floor (prebuy_qty * floor_fraction).
+
+        Sells that would push remaining inventory below this value are
+        rejected when `long_only=True`. With the default floor_fraction
+        of 0.5 and a 70% prebuy, the floor is 35% of starting equity
+        (still long-biased), and the grid has up to 35%-of-equity worth
+        of inventory to sell into chop before the floor blocks further
+        sells.
+        """
+        return self.state.prebuy_qty * self.floor_fraction
+
     def can_sell(self, qty: Decimal) -> tuple[bool, Optional[str]]:
         """Check if a sell of `qty` is allowed (long-only floor check).
 
@@ -116,10 +143,12 @@ class GridPositionManager:
         if self.long_only:
             qty = _to_decimal(qty)
             remaining = self.state.qty - qty
-            if remaining < self.state.prebuy_qty:
+            floor = self.inventory_floor
+            if remaining < floor:
                 return False, (
                     f"long_only floor: sell {qty} would reduce inventory "
-                    f"({self.state.qty}) below prebuy floor ({self.state.prebuy_qty})"
+                    f"({self.state.qty}) below floor ({floor}; "
+                    f"{self.floor_fraction} × prebuy {self.state.prebuy_qty})"
                 )
         return True, None
 

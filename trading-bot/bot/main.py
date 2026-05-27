@@ -166,6 +166,7 @@ async def boot() -> None:
         grid_pos_mgr = GridPositionManager(
             repository=repo,
             long_only=settings.GRID_LONG_ONLY,
+            floor_fraction=settings.GRID_INVENTORY_FLOOR_FRACTION,
         )
         grid_risk_mgr = GridRiskManager(
             repository=repo,

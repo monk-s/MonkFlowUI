@@ -31,8 +31,15 @@ def _mock_repo():
     return repo
 
 
-def _mgr(long_only=True):
-    return GridPositionManager(repository=_mock_repo(), long_only=long_only)
+def _mgr(long_only=True, floor_fraction=Decimal("1.0")):
+    # Tests default to floor_fraction=1.0 (legacy "floor == full prebuy")
+    # so the existing assertions exercise the strict-floor behavior.
+    # Production now defaults to 0.5 (see config/settings.py).
+    return GridPositionManager(
+        repository=_mock_repo(),
+        long_only=long_only,
+        floor_fraction=floor_fraction,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -201,6 +208,48 @@ class TestLongOnlyFloor:
         allowed, reason = m.can_sell(Decimal("0.01"))
         assert allowed is True
         assert reason is None
+
+    def test_floor_fraction_relaxes_floor(self):
+        """With floor_fraction=0.5 and prebuy=0.05, the floor drops to 0.025.
+        A sell of 0.01 from inventory 0.05 leaves 0.04 → above floor → allowed."""
+        m = _mgr(long_only=True, floor_fraction=Decimal("0.5"))
+        m.state.qty = Decimal("0.05")
+        m.state.prebuy_qty = Decimal("0.05")
+        allowed, _ = m.can_sell(Decimal("0.01"))
+        assert allowed is True
+        assert m.inventory_floor == Decimal("0.025")
+
+    def test_floor_fraction_still_blocks_below_relaxed_floor(self):
+        """With floor_fraction=0.5 and prebuy=0.05, floor=0.025.
+        A sell that would leave 0.02 (below 0.025) is still rejected."""
+        m = _mgr(long_only=True, floor_fraction=Decimal("0.5"))
+        m.state.qty = Decimal("0.03")
+        m.state.prebuy_qty = Decimal("0.05")
+        allowed, reason = m.can_sell(Decimal("0.01"))
+        assert allowed is False
+        assert "long_only floor" in reason
+
+    def test_floor_fraction_zero_means_no_floor(self):
+        """floor_fraction=0 lets the grid sell down to zero inventory."""
+        m = _mgr(long_only=True, floor_fraction=Decimal("0.0"))
+        m.state.qty = Decimal("0.05")
+        m.state.prebuy_qty = Decimal("0.05")
+        allowed, _ = m.can_sell(Decimal("0.04"))
+        assert allowed is True
+
+    def test_floor_fraction_validates_range(self):
+        """floor_fraction outside [0, 1] is rejected at construction time."""
+        with pytest.raises(ValueError, match="floor_fraction"):
+            GridPositionManager(repository=_mock_repo(), floor_fraction=Decimal("1.5"))
+        with pytest.raises(ValueError, match="floor_fraction"):
+            GridPositionManager(repository=_mock_repo(), floor_fraction=Decimal("-0.1"))
+
+    def test_floor_fraction_accepts_float_and_str(self):
+        """Constructor coerces float / str via _to_decimal."""
+        m1 = GridPositionManager(repository=_mock_repo(), floor_fraction=0.85)
+        m2 = GridPositionManager(repository=_mock_repo(), floor_fraction="0.85")
+        assert m1.floor_fraction == Decimal("0.85")
+        assert m2.floor_fraction == Decimal("0.85")
 
 
 # ─────────────────────────────────────────────────────────────────────────
