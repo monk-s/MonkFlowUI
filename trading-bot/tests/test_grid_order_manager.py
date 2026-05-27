@@ -168,6 +168,15 @@ class FakeRepo:
         self.fills.append(fill)
         return fill
 
+    async def get_most_recent_fill_at_level(self, level_index, side=None):
+        """Mirror of Repository.get_most_recent_fill_at_level for tests."""
+        candidates = [f for f in self.fills if f.level_index == level_index]
+        if side is not None:
+            candidates = [f for f in candidates if f.side == side]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda f: f.created_at)
+
 
 class FakeExchange:
     """Minimal exchange that returns whatever fills we feed it.
@@ -478,6 +487,157 @@ class TestFillAndOppositePlacement:
         # Opposite-side BUY should be placed at level 3 ($80K)
         buys_at_80k = await repo.get_open_orders_at_level(3, side="buy")
         assert len(buys_at_80k) == 1
+
+
+class TestC1PairStateCooldown:
+    """AUDIT-FIX C1: after a same-side fill at level N, suppress same-side
+    re-placement at level N until the opposite-side pair-partner at the
+    adjacent level fills (or the pair-partner is cancelled).
+    """
+
+    @pytest.mark.asyncio
+    async def test_sell_at_level_blocked_while_pair_buy_pending(self):
+        """Reproduces the 2026-05-27 production bleed: sell fires at level 7,
+        opposite buy at level 6 stays pending → next tick must NOT re-place
+        sell at level 7. The check kicks in via _is_pair_pending.
+        """
+        # 11 levels at $2K spacing, $70K–$90K
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            range_low=70000, range_high=90000, n_levels=11,
+            orders_per_side=5, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=20000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Fire the sell at level 6 ($82K) — opposite buy at level 5 ($80K)
+        # should already exist from the same populate call.
+        sell_82k = next(
+            o for o in await repo.get_open_active_orders()
+            if o.side == "sell" and o.level_index == 6
+        )
+        exch.set_filled(sell_82k.exchange_order_id)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # The sell at level 6 should be marked filled
+        assert (await repo.get_active_order(sell_82k.exchange_order_id)).status == "filled"
+
+        # _place_opposite_after_fill places a buy at level 5 — but since one
+        # already existed, no new one is placed. There IS still an open buy
+        # at level 5 → C1 pair-pending should block re-placement of the
+        # sell at level 6.
+        buys_at_5 = await repo.get_open_orders_at_level(5, side="buy")
+        assert len(buys_at_5) == 1, "expected the pre-existing buy at level 5"
+
+        # Trigger another tick — C1 must block re-placement of sell at level 6
+        await om.tick(grid_range=gr, current_price=80000.0)
+        sells_at_6 = await repo.get_open_orders_at_level(6, side="sell")
+        assert sells_at_6 == [], (
+            f"C1 should block re-placement at level 6 while pair-buy at "
+            f"level 5 is pending. Got: {[(o.side, o.level_index) for o in sells_at_6]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_sell_replaces_after_pair_buy_fills(self):
+        """Once the pair-partner buy at N-1 fills, the round-trip is
+        complete and the bot resumes normal placement at level N."""
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            range_low=70000, range_high=90000, n_levels=11,
+            orders_per_side=5, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=20000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Fire sell at level 6 → opposite buy at level 5 pending
+        sell_82k = next(
+            o for o in await repo.get_open_active_orders()
+            if o.side == "sell" and o.level_index == 6
+        )
+        exch.set_filled(sell_82k.exchange_order_id)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # C1 blocks re-placement at level 6 (verified by prior test)
+        assert await repo.get_open_orders_at_level(6, side="sell") == []
+
+        # Now fire the pair-partner buy at level 5 — round-trip complete
+        buy_80k = (await repo.get_open_orders_at_level(5, side="buy"))[0]
+        exch.set_filled(buy_80k.exchange_order_id)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # On this tick, sell at level 6 should be re-placed by _populate_levels
+        # (most recent sell-fill at level 6 still exists, but the pair-partner
+        # at level 5 is now FILLED, not open → pair_pending=False)
+        sells_at_6 = await repo.get_open_orders_at_level(6, side="sell")
+        assert len(sells_at_6) == 1, (
+            "after the pair-buy fills, the sell at level 6 should be "
+            "re-engaged for the next round-trip"
+        )
+
+    @pytest.mark.asyncio
+    async def test_buy_blocked_while_pair_sell_pending(self):
+        """Symmetric to the sell-side block: after a buy at level N fills,
+        if the opposite sell at level N+1 is still open, no new buy at N."""
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            range_low=70000, range_high=90000, n_levels=11,
+            orders_per_side=5, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=20000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Fire buy at level 4 ($78K) — opposite sell at level 5 ($80K)
+        # already exists from populate.
+        buy_78k = next(
+            o for o in await repo.get_open_active_orders()
+            if o.side == "buy" and o.level_index == 4
+        )
+        exch.set_filled(buy_78k.exchange_order_id)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Pair-partner sell at level 5 still open → C1 blocks buy re-placement
+        sells_at_5 = await repo.get_open_orders_at_level(5, side="sell")
+        assert len(sells_at_5) == 1
+        await om.tick(grid_range=gr, current_price=80000.0)
+        buys_at_4 = await repo.get_open_orders_at_level(4, side="buy")
+        assert buys_at_4 == [], "C1 should block buy re-placement"
+
+    @pytest.mark.asyncio
+    async def test_no_block_when_no_prior_fill_at_level(self):
+        """First-time placement: no fill history → C1 is permissive."""
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            orders_per_side=3, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=2000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+        # All requested levels populated normally
+        open_orders = await repo.get_open_active_orders()
+        # 3 buys below + 3 sells above
+        assert len([o for o in open_orders if o.side == "buy"]) == 3
+        assert len([o for o in open_orders if o.side == "sell"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_no_block_when_pair_partner_off_grid(self):
+        """If the would-be pair-partner is off-grid (level_index < 0 or
+        >= n_levels), there is no pair to wait for. Re-placement allowed.
+        """
+        # 4 levels: [70K, 75K, 80K, 85K]. Sell at level 0 (off-grid) edge case.
+        repo, pos_mgr, exch, om, gr = _build_setup(
+            range_low=70000, range_high=85000, n_levels=4,
+            orders_per_side=4, long_only=False,
+        )
+        await om.execute_prebuy(notional_usd=20000.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+
+        # Manually record a fill at level 0 (sell) to simulate the edge case
+        await repo.record_grid_fill(
+            active_order_id=None, exchange_order_id="synthetic-fill",
+            side="sell", level_index=0,
+            fill_price=70000.0, fill_qty=0.001, fee_paid=0.014,
+            realized_pnl=0.0, inventory_after_qty=0.05,
+            inventory_after_avg_cost=80000.0,
+        )
+        # _is_pair_pending(0, "sell", grid_range) → opposite_idx = -1
+        # → off-grid → return False (no block)
+        pair_pending = await om._is_pair_pending(0, "sell", gr)
+        assert pair_pending is False
 
 
 class TestFullCycle:

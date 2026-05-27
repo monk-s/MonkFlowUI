@@ -656,6 +656,24 @@ class Repository:
             )
             return list(result.scalars().all())
 
+    async def get_most_recent_fill_at_level(
+        self, level_index: int, side: Optional[str] = None,
+    ) -> Optional[GridFill]:
+        """Return the newest fill at a given level (optionally filtered by side).
+
+        Used by the pair-state cooldown logic (AUDIT-FIX C1) to detect when
+        a level just filled on one side and the bot should hold off on
+        re-placing same-side orders there until the matching opposite-side
+        order at the adjacent level completes the round-trip.
+        """
+        async with self.session_factory() as session:
+            stmt = select(GridFill).where(GridFill.level_index == level_index)
+            if side is not None:
+                stmt = stmt.where(GridFill.side == side)
+            stmt = stmt.order_by(GridFill.created_at.desc()).limit(1)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
     # ------------------------------------------------------------------
     # tb3_grid_metrics (daily aggregates)
     # ------------------------------------------------------------------
