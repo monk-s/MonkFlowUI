@@ -244,6 +244,14 @@ class GridOrderManager:
     async def recenter(self, *, new_range: GridRange, current_price: float) -> None:
         """Cancel ALL active grid orders + persist new range. The next
         tick() will populate the new grid. Pre-buy position is NOT touched.
+
+        AUDIT-FIX A4: after the cancel loop, re-query active orders. Any
+        pre-recenter row still showing status='open' is hard-marked
+        cancelled BEFORE the new range is written. Without this defensive
+        sweep, a cancel_order failure (network error, exchange race,
+        retryable failure_reason) would leave orphans from the prior
+        epoch alongside the new grid — which is exactly what produced
+        the 20 orphan rows observed in the 2026-05-27 live evidence.
         """
         logger.info(
             "grid_recenter_start",
@@ -251,18 +259,47 @@ class GridOrderManager:
             n_levels=new_range.n_levels,
         )
         open_orders = await self.repo.get_open_active_orders()
+        pre_recenter_ids = {o.exchange_order_id for o in open_orders}
         cancelled = 0
         for o in open_orders:
             ok = await self._cancel_order(o.exchange_order_id)
             if ok:
                 cancelled += 1
+
+        # AUDIT-FIX A4: belt-and-suspenders sweep — anything from the
+        # pre-recenter cohort still showing status='open' gets force-marked.
+        # The old row was definitely in the prior epoch (we listed it
+        # above, then tried to cancel); leaving it open under the NEW range
+        # would mean the bot keeps `_cancel_out_of_range` looping on a
+        # known-doomed row tick after tick, plus inflated dashboard counts.
+        still_open = await self.repo.get_open_active_orders()
+        force_cleaned = 0
+        for o in still_open:
+            if o.exchange_order_id in pre_recenter_ids:
+                await self.repo.mark_order_cancelled(o.exchange_order_id)
+                logger.warning(
+                    "recenter_force_close_orphan",
+                    order_id=o.exchange_order_id,
+                    side=o.side, level=o.level_index, level_price=o.level_price,
+                    note=(
+                        "row was in pre-recenter set but cancel did not "
+                        "succeed; force-marked cancelled to keep DB coherent"
+                    ),
+                )
+                force_cleaned += 1
+
         await self.repo.update_grid_state(
             current_range_low=new_range.low,
             current_range_high=new_range.high,
             num_levels=new_range.n_levels,
             last_recenter_at=datetime.now(timezone.utc),
         )
-        logger.info("grid_recenter_done", cancelled=cancelled)
+        logger.info(
+            "grid_recenter_done",
+            cancelled=cancelled,
+            force_cleaned=force_cleaned,
+            requested=len(pre_recenter_ids),
+        )
 
     # ─────────────────────────────────────────────────────────────────
     # Emergency exit (called by circuit breaker)
