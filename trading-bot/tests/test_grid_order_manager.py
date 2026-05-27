@@ -85,6 +85,7 @@ class FakeRepo:
             fill_price=None,
             fill_qty=None,
             fee_paid=None,
+            cancel_reason=None,  # AUDIT-FIX A5
         )
         self.active_orders[exchange_order_id] = row
         self._next_order_db_id += 1
@@ -109,12 +110,36 @@ class FakeRepo:
             fee_paid=fee_paid,
         )
 
-    async def mark_order_cancelled(self, exchange_order_id):
+    async def mark_order_cancelled(self, exchange_order_id, *, reason=None):
+        # AUDIT-FIX A5: accept optional `reason` for orphan-source observability
+        kwargs = {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc)}
+        if reason is not None:
+            kwargs["cancel_reason"] = reason
+        await self.update_active_order(exchange_order_id, **kwargs)
+
+    async def mark_order_failed(self, exchange_order_id, *, reason):
+        """AUDIT-FIX A5: exchange rejected at placement (A2 path)."""
         await self.update_active_order(
             exchange_order_id,
-            status="cancelled",
+            status="failed",
             cancelled_at=datetime.now(timezone.utc),
+            cancel_reason=reason,
         )
+
+    async def mark_order_expired(self, exchange_order_id, *, reason):
+        """AUDIT-FIX A5: exchange-side terminal (A1/A3 paths)."""
+        await self.update_active_order(
+            exchange_order_id,
+            status="expired",
+            cancelled_at=datetime.now(timezone.utc),
+            cancel_reason=reason,
+        )
+
+    async def get_active_orders_by_status(self, status):
+        return [
+            o for o in self.active_orders.values()
+            if o.status == status
+        ]
 
     async def get_active_order(self, exchange_order_id):
         return self.active_orders.get(exchange_order_id)
@@ -631,6 +656,107 @@ class TestCancellation:
         # All open orders should be cancelled
         remaining = await repo.get_open_active_orders()
         assert len(remaining) == 0
+
+
+class TestA5DistinctStatusesAndReason:
+    """AUDIT-FIX A5: repository methods that write distinct status values
+    + cancel_reason for orphan-source observability.
+
+    The bot-initiated cancel path still uses status='cancelled' (with an
+    optional reason). Placement-time rejections (A2 follow-up) use
+    status='failed' + reason. Exchange-side terminations (A1/A3
+    follow-ups) use status='expired' + reason.
+    """
+
+    @pytest.mark.asyncio
+    async def test_mark_order_cancelled_without_reason(self):
+        """Backward compat: existing call sites without `reason` still work."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="legacy-cancel",
+            side="buy", level_index=0, level_price=70000.0, qty=0.01,
+        )
+        await repo.mark_order_cancelled("legacy-cancel")
+        row = await repo.get_active_order("legacy-cancel")
+        assert row.status == "cancelled"
+        assert row.cancel_reason is None
+
+    @pytest.mark.asyncio
+    async def test_mark_order_cancelled_with_reason(self):
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="with-reason",
+            side="buy", level_index=0, level_price=70000.0, qty=0.01,
+        )
+        await repo.mark_order_cancelled("with-reason", reason="recenter_force_close")
+        row = await repo.get_active_order("with-reason")
+        assert row.status == "cancelled"
+        assert row.cancel_reason == "recenter_force_close"
+
+    @pytest.mark.asyncio
+    async def test_mark_order_failed_records_reason(self):
+        """A2 path: Coinbase rejected the placement at submission."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="rejected-placement",
+            side="sell", level_index=12, level_price=78000.0, qty=0.005,
+        )
+        await repo.mark_order_failed(
+            "rejected-placement",
+            reason="INVALID_LIMIT_PRICE_POST_ONLY",
+        )
+        row = await repo.get_active_order("rejected-placement")
+        assert row.status == "failed"
+        assert row.cancel_reason == "INVALID_LIMIT_PRICE_POST_ONLY"
+
+    @pytest.mark.asyncio
+    async def test_mark_order_expired_records_reason(self):
+        """A1/A3 path: exchange terminal status (CANCELLED / EXPIRED /
+        UNKNOWN_CANCEL_ORDER / ORDER_IS_FULLY_FILLED / etc)."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="exchange-cancelled",
+            side="buy", level_index=3, level_price=74000.0, qty=0.005,
+        )
+        await repo.mark_order_expired(
+            "exchange-cancelled",
+            reason="UNKNOWN_CANCEL_ORDER",
+        )
+        row = await repo.get_active_order("exchange-cancelled")
+        assert row.status == "expired"
+        assert row.cancel_reason == "UNKNOWN_CANCEL_ORDER"
+
+    @pytest.mark.asyncio
+    async def test_get_active_orders_by_status_splits_cohorts(self):
+        """Query helper: split orphan-source cohorts."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        # Seed 5 rows across 4 statuses
+        for i, (oid, status_writer) in enumerate([
+            ("ok-cancel-1", lambda x: repo.mark_order_cancelled(x, reason="recenter")),
+            ("ok-cancel-2", lambda x: repo.mark_order_cancelled(x, reason="stale")),
+            ("rejected-1", lambda x: repo.mark_order_failed(x, reason="INVALID_LIMIT_PRICE_POST_ONLY")),
+            ("expired-1", lambda x: repo.mark_order_expired(x, reason="UNKNOWN_CANCEL_ORDER")),
+            ("expired-2", lambda x: repo.mark_order_expired(x, reason="ORDER_IS_FULLY_FILLED")),
+        ]):
+            await repo.insert_active_order(
+                exchange_order_id=oid, side="buy",
+                level_index=i, level_price=70000.0 + i * 100, qty=0.001,
+            )
+            await status_writer(oid)
+
+        cancelled_rows = await repo.get_active_orders_by_status("cancelled")
+        assert len(cancelled_rows) == 2
+        assert {r.cancel_reason for r in cancelled_rows} == {"recenter", "stale"}
+
+        failed_rows = await repo.get_active_orders_by_status("failed")
+        assert len(failed_rows) == 1
+        assert failed_rows[0].cancel_reason == "INVALID_LIMIT_PRICE_POST_ONLY"
+
+        expired_rows = await repo.get_active_orders_by_status("expired")
+        assert len(expired_rows) == 2
+        assert {r.cancel_reason for r in expired_rows} == {
+            "UNKNOWN_CANCEL_ORDER", "ORDER_IS_FULLY_FILLED",
+        }
 
 
 class TestEmergencyExit:

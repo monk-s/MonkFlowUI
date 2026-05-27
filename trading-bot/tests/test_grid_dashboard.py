@@ -47,6 +47,8 @@ def _fake_active_order(level_index, side, **overrides):
         status="open",
         created_at=datetime(2026, 5, 26, 12, 0, tzinfo=timezone.utc),
         last_polled_at=datetime(2026, 5, 26, 14, 0, tzinfo=timezone.utc),
+        # AUDIT-FIX A5
+        cancel_reason=None,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -145,6 +147,26 @@ class TestGridState:
         r = client.get("/api/grid/state")
         assert r.status_code == 200
         assert r.json() == {"initialized": False}
+
+    def test_cancel_reason_exposed_in_active_order(self):
+        """AUDIT-FIX A5: cancel_reason flows into the JSON payload so
+        dashboards can split orphan-source cohorts."""
+        gs = _fake_grid_state()
+        active = [
+            _fake_active_order(5, "buy"),  # open — no reason
+            # An open row with cancel_reason should NOT appear in production
+            # (we only write it on terminal transitions), but if it ever
+            # does, the JSON should faithfully pass it through.
+            _fake_active_order(
+                15, "sell",
+                cancel_reason="INVALID_LIMIT_PRICE_POST_ONLY",
+            ),
+        ]
+        app, _ = _build_app(grid_state=gs, active_orders=active)
+        body = TestClient(app).get("/api/grid/state").json()
+        orders_by_level = {o["level_index"]: o for o in body["active_orders"]}
+        assert orders_by_level[5]["cancel_reason"] is None
+        assert orders_by_level[15]["cancel_reason"] == "INVALID_LIMIT_PRICE_POST_ONLY"
 
     def test_handles_nullable_fields(self):
         """Singleton row exists but with NULLs — first deploy before any tick."""
