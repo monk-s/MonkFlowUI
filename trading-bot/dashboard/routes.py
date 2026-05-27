@@ -348,16 +348,53 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
 
     @app.get("/api/grid/state")
     async def grid_state():
-        """Current grid state: range, levels, inventory, prebuy, active orders."""
+        """Current grid state: range, levels, inventory, prebuy, active orders.
+
+        AUDIT-FIX A-final: belt-and-suspenders filter — hide rows whose
+        `level_price` falls outside the currently-active range. Once A1+A4
+        are in place, orphans should be reconciled at the cancel/recenter
+        boundary; this filter ensures any future regression doesn't
+        immediately re-inflate the dashboard count. The hidden count is
+        surfaced as `hidden_out_of_range_count` so operators can spot
+        the signal that something upstream is leaking again.
+        """
         gs = await repo.get_grid_state()
         if gs is None:
             return {"initialized": False}
-        active = await repo.get_open_active_orders()
+        active_all = await repo.get_open_active_orders()
+
+        # Filter to in-range rows (if the range has been initialized).
+        rlow = float(gs.current_range_low) if gs.current_range_low is not None else None
+        rhigh = float(gs.current_range_high) if gs.current_range_high is not None else None
+        if rlow is not None and rhigh is not None:
+            active = []
+            hidden_out_of_range_count = 0
+            hidden_out_of_range_sample: list[dict] = []
+            for o in active_all:
+                lp = float(o.level_price)
+                if rlow <= lp <= rhigh:
+                    active.append(o)
+                else:
+                    hidden_out_of_range_count += 1
+                    if len(hidden_out_of_range_sample) < 5:
+                        hidden_out_of_range_sample.append({
+                            "exchange_order_id": o.exchange_order_id,
+                            "side": o.side,
+                            "level_index": o.level_index,
+                            "level_price": lp,
+                            "created_at": o.created_at.isoformat() if o.created_at else None,
+                        })
+        else:
+            # Range not initialized yet — show everything.
+            active = active_all
+            hidden_out_of_range_count = 0
+            hidden_out_of_range_sample = []
+
         return {
             "initialized": True,
             "symbol": gs.symbol,
-            "range_low": float(gs.current_range_low) if gs.current_range_low is not None else None,
-            "range_high": float(gs.current_range_high) if gs.current_range_high is not None else None,
+            "range_low": rlow,
+            "range_high": rhigh,
             "num_levels": gs.num_levels,
             "capital_per_level": float(gs.capital_per_level) if gs.capital_per_level is not None else None,
             "prebuy_qty": float(gs.prebuy_qty) if gs.prebuy_qty is not None else None,
@@ -387,6 +424,10 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
                 for o in active
             ],
             "active_orders_count": len(active),
+            # AUDIT-FIX A-final: surface the count of hidden out-of-range rows
+            # so operators can detect upstream leaks via the dashboard.
+            "hidden_out_of_range_count": hidden_out_of_range_count,
+            "hidden_out_of_range_sample": hidden_out_of_range_sample,
         }
 
     @app.get("/api/grid/fills")
