@@ -363,3 +363,103 @@ class TestGridMetrics:
         r = client.get("/api/grid/metrics?period=nonsense")
         body = r.json()
         assert body["days"] == 30
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# /api/overview — daily_pnl must include today's grid fills (FEAT live-updates)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestOverviewDailyPnl:
+    def test_daily_pnl_includes_grid_fills(self):
+        """When grid fills happened today, /api/overview's daily_pnl must
+        include their realized P&L net of fees — not just v1 tb_trades.
+
+        Previously, in grid mode, daily_pnl read $0 even after $88+ of grid
+        profit because `get_daily_pnl()` only queries v1 closed trades.
+        """
+        gs = _fake_grid_state()
+        # Three fills today: net +$30, +$25, -$5 → +$50 gross. Fees $0.10 each.
+        fills_today = [
+            _fake_fill(1, "sell", 75000.0, 0.004, realized_pnl=30.0),
+            _fake_fill(2, "sell", 75500.0, 0.004, realized_pnl=25.0),
+            _fake_fill(3, "sell", 75600.0, 0.004, realized_pnl=-5.0),
+        ]
+        # Expected: 30 + 25 - 5 = 50 gross, minus 3 × 0.10 fees = 49.70 net
+        app, repo = _build_app(grid_state=gs, fills=fills_today)
+        # /api/overview asks repo.get_daily_pnl for v1, returns 0.0 by default
+        # And repo.get_grid_fills_since for grid (already returns `fills`)
+
+        client = TestClient(app)
+        r = client.get("/api/overview")
+        assert r.status_code == 200
+        body = r.json()
+
+        assert body["daily_pnl"] == pytest.approx(49.7, abs=0.001)
+        assert "daily_pnl_breakdown" in body
+        assert body["daily_pnl_breakdown"]["v1"] == 0.0
+        assert body["daily_pnl_breakdown"]["grid"] == pytest.approx(49.7, abs=0.001)
+
+    def test_daily_pnl_v1_only_when_no_grid_fills(self):
+        """When no grid fills today, daily_pnl mirrors v1's contribution alone."""
+        gs = _fake_grid_state()
+        app, repo = _build_app(grid_state=gs, fills=[])
+        repo.get_daily_pnl = AsyncMock(return_value=12.50)
+
+        client = TestClient(app)
+        r = client.get("/api/overview")
+        body = r.json()
+
+        assert body["daily_pnl"] == pytest.approx(12.50, abs=0.001)
+        assert body["daily_pnl_breakdown"]["v1"] == 12.50
+        assert body["daily_pnl_breakdown"]["grid"] == 0.0
+
+    def test_daily_pnl_combines_v1_and_grid(self):
+        """v1 and grid contributions both flow into the single daily_pnl number."""
+        gs = _fake_grid_state()
+        fills_today = [
+            _fake_fill(1, "sell", 75000.0, 0.004, realized_pnl=10.0),
+        ]
+        app, repo = _build_app(grid_state=gs, fills=fills_today)
+        repo.get_daily_pnl = AsyncMock(return_value=5.0)  # v1 contribution
+
+        client = TestClient(app)
+        r = client.get("/api/overview")
+        body = r.json()
+
+        # v1: 5.00, grid: 10.0 - 0.10 fee = 9.90 → total 14.90
+        assert body["daily_pnl"] == pytest.approx(14.9, abs=0.001)
+        assert body["daily_pnl_breakdown"]["v1"] == 5.0
+        assert body["daily_pnl_breakdown"]["grid"] == pytest.approx(9.9, abs=0.001)
+
+    def test_daily_pnl_falls_back_to_v1_if_grid_query_fails(self):
+        """If get_grid_fills_since raises, the overview endpoint must still
+        return 200 with v1-only daily_pnl, not 500 the whole dashboard."""
+        gs = _fake_grid_state()
+        app, repo = _build_app(grid_state=gs)
+        repo.get_daily_pnl = AsyncMock(return_value=7.0)
+        repo.get_grid_fills_since = AsyncMock(
+            side_effect=RuntimeError("db down"),
+        )
+
+        client = TestClient(app)
+        r = client.get("/api/overview")
+        assert r.status_code == 200
+        body = r.json()
+
+        assert body["daily_pnl"] == pytest.approx(7.0, abs=0.001)
+        assert body["daily_pnl_breakdown"]["v1"] == 7.0
+        assert body["daily_pnl_breakdown"]["grid"] == 0.0
+
+    def test_daily_pnl_no_grid_state(self):
+        """If there's no grid state at all (pre-prebuy), grid contribution is 0."""
+        app, repo = _build_app(grid_state=None)
+        repo.get_daily_pnl = AsyncMock(return_value=3.0)
+
+        client = TestClient(app)
+        r = client.get("/api/overview")
+        body = r.json()
+
+        assert body["daily_pnl"] == pytest.approx(3.0, abs=0.001)
+        assert body["daily_pnl_breakdown"]["v1"] == 3.0
+        assert body["daily_pnl_breakdown"]["grid"] == 0.0

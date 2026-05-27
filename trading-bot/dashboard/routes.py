@@ -21,9 +21,32 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
         positions = await exchange.get_positions()
         open_trades = await repo.get_open_trades()
         stats = await repo.get_trade_stats()
-        daily_pnl = await repo.get_daily_pnl()
+        daily_pnl_v1 = await repo.get_daily_pnl()
         peak = await repo.get_peak_equity()
         breakers = await repo.get_circuit_breakers()
+
+        # Grid-mode contribution to "Daily P&L": today's UTC-day fills, net of fees.
+        # The legacy `get_daily_pnl()` only queries tb_trades (v1 closed trades). In
+        # grid mode that meant the Overview tile read $0 even when the grid was up
+        # tens of dollars. Add the missing grid component here.
+        daily_pnl_grid = 0.0
+        gs = await repo.get_grid_state()
+        if gs is not None:
+            today_start = datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0,
+            )
+            try:
+                fills_today = await repo.get_grid_fills_since(today_start)
+                daily_pnl_grid = sum(
+                    float(f.realized_pnl or 0) - float(f.fee_paid or 0)
+                    for f in fills_today
+                )
+            except Exception:
+                # If the grid-fills query fails for any reason, fall back to
+                # v1-only daily_pnl rather than 500ing the entire overview.
+                daily_pnl_grid = 0.0
+
+        daily_pnl_total = (daily_pnl_v1 or 0.0) + daily_pnl_grid
 
         unrealized = sum(float(p.unrealized_pnl) for p in positions)
         total_risk = sum(float(t.risk_amount or 0) for t in open_trades)
@@ -37,7 +60,14 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
             "equity": float(equity),
             "cash_balance": float(equity) - unrealized,
             "unrealized_pnl": unrealized,
-            "daily_pnl": daily_pnl,
+            "daily_pnl": daily_pnl_total,
+            # Breakdown so the dashboard / debugging can see which engine produced
+            # what. Frontend keeps using `daily_pnl` for the headline tile; this is
+            # auxiliary and won't break existing consumers.
+            "daily_pnl_breakdown": {
+                "v1": daily_pnl_v1 or 0.0,
+                "grid": daily_pnl_grid,
+            },
             "total_pnl": float(equity) - float(state.paper_balance if state.trading_mode == "paper" else (state.live_balance or 0)),
             "portfolio_heat": round(heat, 2),
             "drawdown_pct": round(drawdown, 2),
