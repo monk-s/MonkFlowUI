@@ -32,6 +32,12 @@ TIMEFRAME_MAP = {
 # Rate limiting: max 8 concurrent requests (under the 10/s limit)
 _semaphore = asyncio.Semaphore(8)
 
+# AUDIT-FIX A3: order statuses from /historical/{order_id} that mean
+# "this order is over and did NOT fill." Surfacing them lets the grid
+# caller reconcile the DB row instead of polling indefinitely. Set
+# rather than checking inline so the policy lives in one place.
+_TERMINAL_NOT_FILLED_STATUSES = frozenset({"CANCELLED", "EXPIRED", "FAILED"})
+
 
 class CoinbaseClient(ExchangeInterface):
     """Live Coinbase Advanced Trade API client."""
@@ -430,6 +436,16 @@ class CoinbaseClient(ExchangeInterface):
         # → filled=False.
         status = (order.get("status") or "").upper()
         is_filled = status == "FILLED"
+        # AUDIT-FIX A3: non-FILLED terminal states need to flow back to the
+        # grid caller so it can reconcile the local DB row instead of
+        # polling forever. Previously these silently registered as
+        # "not filled, try again next tick" — producing permanent orphans
+        # in tb3_active_orders whenever Coinbase cancelled or expired an
+        # order behind our back (user cancel via UI, exchange risk-engine
+        # cancel, listing change, etc).
+        terminal_status: Optional[str] = (
+            status if status in _TERMINAL_NOT_FILLED_STATUSES else None
+        )
 
         # Extract size and prices. Coinbase response fields vary by order type;
         # try the common shapes.
@@ -492,6 +508,7 @@ class CoinbaseClient(ExchangeInterface):
             fee=fee,
             timestamp=datetime.now(timezone.utc),
             raw_response={"status": status, "order": order},
+            terminal_status=terminal_status,
         )
 
     async def get_positions(self) -> list[Position]:

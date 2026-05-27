@@ -309,3 +309,93 @@ class TestCancelOrderReturnShape:
         success, failure_reason = await client.cancel_order("abc-123")
         assert success is False
         assert failure_reason == "EXCEPTION"
+
+
+class TestGetOrderTerminalStatus:
+    """AUDIT-FIX A3: get_order surfaces CANCELLED / EXPIRED / FAILED via the
+    new OrderResult.terminal_status field so the grid caller can reconcile
+    the DB row instead of polling indefinitely.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancelled_status_surfaces(self, client):
+        client._request = AsyncMock(return_value={
+            "order": {
+                "side": "BUY",
+                "status": "CANCELLED",
+                "order_configuration": {
+                    "limit_limit_gtc": {"base_size": "0.01", "limit_price": "70000"},
+                },
+                "total_fees": "0",
+            },
+        })
+        result = await client.get_order("abc-123")
+        assert result is not None
+        assert result.filled is False
+        assert result.terminal_status == "CANCELLED"
+
+    @pytest.mark.asyncio
+    async def test_expired_status_surfaces(self, client):
+        client._request = AsyncMock(return_value={
+            "order": {
+                "side": "SELL",
+                "status": "EXPIRED",
+                "order_configuration": {
+                    "limit_limit_gtc": {"base_size": "0.01", "limit_price": "85000"},
+                },
+                "total_fees": "0",
+            },
+        })
+        result = await client.get_order("abc-123")
+        assert result.terminal_status == "EXPIRED"
+
+    @pytest.mark.asyncio
+    async def test_failed_status_surfaces(self, client):
+        client._request = AsyncMock(return_value={
+            "order": {
+                "side": "BUY",
+                "status": "FAILED",
+                "order_configuration": {
+                    "limit_limit_gtc": {"base_size": "0.01", "limit_price": "70000"},
+                },
+                "total_fees": "0",
+            },
+        })
+        result = await client.get_order("abc-123")
+        assert result.terminal_status == "FAILED"
+
+    @pytest.mark.asyncio
+    async def test_open_status_has_no_terminal(self, client):
+        """OPEN orders are still active — terminal_status must be None."""
+        client._request = AsyncMock(return_value={
+            "order": {
+                "side": "BUY",
+                "status": "OPEN",
+                "order_configuration": {
+                    "limit_limit_gtc": {"base_size": "0.01", "limit_price": "70000"},
+                },
+                "total_fees": "0",
+            },
+        })
+        result = await client.get_order("abc-123")
+        assert result.filled is False
+        assert result.terminal_status is None
+
+    @pytest.mark.asyncio
+    async def test_filled_status_has_no_terminal(self, client):
+        """FILLED is a terminal state but NOT in the not-filled set —
+        filled=True is the relevant signal there, not terminal_status."""
+        client._request = AsyncMock(return_value={
+            "order": {
+                "side": "BUY",
+                "status": "FILLED",
+                "order_configuration": {
+                    "limit_limit_gtc": {"base_size": "0.01", "limit_price": "70000"},
+                },
+                "average_filled_price": "70000",
+                "total_fees": "0.014",
+            },
+        })
+        result = await client.get_order("abc-123")
+        assert result.filled is True
+        assert result.terminal_status is None
