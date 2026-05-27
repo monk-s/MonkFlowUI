@@ -39,6 +39,9 @@ def engine(monkeypatch):
     eng.total_fees = Decimal("0")
     eng.total_funding = Decimal("0")
     eng._last_price = None
+    # v3 grid fill simulation: track min/max price seen per pending order
+    eng._order_price_min = {}
+    eng._order_price_max = {}
     return eng
 
 
@@ -81,8 +84,24 @@ class TestPaperEngine:
 
     @pytest.mark.asyncio
     async def test_cancel_nonexistent_order(self, engine):
-        result = await engine.cancel_order("nonexistent-id")
-        assert result is False
+        # AUDIT-FIX A1: cancel_order returns (success, failure_reason).
+        # Unknown id surfaces as UNKNOWN_CANCEL_ORDER (mirrors Coinbase live
+        # response) so callers can treat it as terminal and reconcile the DB.
+        success, failure_reason = await engine.cancel_order("nonexistent-id")
+        assert success is False
+        assert failure_reason == "UNKNOWN_CANCEL_ORDER"
+
+    @pytest.mark.asyncio
+    async def test_cancel_existing_order_returns_success(self, engine):
+        # Place a limit, then cancel it — should return (True, None).
+        from bot.exchange.base import OrderSide, OrderType
+        placed = await engine.place_order(
+            side=OrderSide.BUY, size=Decimal("0.01"),
+            order_type=OrderType.LIMIT, price=Decimal("70000"),
+        )
+        success, failure_reason = await engine.cancel_order(placed.order_id)
+        assert success is True
+        assert failure_reason is None
 
     @pytest.mark.asyncio
     async def test_equity_includes_locked_margin(self, engine):

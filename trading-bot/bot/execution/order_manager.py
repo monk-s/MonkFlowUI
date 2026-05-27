@@ -196,7 +196,9 @@ class OrderManager:
         # and can't trigger because only one position exists. Worst case:
         # an extra harmless order on the book until it ages out.
         try:
-            cancelled = await self._exchange.cancel_order(old_stop_order_id)
+            # AUDIT-FIX A1: cancel_order now returns (success, failure_reason).
+            # v1 stop-rotation doesn't need the reason — just the boolean.
+            cancelled, _failure_reason = await self._exchange.cancel_order(old_stop_order_id)
             if not cancelled:
                 logger.warning(
                     "old_stop_cancel_failed_after_new_placed",
@@ -241,13 +243,17 @@ class OrderManager:
         failed: list[str] = []
         for attr, oid in order_ids:
             try:
-                cancelled = await self._exchange.cancel_order(oid)
+                # AUDIT-FIX A1: cancel_order now returns (success, failure_reason).
+                cancelled, failure_reason = await self._exchange.cancel_order(oid)
                 if cancelled:
                     logger.info("order_cancelled", order_id=oid, trade_id=str(getattr(trade, "id", "?")))
                 else:
                     # Not necessarily failure — could be already-filled or already-cancelled.
-                    # Coinbase returns False for "not found" which can mean either.
-                    logger.debug("order_cancel_not_found", order_id=oid, attr=attr)
+                    # Coinbase reports the reason in failure_reason.
+                    logger.debug(
+                        "order_cancel_not_found",
+                        order_id=oid, attr=attr, failure_reason=failure_reason,
+                    )
                     failed.append(oid)
             except Exception as exc:
                 logger.warning(

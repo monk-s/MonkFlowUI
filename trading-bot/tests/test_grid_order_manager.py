@@ -258,12 +258,13 @@ class FakeExchange:
                 return m
         return None
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str) -> tuple[bool, Optional[str]]:
+        # AUDIT-FIX A1: returns (success, failure_reason).
         if order_id in self.placed:
             self.cancelled.add(order_id)
             del self.placed[order_id]
-            return True
-        return False
+            return True, None
+        return False, "UNKNOWN_CANCEL_ORDER"
 
     async def close_position(self, side: str, size: Decimal) -> OrderResult:
         # Treat as a market sell
@@ -1000,3 +1001,133 @@ class TestEmergencyExit:
         side, size = exch.closed_positions[0]
         assert side == "long"
         assert size == prebuy_qty
+
+
+class TestA1TerminalCancelFailure:
+    """AUDIT-FIX A1: when exchange.cancel_order returns
+    (False, terminal_reason), the DB row MUST be marked cancelled.
+    Without this, orphaned rows accumulate at status='open' and bleed
+    rate-limit budget on every subsequent tick.
+
+    Triggered in PaperEngine after a Railway redeploy clears
+    self.pending_orders → cancel returns (False, "UNKNOWN_CANCEL_ORDER")
+    for every order from the prior epoch. Triggered in live by races
+    between our cancel attempt and Coinbase-side fills/cancellations
+    (ORDER_IS_FULLY_FILLED, DUPLICATE_CANCEL_REQUEST,
+    UNKNOWN_CANCEL_ORDER).
+    """
+
+    @pytest.mark.asyncio
+    async def test_unknown_cancel_order_marks_row_cancelled(self):
+        repo, _pos_mgr, exch, om, _gr = _build_setup(orders_per_side=2)
+        # Place a buy and then forget it on the exchange side (paper restart
+        # equivalent). Coinbase live: order was already filled/cancelled.
+        await om._place_limit(
+            side="buy", level_index=0, level_price=70000.0, qty=0.01,
+        )
+        order = next(iter(repo.active_orders.values()))
+        assert order.status == "open"
+        # Wipe the exchange's record of it
+        del exch.placed[order.exchange_order_id]
+        # Try to cancel — exchange returns (False, "UNKNOWN_CANCEL_ORDER")
+        result = await om._cancel_order(order.exchange_order_id)
+        # The DB row MUST be marked cancelled even though the cancel
+        # itself "failed."
+        assert result is True, "terminal failure should be treated as success-equivalent"
+        refreshed = await repo.get_active_order(order.exchange_order_id)
+        assert refreshed.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_retryable_failure_leaves_row_open(self):
+        """For retryable failure_reasons (INVALID_CANCEL_REQUEST,
+        NOT_ALLOWED_TO_CANCEL, etc), the row stays open so the next
+        sweep tries again.
+        """
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        # Inject an order and a mock exchange that returns a retryable
+        # failure (not in the terminal set)
+        await repo.insert_active_order(
+            exchange_order_id="retry-order",
+            side="buy", level_index=0, level_price=70000.0, qty=0.01,
+        )
+
+        class _RetryableExch:
+            async def cancel_order(self, oid):
+                return (False, "INVALID_CANCEL_REQUEST")
+
+        om.exchange = _RetryableExch()
+        result = await om._cancel_order("retry-order")
+        assert result is False, "retryable should return False"
+        refreshed = await repo.get_active_order("retry-order")
+        assert refreshed.status == "open", "retryable must NOT mark cancelled"
+
+    @pytest.mark.asyncio
+    async def test_order_is_fully_filled_reconciles(self):
+        """When the order filled on Coinbase between our placement and
+        our cancel attempt, batch_cancel returns ORDER_IS_FULLY_FILLED.
+        Our DB MUST be brought back into sync (row marked cancelled —
+        the actual fill should land via the poll path).
+        """
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="raced-order",
+            side="sell", level_index=4, level_price=78000.0, qty=0.005,
+        )
+
+        class _RacedExch:
+            async def cancel_order(self, oid):
+                return (False, "ORDER_IS_FULLY_FILLED")
+
+        om.exchange = _RacedExch()
+        result = await om._cancel_order("raced-order")
+        assert result is True
+        assert (await repo.get_active_order("raced-order")).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_duplicate_cancel_request_marks_cancelled(self):
+        """If our DB still shows 'open' but Coinbase already cancelled
+        (DUPLICATE_CANCEL_REQUEST), bring DB back into sync."""
+        repo, _pos_mgr, _exch, om, _gr = _build_setup(orders_per_side=2)
+        await repo.insert_active_order(
+            exchange_order_id="dup-order",
+            side="buy", level_index=2, level_price=74000.0, qty=0.005,
+        )
+
+        class _DupExch:
+            async def cancel_order(self, oid):
+                return (False, "DUPLICATE_CANCEL_REQUEST")
+
+        om.exchange = _DupExch()
+        result = await om._cancel_order("dup-order")
+        assert result is True
+        assert (await repo.get_active_order("dup-order")).status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_recenter_cleans_paper_restart_orphans(self):
+        """End-to-end: simulate a Railway redeploy (wipe PaperEngine
+        pending state) and verify recenter() leaves NO orphan rows."""
+        repo, _pos_mgr, exch, om, gr = _build_setup(orders_per_side=3)
+        await om.execute_prebuy(notional_usd=4800.0, current_price=80000.0)
+        await om.tick(grid_range=gr, current_price=80000.0)
+        # Pre-restart: orders exist
+        before = await repo.get_open_active_orders()
+        assert len(before) > 0
+
+        # Simulate Railway redeploy: PaperEngine forgets pending_orders
+        exch.placed.clear()
+
+        # Recenter the grid — should sweep all prior-epoch orders
+        # via the terminal-failure path
+        from bot.strategy.grid_strategy import compute_range_and_levels
+        new_gr = compute_range_and_levels(
+            mode="static", static_low=60000, static_high=120000, n_levels=5,
+        )
+        await om.recenter(new_range=new_gr, current_price=80000.0)
+
+        # All prior-epoch rows should now be status='cancelled'
+        still_open = await repo.get_open_active_orders()
+        assert still_open == [], (
+            f"Recenter should have cleaned all paper-restart orphans, "
+            f"but {len(still_open)} rows remain open: "
+            f"{[(o.side, o.level_index, o.exchange_order_id) for o in still_open]}"
+        )

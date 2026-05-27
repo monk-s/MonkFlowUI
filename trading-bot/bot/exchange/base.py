@@ -97,8 +97,16 @@ class ExchangeInterface(ABC):
         ...
 
     @abstractmethod
-    async def cancel_order(self, order_id: str) -> bool:
-        """Cancel an order by ID. Returns True if cancelled."""
+    async def cancel_order(self, order_id: str) -> tuple[bool, Optional[str]]:
+        """Cancel an order by ID.
+
+        Returns (success, failure_reason). On success, failure_reason is None.
+        On failure, failure_reason is the exchange's reason code (e.g.
+        "UNKNOWN_CANCEL_ORDER", "ORDER_IS_FULLY_FILLED",
+        "DUPLICATE_CANCEL_REQUEST") so callers can distinguish terminal
+        failures (the order is definitively not open on the exchange) from
+        retryable ones (the order is still open and may be re-cancelled).
+        """
         ...
 
     @abstractmethod

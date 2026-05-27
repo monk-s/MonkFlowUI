@@ -203,10 +203,11 @@ class ScenarioExchange:
         return base
 
     async def cancel_order(self, order_id):
+        # AUDIT-FIX A1: returns (success, failure_reason); mirrors live shape.
         if order_id in self.placed:
             self.cancelled.add(order_id); del self.placed[order_id]
-            return True
-        return False
+            return True, None
+        return False, "UNKNOWN_CANCEL_ORDER"
 
     async def close_position(self, side, size):
         self.closed_positions.append((side, size))
