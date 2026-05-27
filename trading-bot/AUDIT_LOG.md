@@ -1159,6 +1159,464 @@ database. Catch bugs that would only surface in production.
 
 ---
 
+## Session: 2026-05-26 — PaperEngine fill semantics vs Coinbase Advanced Trade
+
+**Scope:** read-only audit of `bot/exchange/paper_engine.py` against the live
+behavior implemented in `bot/exchange/coinbase_client.py` and publicly
+documented Coinbase Advanced Trade / INTX semantics. **No code changes
+applied — findings + recommended fixes only.**
+
+**Context:** the v3 grid trader (`bot/execution/grid_order_manager.py`)
+places all entries/exits as `OrderType.LIMIT` with
+`post_only=self.maker_only` and polls fills via `exchange.get_order(...)`.
+The grid's expectancy depends on (a) post-only orders being accepted at
+maker fees and (b) those resting limits getting filled when price touches
+them. Any place where PaperEngine fills MORE generously than Coinbase
+inflates the paper-mode P&L the user is using to decide whether to go live.
+
+### Top-of-page callouts (paper > live, i.e. paper overstates results)
+
+- **CRITICAL — `post_only` is silently ignored in paper.** A maker-only
+  limit that would cross the spread is REJECTED by Coinbase at placement
+  but is queued and filled in paper. See finding [2].
+  → Affects every grid placement that lands at/through the live spread.
+- **HIGH — every price touch is a guaranteed fill in paper.** Paper has
+  no queue, no taker-flow requirement, and no orderbook-vs-trade-print
+  distinction. See findings [1] and [3].
+  → Inflates grid harvest rate on every wick/gap.
+
+### Audit categories
+
+1. Fill triggering (touch vs cross)
+2. Post-only rejection
+3. Fast-move skip / gap handling
+4. Partial fills
+5. Maker fee rate
+6. Time-in-force
+7. Cancel/fill race
+8. Latency
+
+(Plus one bonus finding outside the 8 categories — see [9].)
+
+### Findings
+
+---
+
+**[1] Fill triggering (touch vs cross) — HIGH**
+- `bot/exchange/paper_engine.py:431-435` (grid path, `get_order`):
+  ```python
+  if pending.side == OrderSide.BUY and mn is not None and mn <= limit:
+      fill_triggered = True
+  elif pending.side == OrderSide.SELL and mx is not None and mx >= limit:
+      fill_triggered = True
+  ```
+  Also `paper_engine.py:322-325` (`check_pending_orders`, legacy path):
+  identical touch-based logic against candle high/low.
+- **Paper behavior:** the moment the polled last-trade price equals or
+  crosses the limit (BUY: any tick at-or-below the limit; SELL: any tick
+  at-or-above), the order fills 100% at exactly the limit price.
+- **Live (Coinbase) behavior:** a resting limit fills only when an
+  aggressor on the opposite side actually takes liquidity at your price
+  AND your queue position is reached. Coinbase BTC-PERP-INTX maintains
+  multiple makers per price level at the depths the grid typically posts
+  to; only orders at the front of the FIFO queue at that level fill.
+  A "touch" in last-trade space ≠ a fill for every resting order at that
+  level.
+- **Divergence:** paper assumes P(fill | touch) = 1.0. Live is somewhere
+  in 0.6-0.95 depending on size, level depth, and how much aggression
+  came through. Direction: paper > live.
+- **Estimated impact on grid bot expectancy:** for a grid harvesting
+  $50-wide buckets, every "ghost" touch credits roughly
+  `0.01 BTC × $50 = $0.50` of phantom profit minus the (also-phantom)
+  maker fee. Across the documented ~$300-1000/hr BTC range, paper could
+  count 2x-3x more grid completions than live in volatile hours. **This
+  is the primary mechanism by which paper-mode 30-day P&L will overstate
+  what the bot earns live.**
+
+---
+
+**[2] Post-only rejection — CRITICAL**
+- `bot/exchange/paper_engine.py:172-177`:
+  ```python
+  post_only: bool = False,
+  ) -> OrderResult:
+      order_id = f"paper-{uuid.uuid4().hex[:12]}"
+      # `post_only` accepted for API compatibility; PaperEngine treats LIMIT
+      # orders as always maker-side (no spread modeled here). The grid will
+      # still get the correct maker fees via PAPER_MAKER_FEE_PCT.
+  ```
+  → `post_only` is explicitly accepted-and-discarded.
+- `bot/exchange/coinbase_client.py:198-207`:
+  ```python
+  elif order_type == OrderType.LIMIT:
+      # post_only=True → use limit_limit_gtc with post_only flag.
+      # Coinbase will REJECT (not execute as taker) if the order
+      # would cross the spread at placement. This guarantees maker
+      # fees for the grid trader.
+      order_config["limit_limit_gtc"] = {
+          "base_size": str(size),
+          "limit_price": str(price),
+          "post_only": post_only,
+      }
+  ```
+- **Paper behavior:** ANY limit price is accepted and queued, regardless
+  of whether it would cross the live ask (for buys) or bid (for sells).
+  The order then waits to fill on touch.
+- **Live (Coinbase) behavior:** a `limit_limit_gtc` with `post_only=true`
+  is REJECTED at placement if it would immediately match an order on the
+  opposite side of the book. Coinbase returns the order with terminal
+  status (the bot's `coinbase_client.py:264` only treats `"FILLED"` as
+  success; the rejection lands in the `else` and the caller observes
+  `filled=False` with no order_id resting on the book).
+- **Divergence:** consider a SELL placed at $76,250 when current bid is
+  $76,275 (stale grid level set during a downtick that just reversed):
+  - Live: order rejected → no resting order → no fill ever happens.
+  - Paper: order queued → next tick `mx >= 76,250` (current price is
+    $76,275, already above the limit) → fills immediately at $76,250
+    with maker fee, books a phantom sell.
+  Grid logic at `grid_order_manager.py:509` passes
+  `post_only=self.maker_only`. If `maker_only=True` in live, every
+  placement that would have crossed is silently dropped; paper happily
+  fills them. The grid's "expected harvest per day" diverges by
+  exactly the count of would-cross placements, which can be substantial
+  during fast moves or sloppy recentering.
+- **Estimated impact on grid bot expectancy:** depends on how often the
+  grid posts at/through-spread (need a runtime audit of placements vs
+  best-bid/ask at submit time). Worst case: every grid order placed
+  during a sharp move is a phantom in paper. **This is the most
+  asymmetric divergence in the file — there is no log line, no warning,
+  no telemetry difference between a paper fill and a live rejection.**
+
+---
+
+**[3] Fast-move skip / gap handling — HIGH**
+- `bot/exchange/paper_engine.py:500-514` (`get_current_price`):
+  ```python
+  price = await self.market_client.get_current_price()
+  self._last_price = price
+  for oid in list(self.pending_orders.keys()):
+      if oid not in self._order_price_min:
+          self._order_price_min[oid] = price
+          self._order_price_max[oid] = price
+      else:
+          if price < self._order_price_min[oid]:
+              self._order_price_min[oid] = price
+          if price > self._order_price_max[oid]:
+              self._order_price_max[oid] = price
+  return price
+  ```
+  Combined with the `get_order` fill check (lines 431-435), this means:
+  if EVER, between order placement and the next `get_order` poll, the
+  last-trade price was inside [limit_price, ∞) for a SELL (or (-∞,
+  limit_price] for a BUY), the order fills at the limit price.
+- **Paper behavior:** the min/max window is cumulative across the order's
+  whole lifetime. A SELL @ $76,100 placed when price was $76,000 will
+  fill the first time the polled last-trade price reaches $76,100 — even
+  if the move that took it there was a quote-only gap that left no
+  trades in the [$76,000, $76,100] band, and even if the next poll
+  shows price has already gapped to $77,500 and snapped back. Paper
+  cannot distinguish a single wick-through from a sustained move.
+- **Live (Coinbase) behavior:** a resting limit fires only when a
+  counterparty actually executes against it. Live scenarios:
+  - **Quote-only gap** (makers cancel and reset higher; no print at your
+    level): order stays open. If it ends up marketable (limit < best
+    bid for a sell), Coinbase does NOT auto-execute resting orders
+    against the new BBO — they remain resting until taken.
+  - **Sweep through your level**: a market buy chews through asks
+    including yours. You fill at your limit price (no price
+    improvement on a maker fill), but only for the slice of size that
+    landed at your queue position before the sweep moved on.
+  - **Single wick that doesn't take size at your level**: a print near
+    your price doesn't fill you if no one matched against you specifically.
+- **Divergence:** during the news/liquidation gap moments that grid
+  traders most want to harvest, paper credits a near-perfect harvest;
+  live credits only the slice that actually traded through queue position.
+  Direction: paper > live.
+- **Estimated impact on grid bot expectancy:** large during high-volatility
+  windows (FOMC, CPI, large liquidations), small in placid hours.
+  Combined with [1], this is the dominant source of paper overstating
+  live during the events that produce the bulk of grid P&L variance.
+
+---
+
+**[4] Partial fills — MEDIUM**
+- `bot/exchange/paper_engine.py:475-484` (`get_order` fill path):
+  ```python
+  result = OrderResult(
+      order_id=order_id,
+      side=pending.side,
+      order_type=pending.order_type,
+      size=pending.size,   # ← always full size
+      price=fill_price,
+      filled=True,
+      ...
+  )
+  ```
+  Same shape in `check_pending_orders` at lines 346-357. No code path
+  in PaperEngine produces a partial fill.
+- **Paper behavior:** every fill is full-size at the limit price.
+- **Live (Coinbase) behavior:** Coinbase reports `PARTIALLY_FILLED` as a
+  distinct status. `coinbase_client.py:264-309` explicitly handles it:
+  for MARKET entries, it auto-closes the partial to avoid an orphaned
+  position; for LIMIT orders, the partial slice fills, the remainder
+  stays resting until fully filled or cancelled.
+- **Divergence:** for grid sizes (typically 0.01-0.05 BTC at BTC-PERP-INTX
+  top-of-book depths of hundreds-of-BTC), partial fills are uncommon
+  but not zero — particularly during sweep events where a market order
+  consumes part of your queue position and the rest gets queue-jumped
+  by later inserts at the same price. Paper books the full size at
+  once; live can leave half of it open and the caller has to decide
+  whether to wait or cancel.
+- **Estimated impact on grid bot expectancy:** small in absolute P&L
+  terms (likely <2%), but it interacts with [1] and [2]: the cases
+  where live would partial-fill are often the same cases where paper
+  full-fills. Compounding effect.
+
+---
+
+**[5] Maker fee rate — HIGH**
+- `config/settings.py:91`: `PAPER_MAKER_FEE_PCT: float = 0.04`
+- `bot/exchange/paper_engine.py:127-131`:
+  ```python
+  fee_rate = (
+      Decimal(str(settings.PAPER_TAKER_FEE_PCT))
+      if is_taker
+      else Decimal(str(settings.PAPER_MAKER_FEE_PCT))
+  ) / 100
+  ```
+  → paper maker fee = 0.04% per side.
+- **Live (Coinbase INTX) maker fee:** 0.02% per side for the Intro /
+  default-tier on perpetual futures (BTC-PERP-INTX). Note: I was unable
+  to fetch the Coinbase fee page directly during this audit (Cloudflare
+  challenge on `coinbase.com/advanced-fees` and
+  `help.coinbase.com/.../perpetual-futures-fees`). The 0.02% figure is
+  cited in the audit prompt and is consistent with public reporting; a
+  pre-merge verification against Coinbase's current published rate is
+  recommended before any fix is applied.
+- **Divergence:** paper charges 2x the live maker fee. `PAPER_TAKER_FEE_PCT
+  = 0.06` in `settings.py:90` is similarly elevated vs the published
+  ~0.05% INTX taker (but the grid is maker-only, so taker doesn't bind).
+- **Estimated impact on grid bot expectancy:** Direction is OPPOSITE to
+  [1]/[2]/[3] — paper UNDERSTATES live performance on the fee dimension
+  (paper pays $0.30 per $760 notional grid leg; live pays $0.15). Across
+  thousands of grid completions, this is a meaningful drag in paper that
+  won't exist in live. Per-completion impact: ~$0.15 of phantom cost.
+  Across 200 completions/day, that's ~$30/day understated.
+- **Net effect on paper-vs-live comparison:** the elevated fee partially
+  masks the fill-rate overstatement in [1]/[2]/[3]. Don't rely on net
+  paper P&L looking "about right" — the components are wrong in
+  opposite directions.
+
+---
+
+**[6] Time-in-force — LOW**
+- Paper has no TIF concept at all. LIMIT orders sit in `self.pending_orders`
+  indefinitely until `cancel_order` is called or they fill.
+- `coinbase_client.py:194-207` uses only `market_market_ioc` for markets
+  and `limit_limit_gtc` for limits — no IOC/FOK/GTD for limits anywhere
+  in the bot today.
+- **Paper behavior:** all limits are effectively GTC. All markets are
+  effectively IOC (immediate fill in `place_order`, no queueing).
+- **Live behavior:** same in practice — GTC for limits, IOC for markets.
+- **Divergence:** none, given current bot usage. But if any future caller
+  passes a non-GTC TIF, paper would silently treat it as GTC. The
+  `place_order` signature in `base.py:79-97` doesn't even have a `tif`
+  parameter, so this is closed off by interface.
+- **Estimated impact:** zero today; flagged for posterity.
+
+---
+
+**[7] Cancel/fill race — MEDIUM**
+- `bot/exchange/paper_engine.py:395-402`:
+  ```python
+  async def cancel_order(self, order_id: str) -> bool:
+      if order_id in self.pending_orders:
+          del self.pending_orders[order_id]
+          ...
+          return True
+      return False
+  ```
+  Cancel is synchronous and atomic — if the order is still in
+  `pending_orders`, it's removed and True returned. There is no window
+  in which the order could be "filled-just-before-cancel".
+- `bot/exchange/coinbase_client.py:322-332`: cancel hits Coinbase's
+  `/batch_cancel` endpoint and returns whatever `success` flag Coinbase
+  reports per-order. Coinbase's documented behavior: if the order has
+  already matched (even partially) before the cancel reaches the match
+  engine, the cancel returns `success: false` for that order, and the
+  fill is final.
+- **Paper behavior:** cancel always wins if the order is still pending.
+  The grid's reprice/replace logic can rely on "cancel returned True →
+  order definitely did not fill."
+- **Live behavior:** cancel can lose the race. A cancel-returns-False
+  is ambiguous: order might have filled, might already be cancelled,
+  might be in some other terminal state. Caller must `get_order` to
+  disambiguate.
+- **Divergence:** paper-mode never produces the race. Any grid logic
+  that does "place new + cancel old" without re-polling after the
+  cancel is correct in paper but can produce an orphaned long/short
+  in live. (Note: the bot already has orphan-recovery logic per prior
+  audit sessions, which would catch this on the next tick — but the
+  in-tick accounting could be off by one fill.)
+- **Estimated impact on grid bot expectancy:** small in steady state.
+  Spikes during high-frequency reprice activity (rapid grid recentering
+  on fast moves).
+
+---
+
+**[8] Latency — LOW**
+- Paper `place_order` (line 251) inserts into `self.pending_orders` and
+  returns the OrderResult synchronously. The next `get_order` call sees
+  the order immediately. The next `get_current_price` call (line 506-508)
+  initializes the order's min/max to the current price.
+- Live: ~50-200ms for `POST /orders` round-trip, then another
+  50-500ms before the order appears in `/historical/{order_id}` and
+  in the matching engine's order book.
+- **Paper behavior:** 0ms placement → queryable → fillable.
+- **Live behavior:** 100ms+ before the order is even on the book; first
+  fill detection requires the next `get_order` poll cycle after that.
+- **Divergence:** paper has a hidden ~100-700ms head start per placement.
+- **Estimated impact on grid bot expectancy:** negligible at the 60-second
+  position-management tick the grid currently uses. Would matter for any
+  future high-frequency reprice loop. The grid's current tick cadence
+  swamps the latency difference.
+
+---
+
+**[9] BONUS — Legacy `check_pending_orders` charges taker fee + slippage on LIMIT orders**
+
+Not in the 8 categories above, but noticed during the audit:
+
+- `bot/exchange/paper_engine.py:321-330`:
+  ```python
+  elif order.order_type == OrderType.LIMIT:
+      if order.side == OrderSide.BUY and candle_low <= float(order.price):
+          triggered = True
+      elif order.side == OrderSide.SELL and candle_high >= float(order.price):
+          triggered = True
+
+  if triggered:
+      fill_price = Decimal(str(order.stop_price or order.price))
+      fill_price = self._apply_slippage(fill_price, order.side)
+      fee = self._calculate_fee(order.size, fill_price, is_taker=True)
+  ```
+  A LIMIT order filled via this path gets slippage applied AND is
+  charged the taker fee — neither of which is correct for a maker limit.
+- The path is reachable: `bot/execution/position_manager.py:377-386`
+  calls `check_pending_orders` in paper mode every position-management
+  tick. The grid trader doesn't use this path (it polls via `get_order`
+  at `grid_order_manager.py:312`), but any v1-strategy LIMIT order (if
+  one is ever placed) would route through here.
+- **Direction:** paper UNDERSTATES live for non-grid LIMITs (extra
+  slippage + 2x-3x fee).
+- **Severity:** MEDIUM — only matters if non-grid LIMIT orders exist;
+  for current grid-only operation this code path is effectively dead
+  for limits but should still be corrected to avoid future foot-guns.
+
+### Summary
+
+- Total findings: **9** (8 prompted categories + 1 bonus)
+- CRITICAL: **1** — [2] post-only ignored
+- HIGH: **3** — [1] touch-vs-cross, [3] gap handling, [5] maker fee 2x
+- MEDIUM: **3** — [4] partial fills, [7] cancel/fill race, [9] legacy limit-fill fee/slippage
+- LOW: **2** — [6] TIF, [8] latency
+
+**Findings where paper > live (paper overstates):** [1], [2], [3], [4],
+[7]. These all push reported paper P&L above what the bot will actually
+do in live.
+
+**Findings where paper < live (paper understates):** [5], [9]. These
+push reported paper P&L below live, partially masking the overstatement
+from the above group.
+
+**Net direction:** paper P&L is biased UP vs live, with the magnitude
+dominated by [1]+[2]+[3] (fill-rate generosity) and partially offset by
+[5] (fee overcharge). The 30-day paper observation is therefore NOT a
+reliable proxy for live grid performance as the simulator stands.
+
+### Recommended fixes (do not apply — propose only)
+
+In rough priority order. Each is independently shippable; suggest doing
+them as separate PRs so the impact of each on paper-mode P&L is visible.
+
+1. **[2] Enforce `post_only` rejection in paper.**
+   When `post_only=True` and the limit would cross the prevailing
+   spread (best ask for BUY, best bid for SELL), return
+   `OrderResult(filled=False, ...)` with no entry in
+   `self.pending_orders`. Requires fetching best bid/ask at placement
+   — Coinbase `/products/{symbol}` exposes `price`/`mid` but not the
+   full BBO without the order-book endpoint; an approximation using
+   `current_price ± 1bp` would catch >95% of would-cross cases.
+
+2. **[1] Probabilistic touch→fill model.**
+   Replace the deterministic touch logic with a `random.random() < p_fill`
+   gate where `p_fill` is a configurable parameter (e.g., new setting
+   `PAPER_FILL_PROBABILITY_ON_TOUCH: float = 0.75`). This is a crude
+   model but captures the queue-position dimension well enough that
+   paper P&L stops being unboundedly optimistic.
+
+3. **[3] Reset min/max window on each poll.**
+   Change `_order_price_min` / `_order_price_max` semantics from
+   "cumulative since placement" to "within the last tick interval."
+   The fill check then only considers price action in the last 60s
+   (or whatever the poll cadence is), which better approximates the
+   queue-clearing dynamics on Coinbase.
+
+4. **[5] Correct the maker/taker fee defaults.**
+   Lower `PAPER_MAKER_FEE_PCT` to 0.02 and `PAPER_TAKER_FEE_PCT` to
+   0.05 (verify against current Coinbase fee schedule first). Easy
+   one-line PR; should be done AFTER [1]-[3] so the paper P&L
+   degradation from those fixes isn't compounded by also-bigger fees
+   in the comparison.
+
+5. **[4] Simulate partial fills on a small probability tail.**
+   On fill, sample `actual_filled_size = size * random.uniform(p_min,
+   1.0)` with `p_min = 0.5` and `P(partial) = 5%`. Adjust to taste once
+   real-world partial-fill stats are observed from live mode.
+
+6. **[7] Simulate cancel/fill race.**
+   On `cancel_order`, with small probability (e.g., 1%), check if the
+   order's limit was crossed in the most recent tick — if so, fill it
+   instead of cancelling and return False. Matches the real-world
+   ambiguity and forces the caller to use `get_order` for confirmation.
+
+7. **[9] Fix `check_pending_orders` to use maker fee + no slippage for LIMITs.**
+   Trivial fix: split the `if triggered` block into stop vs limit
+   branches, pass `is_taker=False` and skip `_apply_slippage` for limits.
+
+8. **[8] Inject placement latency.**
+   On `place_order`, schedule the order's first eligibility for fill
+   detection ~100ms in the future (or via a `created_at + latency`
+   gate in `get_order`). Low priority for current 60s grid tick.
+
+9. **[6] Add `tif` parameter to `base.ExchangeInterface.place_order`** —
+   only relevant if non-GTC TIF is ever needed; deferrable indefinitely.
+
+### Verification (none performed)
+
+No tests were run. No code modified. Branch `audit/paperengine-fill-semantics`
+contains only this AUDIT_LOG entry.
+
+### Next session priority
+
+1. **User decision:** which of the recommended fixes to schedule, and
+   in what order. The CRITICAL one ([2] post_only) should land first if
+   any paper-mode P&L numbers will be reported externally.
+2. **Pre-fix telemetry:** before [1]/[2]/[3] are fixed, add a log line
+   in PaperEngine that records, per fill, whether the BBO at the time
+   of placement would have made the order "would-cross" in live. This
+   gives a concrete frequency estimate of how often [2] hits.
+3. **Verify Coinbase published fee rate** before changing
+   `PAPER_MAKER_FEE_PCT` (couldn't fetch live during this session due to
+   Cloudflare; cite the actual fee page in the fix PR).
+
+### Metrics
+
+- Files modified: 1 (this `AUDIT_LOG.md` only — no code changed)
+- Files added: 0
+- Bugs identified: 9 (1 CRITICAL, 3 HIGH, 3 MEDIUM, 2 LOW)
+- Bugs fixed: 0 (audit only — fixes proposed, not applied)
+- Audit categories evaluated: 8 of 8 prompted (+1 bonus)
 ## Session: 2026-05-26 — active_orders count overflow audit
 
 > **⚠ HIGH severity — fix before next live deploy.** Read-only audit, no code
