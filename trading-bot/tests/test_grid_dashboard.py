@@ -166,6 +166,103 @@ class TestGridState:
         assert body["num_levels"] is None
 
 
+class TestGridStateOutOfRangeFilter:
+    """AUDIT-FIX A-final: rows whose level_price falls outside the current
+    range are hidden from active_orders. The count is surfaced as
+    `hidden_out_of_range_count` so operators can detect leaks.
+
+    This is belt-and-suspenders — A1+A4 should keep tb3_active_orders
+    clean to begin with. The filter ensures the dashboard surface is
+    coherent even if a future regression reintroduces orphans.
+    """
+
+    def test_out_of_range_rows_hidden_from_active_orders(self):
+        """Reproduces the 2026-05-27 pre-recenter cohort: rows with
+        level_price below range_low must NOT appear in active_orders."""
+        gs = _fake_grid_state(
+            current_range_low=73793.0,
+            current_range_high=82434.0,
+            num_levels=30,
+        )
+        # Mix of in-range and pre-recenter-orphan rows
+        active = [
+            _fake_active_order(0, "buy", level_price=73793.0),    # in range
+            _fake_active_order(15, "sell", level_price=78000.0),  # in range
+            _fake_active_order(7, "buy", level_price=67861.0),    # ORPHAN, below range
+            _fake_active_order(21, "sell", level_price=83118.78), # ORPHAN, above range
+            _fake_active_order(22, "buy", level_price=75891.0),   # in range (old level_index, but price OK)
+        ]
+        app, _ = _build_app(grid_state=gs, active_orders=active)
+        r = TestClient(app).get("/api/grid/state")
+        body = r.json()
+
+        # Only the 3 in-range rows appear in active_orders
+        assert body["active_orders_count"] == 3, body["active_orders_count"]
+        assert len(body["active_orders"]) == 3
+        in_range_prices = sorted(o["level_price"] for o in body["active_orders"])
+        assert in_range_prices == [73793.0, 75891.0, 78000.0]
+
+        # The two orphans are hidden + counted + sampled
+        assert body["hidden_out_of_range_count"] == 2
+        sample_prices = sorted(s["level_price"] for s in body["hidden_out_of_range_sample"])
+        assert sample_prices == [67861.0, 83118.78]
+
+    def test_no_hidden_when_all_in_range(self):
+        gs = _fake_grid_state(current_range_low=60000.0, current_range_high=95000.0)
+        active = [
+            _fake_active_order(5, "buy"),     # 81000 — in range
+            _fake_active_order(15, "sell"),   # 91000 — in range
+        ]
+        app, _ = _build_app(grid_state=gs, active_orders=active)
+        body = TestClient(app).get("/api/grid/state").json()
+        assert body["active_orders_count"] == 2
+        assert body["hidden_out_of_range_count"] == 0
+        assert body["hidden_out_of_range_sample"] == []
+
+    def test_no_filtering_when_range_not_initialized(self):
+        """First deploy before recenter has fired: range is NULL. The filter
+        must be a no-op (show all rows) instead of hiding everything."""
+        gs = _fake_grid_state(
+            current_range_low=None,
+            current_range_high=None,
+        )
+        active = [
+            _fake_active_order(0, "buy"),
+            _fake_active_order(1, "sell"),
+        ]
+        app, _ = _build_app(grid_state=gs, active_orders=active)
+        body = TestClient(app).get("/api/grid/state").json()
+        assert body["active_orders_count"] == 2
+        assert body["hidden_out_of_range_count"] == 0
+
+    def test_boundary_prices_included(self):
+        """level_price == range_low or range_high must be IN range (inclusive)."""
+        gs = _fake_grid_state(current_range_low=70000.0, current_range_high=80000.0)
+        active = [
+            _fake_active_order(0, "buy", level_price=70000.0),   # exactly at low
+            _fake_active_order(1, "sell", level_price=80000.0),  # exactly at high
+            _fake_active_order(2, "buy", level_price=69999.99),  # just below
+            _fake_active_order(3, "sell", level_price=80000.01), # just above
+        ]
+        app, _ = _build_app(grid_state=gs, active_orders=active)
+        body = TestClient(app).get("/api/grid/state").json()
+        assert body["active_orders_count"] == 2  # the two boundary rows
+        assert body["hidden_out_of_range_count"] == 2
+
+    def test_sample_capped_at_5_rows(self):
+        gs = _fake_grid_state(current_range_low=70000.0, current_range_high=80000.0)
+        # 8 orphan rows, all below range
+        active = [
+            _fake_active_order(i, "buy", level_price=60000.0 + i)
+            for i in range(8)
+        ]
+        app, _ = _build_app(grid_state=gs, active_orders=active)
+        body = TestClient(app).get("/api/grid/state").json()
+        assert body["hidden_out_of_range_count"] == 8
+        # Sample is capped so the payload doesn't blow up under heavy corruption
+        assert len(body["hidden_out_of_range_sample"]) == 5
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # /api/grid/fills
 # ─────────────────────────────────────────────────────────────────────────
