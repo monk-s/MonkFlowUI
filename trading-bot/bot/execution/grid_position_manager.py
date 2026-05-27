@@ -152,6 +152,33 @@ class GridPositionManager:
                 )
         return True, None
 
+    def effective_avg_cost(self) -> Decimal:
+        """P&L-adjusted effective cost basis of the current inventory.
+
+        AUDIT-FIX C4: realized losses booked from past sells raise the
+        effective cost of remaining inventory; realized profits lower it.
+        This makes the breakeven floor self-correcting — a level that
+        was marginally profitable before becomes unprofitable after
+        losses, blocking the bleed sooner.
+
+        Formula:
+            eff_avg = avg_cost - (realized_pnl_total / qty)
+
+        Sign convention:
+          - realized_pnl_total < 0 (losses) → eff_avg > avg_cost
+            (harder to sell, floor raises)
+          - realized_pnl_total > 0 (profits) → eff_avg < avg_cost
+            (easier to sell, floor lowers)
+          - realized_pnl_total == 0 (fresh deploy / break-even)
+            → eff_avg == avg_cost (no change)
+
+        Edge case: if inventory has dropped to zero, eff_avg is undefined.
+        Callers should gate on `state.qty > 0` before consulting this.
+        """
+        if self.state.qty <= 0:
+            return self.state.avg_cost
+        return self.state.avg_cost - (self.state.realized_pnl_total / self.state.qty)
+
     def is_sell_economically_positive(
         self,
         *,
@@ -172,8 +199,12 @@ class GridPositionManager:
         levels.
 
         Formula: gross > fee * margin, where
-            gross = (level_price - avg_cost) * qty
+            gross = (level_price - effective_avg_cost) * qty
             fee   = level_price * qty * (maker_fee_pct / 100)
+
+        AUDIT-FIX C4: `effective_avg_cost` incorporates realized P&L so
+        the breakeven floor self-corrects as losses (or profits) accrue.
+        See `effective_avg_cost()` for the formula.
 
         `margin` is a safety multiplier above strict breakeven; the
         default 1.5 means the level must clear fees by 50% before the
@@ -192,13 +223,16 @@ class GridPositionManager:
         q = _to_decimal(qty)
         fee_pct = _to_decimal(maker_fee_pct)
         m = _to_decimal(margin)
-        gross = (lvl - self.state.avg_cost) * q
+        eff_avg = self.effective_avg_cost()
+        gross = (lvl - eff_avg) * q
         fee = lvl * q * (fee_pct / Decimal("100"))
         if gross > fee * m:
             return True, None
         return False, (
             f"sell at {lvl} (qty {q}) gross ${gross:.4f} ≤ fee ${fee:.4f} × "
-            f"margin {m} (avg_cost ${self.state.avg_cost}); "
+            f"margin {m} (eff_avg ${eff_avg:.4f}; "
+            f"avg_cost ${self.state.avg_cost}, "
+            f"realized_pnl_total ${self.state.realized_pnl_total}); "
             f"placement would lose money on a lone fill"
         )
 
