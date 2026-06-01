@@ -1,14 +1,14 @@
 # Case Study — Team Financial Strategies
 
-> **Status:** Permission granted by Jody Team (founding partner) on
-> 2026-04-29. Cleared for: firm name, Jody's name, the 45 → 5 minute
-> result, Redtail mention, reference-call permission. **Testimonial
-> wording still pending** — Jody's exact 1-2 sentence quote to be
-> inserted in the "What Jody said" section before publishing.
+> **Status:** PUBLISHED (metrics-only) at
+> monkflow.io/case-studies/team-financial-strategies. Permission granted
+> by Jody Team (founding partner) on 2026-04-29 for: firm name, Jody's
+> name, the 45 → 5 minute result, Redtail mention, reference-call
+> permission. Engagement confirmed complete + measured 2026-06-01.
 >
-> Once Jody's quote lands, this draft is publish-ready at
-> monkflow.io/case-studies/team-financial-strategies (route added to
-> app.js as part of the same change).
+> Testimonial deferred — Jody is on vacation; not worth bothering him
+> for a quote right now. The "What Jody said" section is removed for
+> launch. When he's back, request a 1-2 sentence quote and add it.
 
 ---
 
@@ -103,13 +103,11 @@ add only when clients actually hit edge cases.
 
 ---
 
-### What Jody said
-
-> *Awaiting Jody's testimonial wording. Target: 1-2 sentences,
-> specific, references the 45→5 result and the partnership
-> experience. Example structure: "[Specific outcome]. [Specific
-> partnership experience.]" Insert verbatim before publishing — do
-> not paraphrase or AI-generate.*
+<!-- "What Jody said" testimonial section removed for launch (2026-06-01).
+     Jody is on vacation; not bothering him for a quote right now. When he's
+     back, request a 1-2 sentence quote that references the 45→5 result + the
+     partnership experience, and reinstate this section. Insert verbatim —
+     do NOT paraphrase or AI-generate. -->
 
 ---
 

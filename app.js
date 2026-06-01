@@ -1225,11 +1225,6 @@ function renderTfsCaseStudyPage() {
       <p>The intake-form conditional logic was over-engineered in v1. We shipped 9 conditional branches when 4 would have covered 95% of client types. Jody's ops manager flagged it during week 1 of go-live; we collapsed branches the following week.</p>
       <p><em>Lesson: ship fewer branches, add only when clients actually hit edge cases.</em></p>
 
-      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">What Jody said</h2>
-      <blockquote style="border-left:4px solid var(--accent);padding:8px 24px;margin:24px 0;color:var(--text-secondary);font-style:italic;">
-        <em style="color:var(--text-tertiary);">— Awaiting Jody's verbatim testimonial wording. Will be inserted before the Day-1 LinkedIn link drop.</em>
-      </blockquote>
-
       <div style="margin-top:48px;padding:32px;background:var(--bg-secondary);border-radius:12px;text-align:center;">
         <h3 style="font-family:-apple-system,sans-serif;font-size:22px;margin:0 0 12px;">Want this for your firm?</h3>
         <p style="margin:0 0 20px;color:var(--text-secondary);">We took the same scope MonkFlow built for TFS and packaged it into three productized tiers. Public pricing. Fixed delivery windows. Refundable audit anchor.</p>

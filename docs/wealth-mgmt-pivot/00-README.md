@@ -9,13 +9,14 @@ part of the wealth-mgmt vertical pivot.
 | # | File | Purpose | Pre-flight |
 |---|---|---|---|
 | 01 | `01-intake-forms-1pager.md` | The "1-page map of the 3 highest-ROI automations" delivered to prospects who reply "send it." | Convert to polished PDF (Notion → PDF or Figma → PDF). Brand consistently with monkflow.io. **Must be ready before re-enabling cold outreach.** |
-| 02 | `02-tfs-case-study.md` | Published case study at monkflow.io/case-studies/team-financial-strategies | **Permission granted by Jody Team (founding partner) on 2026-04-29** for firm name, Jody's name, the 45→5 result, Redtail mention, and reference-call permission. **Testimonial wording still pending** — Jody's exact quote to insert before publishing. |
+| 02 | `02-tfs-case-study.md` | PUBLISHED (metrics-only) at monkflow.io/case-studies/team-financial-strategies | Live. Permission granted by Jody Team 2026-04-29; engagement confirmed complete + measured 2026-06-01. Testimonial deferred (Jody on vacation) — "What Jody said" section removed for launch; add a quote when he's back. |
 | 03 | `03-security-overview.md` | Security & data-handling overview for CCO review | Convert to PDF. Update sub-processor list quarterly. |
 | 04 | `04-dpa-template.md` | Data Processing Agreement template | **Have a marketing-law attorney review before first signing.** $200-400 budget for a 30-min review. |
 | 05 | `05-reply-handling-sop.md` | Decision tree for handling cold-outreach replies within 4 hours | Pin near monitor. Update with new patterns as they emerge. |
 | 06 | `06-discovery-call-script.md` | 30-min discovery call structure for $1,500 audit kickoff or intro calls | Refine after first 5 calls based on which questions surface real signal. |
-| 07 | `07-linkedin-content-drafts.md` | 6-week LinkedIn content drip series | Edit in Nathan's voice. Post 5 ready to publish once Jody's testimonial wording lands and the published case study page is live. |
+| 07 | `07-linkedin-content-drafts.md` | 6-week LinkedIn content drip series | Edit in Nathan's voice. All 6 posts ready — case study page is live; testimonial deferred (not a blocker for any post). |
 | 08 | `08-strategic-alliance-pitch.md` | 1-pager + pitch templates for 5 alliance partners | Customize per category. |
+| 09 | `09-capabilities-deck.md` | 1-page partner capabilities deck (who/what/who-for/proof/integrations/contact) | Playbook Day-3 artifact for Wealthbox/Redtail partnership managers + alliance partners. Convert to 1-page PDF or 4-6 slide deck. Proof section confirmed true. |
 
 ## Sequencing (per main plan)
 
