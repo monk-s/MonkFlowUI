@@ -204,6 +204,17 @@ class Settings(BaseSettings):
     # entirely: set GRID_LONG_ONLY=False.
     GRID_INVENTORY_FLOOR_FRACTION: float = 0.50
 
+    # Early recenter when price breaks out of the active range. The
+    # time-based recenter (GRID_RECENTER_INTERVAL_DAYS) is too slow when BTC
+    # drifts past the padded range — the grid goes dormant (no buy levels
+    # below price, or no sell levels above) until the next scheduled rebuild.
+    #
+    # If price closes more than this % beyond range_low/range_high, the next
+    # tick rebuilds the range around current price. Expressed as a % of the
+    # boundary price. 2.0 = recenter once price is >2% outside the range;
+    # set 0 to disable and rely purely on the time-based cadence.
+    GRID_RECENTER_ON_RANGE_EXIT_PCT: float = 2.0
+
     # --- Logging ---
     LOG_LEVEL: str = "INFO"
 

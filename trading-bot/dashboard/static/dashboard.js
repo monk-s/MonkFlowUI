@@ -509,13 +509,35 @@ async function refreshGrid() {
   await _renderGridPnlChart();
 }
 
+// Maps a backend regime note (state.regime.note) to a banner message. Anything
+// in here renders as a WARNING banner so the user sees when the grid has gone
+// into its weak "lean-long in a downtrend" regime instead of having to infer it.
+const GRID_REGIME_MSG = {
+  accumulating_in_downtrend: {
+    text: 'ACCUMULATING — price below grid + inventory at floor',
+    sub: 'Sells floor-capped; bot is long-only here. Re-engages when price re-enters range.',
+  },
+  below_range: {
+    text: 'BELOW RANGE — price has dropped under the grid',
+    sub: 'Buy levels exhausted; early recenter triggers once price is >2% outside range.',
+  },
+  above_range: {
+    text: 'ABOVE RANGE — price has run above the grid',
+    sub: 'Sell levels exhausted; early recenter triggers once price is >2% outside range.',
+  },
+  floor_capped: {
+    text: 'FLOOR-CAPPED — inventory near the long-only floor',
+    sub: 'Few sells left until buys replenish inventory.',
+  },
+};
+
 function _renderGridStatusBanner(state, overview) {
   const banner = document.getElementById('g-status-banner');
   const textEl = document.getElementById('g-status-text');
   const subEl = document.getElementById('g-status-sub');
   const halted = overview?.status === 'HALTED';
   const mode = (overview?.status || 'paper').toLowerCase();
-  const lastFill = state?.active_orders?.length || state?.n_buy_fills || state?.n_sell_fills ? null : null;
+  const heartbeatAge = overview?.last_heartbeat ? _humanAge(overview.last_heartbeat) : '–';
 
   banner.classList.remove('healthy', 'halted', 'warning');
   if (halted) {
@@ -529,25 +551,41 @@ function _renderGridStatusBanner(state, overview) {
   if (dd <= -25) {
     banner.classList.add('warning');
     textEl.textContent = `Drawdown ${dd.toFixed(1)}% — approaching CB threshold (-40%)`;
-    subEl.textContent = `Last heartbeat: ${_humanAge(overview.last_heartbeat)}`;
+    subEl.textContent = `Last heartbeat: ${heartbeatAge}`;
     return;
   }
+  // Regime observability — surface the weak/dormant states (below/above range,
+  // floor-capped, accumulating in a downtrend) as a warning banner.
+  const regime = state?.regime?.note || 'healthy';
+  if (GRID_REGIME_MSG[regime]) {
+    banner.classList.add('warning');
+    textEl.textContent = GRID_REGIME_MSG[regime].text;
+    subEl.textContent = `${GRID_REGIME_MSG[regime].sub} · heartbeat ${heartbeatAge}`;
+    return;
+  }
+
   banner.classList.add('healthy');
   const fills = (state?.n_buy_fills || 0) + (state?.n_sell_fills || 0);
   const prebuy = state?.prebuy_status || 'not started';
   textEl.textContent = `Bot HEALTHY · ${mode.toUpperCase()} mode · prebuy ${prebuy}`;
-  const heartbeatAge = overview?.last_heartbeat ? _humanAge(overview.last_heartbeat) : '–';
   subEl.textContent = `${fills} lifetime fills · last heartbeat ${heartbeatAge}`;
 }
 
 function _renderGridStatCards(state, overview) {
-  // Equity
+  // Equity — sub-line shows the TRUE account net (equity − starting balance),
+  // which is the honest performance number. This is deliberately prominent
+  // because the "Realized P&L" card below is measured against avg-cost basis
+  // and can diverge from reality (e.g. after a manual avg-cost reset), so the
+  // account-level truth lives here.
   const equity = overview?.equity ?? 0;
   const peak = overview?.peak_equity ?? equity;
   const dd = overview?.drawdown_pct ?? 0;
+  const trueNet = overview?.total_pnl ?? 0;   // equity − starting balance
   document.getElementById('g-equity').textContent = _fmtMoney(equity, 2);
   const eqSub = document.getElementById('g-equity-sub');
-  eqSub.textContent = `Peak: ${_fmtMoney(peak, 0)}`;
+  eqSub.innerHTML =
+    `Net <span class="${pnlClass(trueNet)}">${trueNet >= 0 ? '+' : '–'}` +
+    `${_fmtMoney(Math.abs(trueNet), 2)}</span> · peak ${_fmtMoney(peak, 0)}`;
 
   // Inventory — show BTC + $-value
   const invQty = state?.inventory_qty || 0;
@@ -567,13 +605,16 @@ function _renderGridStatCards(state, overview) {
     document.getElementById('g-avg-sub').textContent = ' ';
   }
 
-  // Realized P&L
+  // Realized P&L — the grid's gross harvest measured against its AVG-COST
+  // basis. Labelled "vs avg-cost" because it can diverge from account Net
+  // (shown on the Equity card) — most notably after a manual avg-cost reset,
+  // where booked "gains" are against an artificial basis, not real cash.
   const realized = state?.realized_pnl_total || 0;
   const realizedEl = document.getElementById('g-realized');
   realizedEl.textContent = (realized >= 0 ? '+' : '–') + _fmtMoney(Math.abs(realized), 2);
   realizedEl.className = 'stat-value ' + pnlClass(realized);
   const fees = state?.fees_paid_total || 0;
-  document.getElementById('g-realized-sub').textContent = `Fees paid: ${_fmtMoney(fees, 2)}`;
+  document.getElementById('g-realized-sub').textContent = `vs avg-cost · fees ${_fmtMoney(fees, 2)}`;
 
   // Drawdown — color-coded
   const ddEl = document.getElementById('g-dd');

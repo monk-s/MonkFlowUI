@@ -161,6 +161,59 @@ class TestRecenter:
         # But also shouldn't crash
 
 
+class TestRangeExitRecenter:
+    """Early recenter when price breaks out of the active range (>2% buffer).
+
+    Uses last_recenter_at=5 days ago so the TIME-based recenter is NOT due —
+    isolating the range-exit trigger. Default range [70000, 90000] → triggers
+    below 68600 / above 91800.
+    """
+
+    @pytest.mark.asyncio
+    async def test_price_well_below_range_triggers_recenter(self):
+        recent = datetime.now(timezone.utc) - timedelta(days=5)
+        h, _, _, om, _ = _build_handler(
+            last_recenter_at=recent, range_low=70000, range_high=90000,
+            current_price=68000,  # < 68600 trigger
+        )
+        await h.run()
+        om.recenter.assert_awaited_once()
+        om.tick.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_price_well_above_range_triggers_recenter(self):
+        recent = datetime.now(timezone.utc) - timedelta(days=5)
+        h, _, _, om, _ = _build_handler(
+            last_recenter_at=recent, range_low=70000, range_high=90000,
+            current_price=92000,  # > 91800 trigger
+        )
+        await h.run()
+        om.recenter.assert_awaited_once()
+        om.tick.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_price_just_outside_within_buffer_does_normal_tick(self):
+        recent = datetime.now(timezone.utc) - timedelta(days=5)
+        h, _, _, om, _ = _build_handler(
+            last_recenter_at=recent, range_low=70000, range_high=90000,
+            current_price=69500,  # below 70000 but inside the 2% buffer
+        )
+        await h.run()
+        om.recenter.assert_not_called()
+        om.tick.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_price_in_range_does_normal_tick(self):
+        recent = datetime.now(timezone.utc) - timedelta(days=5)
+        h, _, _, om, _ = _build_handler(
+            last_recenter_at=recent, range_low=70000, range_high=90000,
+            current_price=80000,
+        )
+        await h.run()
+        om.recenter.assert_not_called()
+        om.tick.assert_awaited_once()
+
+
 class TestNormalTick:
     @pytest.mark.asyncio
     async def test_normal_tick_delegates_to_order_manager(self):

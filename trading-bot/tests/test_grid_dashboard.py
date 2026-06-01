@@ -82,7 +82,8 @@ def _fake_daily_metric(date_iso, net_pnl):
     )
 
 
-def _build_app(*, grid_state=None, active_orders=None, fills=None, metrics=None):
+def _build_app(*, grid_state=None, active_orders=None, fills=None, metrics=None,
+               current_price=None):
     app = FastAPI()
     repo = AsyncMock()
     repo.get_grid_state = AsyncMock(return_value=grid_state)
@@ -105,6 +106,10 @@ def _build_app(*, grid_state=None, active_orders=None, fills=None, metrics=None)
     exchange = AsyncMock()
     exchange.get_equity = AsyncMock(return_value=10000)
     exchange.get_positions = AsyncMock(return_value=[])
+    # get_current_price is used by /api/grid/state regime computation. When
+    # current_price is None, return_value=None makes the route's float() raise
+    # and fall back to current_price=None (price_vs_range="unknown").
+    exchange.get_current_price = AsyncMock(return_value=current_price)
     templates = Jinja2Templates(directory=".")  # not used in API tests
     register_routes(app, repo, exchange, templates, scheduler=None)
     return app, repo
@@ -463,3 +468,76 @@ class TestOverviewDailyPnl:
         assert body["daily_pnl"] == pytest.approx(3.0, abs=0.001)
         assert body["daily_pnl_breakdown"]["v1"] == 3.0
         assert body["daily_pnl_breakdown"]["grid"] == 0.0
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# /api/grid/state — regime observability (Change 3)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestGridRegime:
+    # _fake_grid_state defaults: prebuy_qty=0.0623, inventory_qty=0.075,
+    # range [60000, 95000], capital_per_level=320. With floor_fraction=0.5 the
+    # floor is 0.03115 BTC, so default inventory (0.075) is well above it.
+
+    def test_healthy_when_in_range_and_above_floor(self):
+        gs = _fake_grid_state()
+        app, _ = _build_app(grid_state=gs, current_price=75000.0)
+        body = TestClient(app).get("/api/grid/state").json()
+        reg = body["regime"]
+        assert reg["note"] == "healthy"
+        assert reg["price_vs_range"] == "in"
+        assert reg["at_floor"] is False
+        assert reg["current_price"] == 75000.0
+
+    def test_below_range(self):
+        gs = _fake_grid_state()
+        app, _ = _build_app(grid_state=gs, current_price=58000.0)  # < range_low 60000
+        body = TestClient(app).get("/api/grid/state").json()
+        reg = body["regime"]
+        assert reg["price_vs_range"] == "below"
+        assert reg["note"] == "below_range"
+
+    def test_above_range(self):
+        gs = _fake_grid_state()
+        app, _ = _build_app(grid_state=gs, current_price=96000.0)  # > range_high 95000
+        body = TestClient(app).get("/api/grid/state").json()
+        reg = body["regime"]
+        assert reg["price_vs_range"] == "above"
+        assert reg["note"] == "above_range"
+
+    def test_floor_capped_when_inventory_near_floor(self):
+        # Inventory just above the 0.03115 floor → less than one order of headroom
+        gs = _fake_grid_state(inventory_qty=0.032)
+        app, _ = _build_app(grid_state=gs, current_price=75000.0)  # in range
+        body = TestClient(app).get("/api/grid/state").json()
+        reg = body["regime"]
+        assert reg["at_floor"] is True
+        assert reg["note"] == "floor_capped"
+
+    def test_accumulating_in_downtrend_when_below_range_and_at_floor(self):
+        gs = _fake_grid_state(inventory_qty=0.032)
+        app, _ = _build_app(grid_state=gs, current_price=58000.0)  # below + at floor
+        body = TestClient(app).get("/api/grid/state").json()
+        reg = body["regime"]
+        assert reg["price_vs_range"] == "below"
+        assert reg["at_floor"] is True
+        assert reg["note"] == "accumulating_in_downtrend"
+
+    def test_floor_fields_present_and_correct(self):
+        gs = _fake_grid_state()  # prebuy_qty 0.0623, floor_fraction 0.5
+        app, _ = _build_app(grid_state=gs, current_price=75000.0)
+        body = TestClient(app).get("/api/grid/state").json()
+        reg = body["regime"]
+        assert reg["floor_fraction"] == 0.5
+        assert reg["inventory_floor_qty"] == pytest.approx(0.0623 * 0.5, abs=1e-9)
+        assert reg["inventory_headroom_qty"] == pytest.approx(0.075 - 0.0623 * 0.5, abs=1e-9)
+
+    def test_price_unknown_when_feed_unavailable(self):
+        # current_price=None → route's float() raises → falls back gracefully
+        gs = _fake_grid_state()
+        app, _ = _build_app(grid_state=gs, current_price=None)
+        body = TestClient(app).get("/api/grid/state").json()
+        reg = body["regime"]
+        assert reg["current_price"] is None
+        assert reg["price_vs_range"] == "unknown"

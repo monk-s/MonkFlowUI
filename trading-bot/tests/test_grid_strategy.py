@@ -15,6 +15,7 @@ from bot.strategy.grid_strategy import (
     compute_dynamic_range,
     compute_levels,
     compute_range_and_levels,
+    is_price_outside_range,
     prebuy_qty_from_pct,
     should_recenter,
 )
@@ -228,6 +229,50 @@ class TestShouldRecenter:
         now = datetime.now(timezone.utc)
         last = now - timedelta(days=60)
         assert should_recenter(last, interval_days=60, now=now) is True
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# is_price_outside_range (early-recenter trigger)
+# ─────────────────────────────────────────────────────────────────────────
+
+class TestIsPriceOutsideRange:
+    LOW, HIGH = 70000.0, 80000.0  # 2% buffer → triggers below 68600 / above 81600
+
+    def test_price_in_range_false(self):
+        assert is_price_outside_range(75000, self.LOW, self.HIGH, exit_pct=2.0) is False
+
+    def test_price_just_below_within_buffer_false(self):
+        # 69000 is below LOW but inside the 2% buffer (>68600) → not "exited"
+        assert is_price_outside_range(69000, self.LOW, self.HIGH, exit_pct=2.0) is False
+
+    def test_price_well_below_true(self):
+        # 68000 < 68600 trigger → exited downside
+        assert is_price_outside_range(68000, self.LOW, self.HIGH, exit_pct=2.0) is True
+
+    def test_price_just_above_within_buffer_false(self):
+        assert is_price_outside_range(81000, self.LOW, self.HIGH, exit_pct=2.0) is False
+
+    def test_price_well_above_true(self):
+        assert is_price_outside_range(82000, self.LOW, self.HIGH, exit_pct=2.0) is True
+
+    def test_exit_pct_zero_disables(self):
+        # Even far outside, exit_pct=0 means "disabled" → always False
+        assert is_price_outside_range(50000, self.LOW, self.HIGH, exit_pct=0.0) is False
+        assert is_price_outside_range(99000, self.LOW, self.HIGH, exit_pct=0.0) is False
+
+    def test_negative_exit_pct_disables(self):
+        assert is_price_outside_range(50000, self.LOW, self.HIGH, exit_pct=-5.0) is False
+
+    def test_invalid_range_returns_false(self):
+        # Defensive: non-positive or inverted ranges never trigger
+        assert is_price_outside_range(75000, 0.0, 80000.0, exit_pct=2.0) is False
+        assert is_price_outside_range(75000, 80000.0, 70000.0, exit_pct=2.0) is False
+
+    def test_larger_buffer_requires_bigger_move(self):
+        # With a 5% buffer, 68000 (which tripped at 2%) is now inside (>66500)
+        assert is_price_outside_range(68000, self.LOW, self.HIGH, exit_pct=5.0) is False
+        # 66000 < 66500 → trips at 5%
+        assert is_price_outside_range(66000, self.LOW, self.HIGH, exit_pct=5.0) is True
 
 
 # ─────────────────────────────────────────────────────────────────────────
