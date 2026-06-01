@@ -168,6 +168,35 @@ def should_recenter(
     return age >= timedelta(days=interval_days)
 
 
+def is_price_outside_range(
+    current_price: float,
+    range_low: float,
+    range_high: float,
+    *,
+    exit_pct: float,
+) -> bool:
+    """True if `current_price` is more than `exit_pct`% beyond the range bounds.
+
+    `exit_pct` is a percentage of the boundary price (a buffer beyond the
+    raw edge, so a one-tick poke past range_low doesn't immediately trigger
+    a recenter). With exit_pct=2.0:
+        lower trigger = range_low  × 0.98
+        upper trigger = range_high × 1.02
+    Returns True if price is below the lower trigger or above the upper one.
+
+    exit_pct <= 0 disables the check (always returns False). Non-positive or
+    inverted ranges also return False defensively — the caller falls back to
+    the time-based recenter.
+    """
+    if exit_pct <= 0:
+        return False
+    if range_low <= 0 or range_high <= 0 or range_low >= range_high:
+        return False
+    lower_trigger = range_low * (1 - exit_pct / 100.0)
+    upper_trigger = range_high * (1 + exit_pct / 100.0)
+    return current_price < lower_trigger or current_price > upper_trigger
+
+
 def capital_per_level(starting_capital_usd: float, n_levels: int) -> float:
     """Equal-weighted capital per grid level. Total notional = capital.
 

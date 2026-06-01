@@ -22,6 +22,7 @@ from typing import Optional
 from bot.strategy.grid_strategy import (
     GridRange,
     compute_range_and_levels,
+    is_price_outside_range,
     should_recenter,
 )
 from config.logging_config import get_logger
@@ -101,25 +102,62 @@ class GridTickHandler:
                 )
                 return
 
-            # 3. Recenter check
+            # 3. Recenter check — time-based OR price-broke-out-of-range
             grid_state = await self.repo.get_grid_state()
             recenter_due = should_recenter(
                 getattr(grid_state, "last_recenter_at", None) if grid_state else None,
                 interval_days=settings.GRID_RECENTER_INTERVAL_DAYS,
             )
 
-            if recenter_due:
+            # Fetch current price once. Used by the range-exit check, recenter,
+            # and the normal maintenance tick — so we never poll it twice.
+            try:
+                current_price = float(await self.exchange.get_current_price())
+            except Exception as e:
+                logger.warning("get_price_failed_skipping_tick", error=str(e))
+                return
+
+            # Early recenter if price has broken out of the active range by
+            # more than the configured threshold. Without this, when BTC drifts
+            # past the padded range the grid goes dormant (no buy levels below
+            # price, or no sells above) until the slow time-based recenter fires.
+            range_exit_recenter = False
+            if (
+                not recenter_due
+                and grid_state is not None
+                and settings.GRID_RECENTER_ON_RANGE_EXIT_PCT > 0
+            ):
+                rlow = getattr(grid_state, "current_range_low", None)
+                rhigh = getattr(grid_state, "current_range_high", None)
+                if rlow is not None and rhigh is not None and is_price_outside_range(
+                    current_price, float(rlow), float(rhigh),
+                    exit_pct=settings.GRID_RECENTER_ON_RANGE_EXIT_PCT,
+                ):
+                    range_exit_recenter = True
+                    logger.info(
+                        "grid_tick_range_exit_recenter",
+                        price=current_price,
+                        range_low=float(rlow), range_high=float(rhigh),
+                        exit_pct=settings.GRID_RECENTER_ON_RANGE_EXIT_PCT,
+                    )
+                    try:
+                        await self.repo.log(
+                            "info", "grid_tick",
+                            f"Price {current_price:.0f} broke out of range "
+                            f"[{float(rlow):.0f}, {float(rhigh):.0f}] by "
+                            f">{settings.GRID_RECENTER_ON_RANGE_EXIT_PCT}% — "
+                            f"recentering early.",
+                        )
+                    except Exception:
+                        pass  # logging is best-effort; don't block the recenter
+
+            if recenter_due or range_exit_recenter:
                 new_range = await self._compute_new_range()
                 if new_range is None:
                     logger.warning(
                         "grid_tick_recenter_skipped_no_data",
                         note="couldn't fetch enough daily history to recenter",
                     )
-                    return
-                try:
-                    current_price = float(await self.exchange.get_current_price())
-                except Exception as e:
-                    logger.warning("get_price_failed_skipping_tick", error=str(e))
                     return
                 await self.order_manager.recenter(
                     new_range=new_range, current_price=current_price,
@@ -128,13 +166,7 @@ class GridTickHandler:
                 # populate the new grid. Keeps each tick simple + idempotent.
                 return
 
-            # 4. Normal maintenance tick
-            try:
-                current_price = float(await self.exchange.get_current_price())
-            except Exception as e:
-                logger.warning("get_price_failed_skipping_tick", error=str(e))
-                return
-
+            # 4. Normal maintenance tick (current_price already fetched above)
             current_range = self._range_from_state(grid_state)
             if current_range is None:
                 # No active grid yet (this is the first tick after pre-buy

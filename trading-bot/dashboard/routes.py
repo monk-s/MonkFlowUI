@@ -420,6 +420,60 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
             hidden_out_of_range_count = 0
             hidden_out_of_range_sample = []
 
+        # ── Regime observability (Change 3) ──────────────────────────────
+        # Surface when the bot is in its weak "lean-long in a downtrend"
+        # regime — inventory pinned at the floor and/or price outside the
+        # grid range — so the dashboard shows it instead of the user having
+        # to infer it. Pure derived fields; no new DB state.
+        from config.settings import settings as _s
+
+        inv_qty = float(gs.inventory_qty or 0)
+        prebuy_qty = float(gs.prebuy_qty or 0)
+        floor_fraction = float(_s.GRID_INVENTORY_FLOOR_FRACTION)
+        floor_qty = prebuy_qty * floor_fraction
+        headroom = inv_qty - floor_qty
+
+        # Current price (defensive — never 500 the endpoint on a feed blip).
+        current_price = None
+        try:
+            current_price = float(await exchange.get_current_price())
+        except Exception:
+            current_price = None
+
+        # "At floor" = less than ~one order's worth of sellable inventory
+        # remaining, so sells are about to be (or already are) blocked.
+        cpl = float(gs.capital_per_level) if gs.capital_per_level else 0.0
+        if cpl and current_price:
+            one_order_qty = cpl / current_price
+        elif floor_qty:
+            one_order_qty = floor_qty * 0.10
+        else:
+            one_order_qty = 0.0
+        at_floor = bool(prebuy_qty > 0 and headroom <= one_order_qty)
+
+        price_vs_range = "unknown"
+        if current_price is not None and rlow is not None and rhigh is not None:
+            if current_price < rlow:
+                price_vs_range = "below"
+            elif current_price > rhigh:
+                price_vs_range = "above"
+            else:
+                price_vs_range = "in"
+
+        # Human-readable regime classification, most-severe first.
+        if price_vs_range == "below" and at_floor:
+            # The painful combo: price under the grid AND no sellable inventory
+            # left — the bot can only sit long and wait. Pure-downtrend weakness.
+            regime_note = "accumulating_in_downtrend"
+        elif price_vs_range == "below":
+            regime_note = "below_range"   # price under grid; buys exhausted, awaiting recenter
+        elif price_vs_range == "above":
+            regime_note = "above_range"   # price over grid; sells exhausted, awaiting recenter
+        elif at_floor:
+            regime_note = "floor_capped"  # inventory at floor; sells limited
+        else:
+            regime_note = "healthy"
+
         return {
             "initialized": True,
             "symbol": gs.symbol,
@@ -439,6 +493,16 @@ def register_routes(app: FastAPI, repo, exchange, templates: Jinja2Templates, sc
             "n_sell_fills": int(gs.n_sell_fills or 0),
             "last_recenter_at": gs.last_recenter_at.isoformat() if gs.last_recenter_at else None,
             "next_recenter_at": gs.next_recenter_at.isoformat() if gs.next_recenter_at else None,
+            # Regime observability — derived, surfaced for the dashboard banner.
+            "regime": {
+                "note": regime_note,
+                "current_price": current_price,
+                "price_vs_range": price_vs_range,
+                "inventory_floor_qty": floor_qty,
+                "inventory_headroom_qty": headroom,
+                "at_floor": at_floor,
+                "floor_fraction": floor_fraction,
+            },
             "active_orders": [
                 {
                     "id": o.id,
