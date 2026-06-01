@@ -1263,6 +1263,9 @@ function renderTfsCaseStudyPage() {
 // TFS case study summary card, offer ladder (relocated from the landing
 // page's #wealth-intake section), security teaser, CTA.
 function renderForAdvisorsPage() {
+  // Analytics: track /for-advisors views (the deep advisor pitch page that
+  // partnership emails + LinkedIn link to). Guarded no-op until Plausible live.
+  try { window.plausible && window.plausible('For Advisors View'); } catch (_) {}
   const container = document.getElementById('landing-container');
   container.innerHTML = `
     <nav class="landing-nav">
@@ -5592,6 +5595,10 @@ function showLegalPage(type) {
 }
 
 function showSchedulingModal() {
+  // Analytics: the highest-intent action on the site. Guarded — no-op until
+  // the Plausible account is live (see index.html). Safe if window.plausible
+  // is undefined because the inline stub in index.html always defines it.
+  try { window.plausible && window.plausible('Schedule Modal Opened'); } catch (_) {}
   let currentStep = 1;
   let selectedDate = null;
   let selectedSlot = null;
