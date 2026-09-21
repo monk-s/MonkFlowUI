@@ -17,10 +17,16 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/lucide.min.css" />
-  <link rel="icon" type="image/svg+xml" href="logo.svg" />
-  <link rel="apple-touch-icon" href="logo.svg" />
+  <!-- Asset paths MUST be root-absolute (/foo), not relative (foo). On a
+       nested route like /case-studies/team-financial-strategies a relative
+       path resolves to /case-studies/app.js, which the vercel.json catch-all
+       rewrite serves as index.html — the app then never boots and the page
+       renders blank. Single-segment routes (/for-advisors) happen to work
+       either way, which is what hid this. Keep the leading slash. -->
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+  <link rel="apple-touch-icon" href="/logo.svg" />
   <meta name="theme-color" content="#00ff88" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/styles.css" />
   <!-- Plausible analytics (privacy-first, no cookie banner). Tagged-events
        build supports manual window.plausible('Event') calls for funnel
        tracking. INERT until monkflow.io is added in the Plausible dashboard —
@@ -58,6 +64,6 @@
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container"></div>
 
-  <script src="app.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>
