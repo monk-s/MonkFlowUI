@@ -186,10 +186,10 @@ the productized tiers are public on monkflow.io/for-advisors. Or
 just DM me.
 ```
 
-*Note: TFS permission was granted by Jody Team on 2026-04-29. Post is
-ready to publish once (a) Jody's testimonial wording lands, and (b) the
-published case study page is live at
-monkflow.io/case-studies/team-financial-strategies.*
+*Note: READY TO PUBLISH. TFS permission granted by Jody Team 2026-04-29;
+engagement confirmed complete + measured 2026-06-01; case study page is
+live at monkflow.io/case-studies/team-financial-strategies. No testimonial
+quote in the post (deferred — Jody's on vacation), so nothing blocks this.*
 
 ---
 
@@ -233,7 +233,7 @@ no slides.*
 | 2 | Post 2 — 4 minutes | Tuesday 8am CT | Time-based observation, light data |
 | 3 | Post 3 — Redtail vs Wealthbox | Wednesday 8am CT | Comparative content gets shares |
 | 4 | Post 4 — Paper intake | Tuesday 8am CT | Slight contrarian — drives comments |
-| 5 | Post 5 — TFS case study | Thursday 8am CT | Link drop. **Permission granted by Jody Team 2026-04-29.** Post once Jody's testimonial wording lands and the published case study page is live. |
+| 5 | Post 5 — TFS case study | Thursday 8am CT | Link drop. **READY** — case study page live, permission granted, testimonial deferred (not a blocker). |
 | 6 | Post 6 — Loom walkthrough | Wednesday 8am CT | Video; longest dwell time |
 
 After week 6: cadence becomes "1 wealth-mgmt-automation observation

@@ -39,7 +39,7 @@
 >
 > **Result: 45 min → under 5 min per new-client onboarding.**
 >
-> *Jody Team, founding partner: [testimonial wording pending — will be inserted as soon as Jody's exact quote lands]*
+> *Jody Team, founding partner — reference call available to serious prospects.*
 
 ### BOTTOM HALF: What I do for your clients (plus what you get)
 

@@ -644,10 +644,17 @@ function resolvePageRoute(pathname) {
   return null;
 }
 
-// Navigate to a path without a full page reload. Uses history.pushState
-// so back/forward work natively; the popstate listener below re-runs
-// route dispatch when the user hits the browser back button.
-function navigateTo(path) {
+// Navigate to a marketing/public PATH without a full page reload. Uses
+// history.pushState so back/forward work natively; the popstate listener
+// below re-runs route dispatch when the user hits the browser back button.
+//
+// NOTE: deliberately NOT named navigateTo() — that name belongs to the
+// authenticated app's router (see ~line 465), which takes a page KEY
+// ('admin', 'dashboard', ...) rather than a path. Two function
+// declarations with the same name silently collide (last one wins), which
+// previously killed every nav button in the signed-in app. Keep these two
+// routers' names distinct.
+function navigateToPath(path) {
   if (window.location.pathname === path && !window.location.hash) return;
   window.history.pushState({}, '', path);
   // Scroll to top — replaces the default scroll-restoration the
@@ -659,7 +666,7 @@ function navigateTo(path) {
 
 // Decide which renderer fills #landing-container based on the current
 // pathname. Called from showLanding() on initial load AND from
-// navigateTo() / popstate after each route change.
+// navigateToPath() / popstate after each route change.
 function dispatchLandingRoute() {
   const renderer = resolvePageRoute(window.location.pathname);
   if (renderer) {
@@ -926,7 +933,7 @@ function renderLandingPage() {
     <nav class="landing-nav">
       <div class="landing-nav-inner">
         <div class="landing-nav-logo">
-          <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
+          <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
           <div class="logo-text">Monk<span>Flow</span></div>
         </div>
         <div class="landing-nav-links">
@@ -953,7 +960,7 @@ function renderLandingPage() {
         <p class="landing-hero-subtitle">MonkFlow builds the new-client onboarding stack for independent RIAs. Cut intake from 45 minutes to under 5. CRM populates automatically. Compliance-friendly signed PDFs out of the box.</p>
         <div class="hero-actions">
           <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Book a 15-min Intro Call</button>
-          <button class="btn btn-secondary btn-lg" onclick="navigateTo('/for-advisors')">${icons.eye} View the $1,500 Audit →</button>
+          <button class="btn btn-secondary btn-lg" onclick="navigateToPath('/for-advisors')">${icons.eye} View the $1,500 Audit →</button>
         </div>
         <div class="landing-hero-stats">
           <div class="landing-stat"><div class="landing-stat-val">45→5 min</div><div class="landing-stat-label">Onboarding time (TFS, real client)</div></div>
@@ -1033,7 +1040,7 @@ function renderLandingPage() {
             </div>
           </div>
           <div style="margin-top:24px;">
-            <a href="/case-studies/team-financial-strategies" onclick="event.preventDefault();navigateTo('/case-studies/team-financial-strategies');" style="font-size:14px;color:var(--accent);text-decoration:underline;">Read the full case study →</a>
+            <a href="/case-studies/team-financial-strategies" onclick="event.preventDefault();navigateToPath('/case-studies/team-financial-strategies');" style="font-size:14px;color:var(--accent);text-decoration:underline;">Read the full case study →</a>
           </div>
         </div>
       </div>
@@ -1085,7 +1092,7 @@ function renderLandingPage() {
           Onboarding Audit · Intake Pro · Onboarding System.<br/>
           Refundable audit anchor. Fixed-fee delivery. Founder-led builds for RIAs on Redtail, Wealthbox, or Salesforce FSC.
         </p>
-        <button class="btn btn-primary btn-lg" onclick="navigateTo('/for-advisors')">
+        <button class="btn btn-primary btn-lg" onclick="navigateToPath('/for-advisors')">
           ${icons.eye} See pricing + offer ladder →
         </button>
       </div>
@@ -1117,7 +1124,7 @@ function renderLandingPage() {
       <div class="landing-footer-inner">
         <div class="landing-footer-brand">
           <div class="landing-nav-logo">
-            <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
+            <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
             <div class="logo-text">Monk<span>Flow</span></div>
           </div>
           <p>Custom software tools built around your business — not the other way around.</p>
@@ -1125,9 +1132,9 @@ function renderLandingPage() {
         <div class="landing-footer-links">
           <div>
             <h4>Offers</h4>
-            <a href="/for-advisors" onclick="event.preventDefault();navigateTo('/for-advisors')">Onboarding Audit · $1,500</a>
-            <a href="/for-advisors" onclick="event.preventDefault();navigateTo('/for-advisors')">Intake Pro · $7,500</a>
-            <a href="/for-advisors" onclick="event.preventDefault();navigateTo('/for-advisors')">Onboarding System · $14,500</a>
+            <a href="/for-advisors" onclick="event.preventDefault();navigateToPath('/for-advisors')">Onboarding Audit · $1,500</a>
+            <a href="/for-advisors" onclick="event.preventDefault();navigateToPath('/for-advisors')">Intake Pro · $7,500</a>
+            <a href="/for-advisors" onclick="event.preventDefault();navigateToPath('/for-advisors')">Onboarding System · $14,500</a>
             <a href="#" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">All services</a>
           </div>
           <div>
@@ -1164,12 +1171,12 @@ function renderTfsCaseStudyPage() {
   container.innerHTML = `
     <nav class="landing-nav">
       <div class="landing-nav-inner">
-        <div class="landing-nav-logo" onclick="navigateTo('/')" style="cursor:pointer;">
-          <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
+        <div class="landing-nav-logo" onclick="navigateToPath('/')" style="cursor:pointer;">
+          <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
           <div class="logo-text">Monk<span>Flow</span></div>
         </div>
         <div class="landing-nav-actions">
-          <button class="btn btn-ghost" onclick="navigateTo('/')">← Back to MonkFlow</button>
+          <button class="btn btn-ghost" onclick="navigateToPath('/')">← Back to MonkFlow</button>
           <button class="btn btn-primary btn-sm" onclick="showSchedulingModal()">Schedule a Call</button>
         </div>
       </div>
@@ -1225,15 +1232,10 @@ function renderTfsCaseStudyPage() {
       <p>The intake-form conditional logic was over-engineered in v1. We shipped 9 conditional branches when 4 would have covered 95% of client types. Jody's ops manager flagged it during week 1 of go-live; we collapsed branches the following week.</p>
       <p><em>Lesson: ship fewer branches, add only when clients actually hit edge cases.</em></p>
 
-      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">What Jody said</h2>
-      <blockquote style="border-left:4px solid var(--accent);padding:8px 24px;margin:24px 0;color:var(--text-secondary);font-style:italic;">
-        <em style="color:var(--text-tertiary);">— Awaiting Jody's verbatim testimonial wording. Will be inserted before the Day-1 LinkedIn link drop.</em>
-      </blockquote>
-
       <div style="margin-top:48px;padding:32px;background:var(--bg-secondary);border-radius:12px;text-align:center;">
         <h3 style="font-family:-apple-system,sans-serif;font-size:22px;margin:0 0 12px;">Want this for your firm?</h3>
         <p style="margin:0 0 20px;color:var(--text-secondary);">We took the same scope MonkFlow built for TFS and packaged it into three productized tiers. Public pricing. Fixed delivery windows. Refundable audit anchor.</p>
-        <button class="btn btn-primary btn-lg" onclick="navigateTo('/for-advisors')">View the offer ladder →</button>
+        <button class="btn btn-primary btn-lg" onclick="navigateToPath('/for-advisors')">View the offer ladder →</button>
         <button class="btn btn-secondary btn-lg" style="margin-left:12px;" onclick="showSchedulingModal()">Or book a 15-min call</button>
       </div>
 
@@ -1263,16 +1265,19 @@ function renderTfsCaseStudyPage() {
 // TFS case study summary card, offer ladder (relocated from the landing
 // page's #wealth-intake section), security teaser, CTA.
 function renderForAdvisorsPage() {
+  // Analytics: track /for-advisors views (the deep advisor pitch page that
+  // partnership emails + LinkedIn link to). Guarded no-op until Plausible live.
+  try { window.plausible && window.plausible('For Advisors View'); } catch (_) {}
   const container = document.getElementById('landing-container');
   container.innerHTML = `
     <nav class="landing-nav">
       <div class="landing-nav-inner">
-        <div class="landing-nav-logo" onclick="navigateTo('/')" style="cursor:pointer;">
-          <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
+        <div class="landing-nav-logo" onclick="navigateToPath('/')" style="cursor:pointer;">
+          <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
           <div class="logo-text">Monk<span>Flow</span></div>
         </div>
         <div class="landing-nav-actions">
-          <button class="btn btn-ghost" onclick="navigateTo('/')">← Back to MonkFlow</button>
+          <button class="btn btn-ghost" onclick="navigateToPath('/')">← Back to MonkFlow</button>
           <button class="btn btn-primary btn-sm" onclick="showSchedulingModal()">Schedule a Call</button>
         </div>
       </div>
@@ -1286,7 +1291,7 @@ function renderForAdvisorsPage() {
         <p class="landing-hero-subtitle">Your CRM does what it's built to do. We build the layer above it — digital intake, signed-PDF generation, custodian-of-record automation, client portals — that turns your CRM into the new-client onboarding system your firm actually needs. Real result: 45 min → under 5 min per onboarding for Team Financial Strategies (Abilene TX).</p>
         <div class="hero-actions">
           <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Book a 15-min intro call</button>
-          <button class="btn btn-secondary btn-lg" onclick="navigateTo('/case-studies/team-financial-strategies')">${icons.eye} Read the TFS case study →</button>
+          <button class="btn btn-secondary btn-lg" onclick="navigateToPath('/case-studies/team-financial-strategies')">${icons.eye} Read the TFS case study →</button>
         </div>
       </div>
       <div class="hero-glow"></div>
@@ -1357,7 +1362,7 @@ function renderForAdvisorsPage() {
               <div style="font-size:13px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Team Financial Strategies · 4 advisors, Abilene TX</div>
               <h3 style="margin:0 0 12px;font-size:24px;">45 minutes → under 5 minutes per new-client onboarding</h3>
               <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0 0 20px;">Custom intake form + Redtail CRM auto-sync + signed-PDF generation. Built in two weeks. Jody Team (founding partner) available for reference calls to serious prospects.</p>
-              <button class="btn btn-primary" onclick="navigateTo('/case-studies/team-financial-strategies')">Read the full case study →</button>
+              <button class="btn btn-primary" onclick="navigateToPath('/case-studies/team-financial-strategies')">Read the full case study →</button>
             </div>
             <div style="flex:0 0 auto;text-align:center;">
               <div style="font-size:48px;font-weight:700;color:var(--accent);line-height:1;">9×</div>
@@ -1484,7 +1489,7 @@ function renderAuthLogin() {
       <div class="auth-left">
         <div class="auth-form-wrapper">
           <div class="auth-logo">
-            <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
+            <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
             <div class="logo-text">Monk<span>Flow</span></div>
           </div>
           <h1 class="auth-heading">Welcome back</h1>
@@ -1554,7 +1559,7 @@ function renderAuthSignup() {
       <div class="auth-left">
         <div class="auth-form-wrapper">
           <div class="auth-logo">
-            <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
+            <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
             <div class="logo-text">Monk<span>Flow</span></div>
           </div>
           <h1 class="auth-heading">Get started</h1>
@@ -1627,7 +1632,7 @@ function renderSidebar() {
   const sidebar = document.getElementById('sidebar');
   sidebar.innerHTML = `
     <div class="sidebar-logo">
-      <img src="logo.svg" alt="MonkFlow" class="logo-icon-img">
+      <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
       <div class="logo-text">Monk<span>Flow</span></div>
     </div>
     <nav class="sidebar-nav">
@@ -5592,6 +5597,10 @@ function showLegalPage(type) {
 }
 
 function showSchedulingModal() {
+  // Analytics: the highest-intent action on the site. Guarded — no-op until
+  // the Plausible account is live (see index.html). Safe if window.plausible
+  // is undefined because the inline stub in index.html always defines it.
+  try { window.plausible && window.plausible('Schedule Modal Opened'); } catch (_) {}
   let currentStep = 1;
   let selectedDate = null;
   let selectedSlot = null;
