@@ -853,3 +853,72 @@ Postgres stack.
 - Commits: 1 (3a58796)
 - Tests added: 0 (module smoke-tested locally; pure render fns validated)
 
+
+---
+
+## Session: 2026-09-21
+
+### Audit Findings
+- [CRITICAL] **Duplicate `navigateTo` declaration killed all navigation in
+  the signed-in app.** The wealth-mgmt pivot added a marketing router
+  `function navigateTo(path)` (app.js ~650) alongside the app's existing
+  `function navigateTo(page)` (app.js ~465). Function declarations hoist and
+  the last wins, so all 55 page-key call sites silently dispatched to the
+  marketing router, which pushed a bogus URL and re-rendered the hidden
+  landing container — no visible effect. Every dashboard nav button was
+  dead, not just admin. Reported by Nathan ("no buttons are working").
+  FIXED in commit fbba846 (renamed to `navigateToPath()`; 13 path-style
+  call sites updated; 55 page-key sites untouched).
+- [CRITICAL] **`/case-studies/team-financial-strategies` served a blank
+  page in production.** index.html used relative asset paths, so a
+  two-segment route requested `/case-studies/app.js`, which the vercel.json
+  catch-all rewrite returned as index.html → `SyntaxError: Unexpected token
+  '<'` → app never booted. One-segment routes (`/for-advisors`) resolve
+  relative paths to root and worked, masking the bug. This is the URL
+  published in the capabilities deck, alliance pitch, and LinkedIn Post 5.
+  FIXED in commit fbba846 (root-absolute paths in index.html + 7
+  `src="logo.svg"` refs in app.js).
+- [LOW] `.claude/launch.json` dev config invoked a bash wrapper script that
+  the preview sandbox refused (`Operation not permitted`). Switched to
+  invoking `npx serve` directly. Local-only, gitignored.
+
+### Improvements Made
+- Added comments at BOTH `navigateTo` / `navigateToPath` declarations
+  explaining the collision class, so it can't silently reappear (fbba846).
+- Added a comment in index.html explaining why asset paths must be
+  root-absolute under the catch-all rewrite (fbba846).
+- Published TFS case study metrics-only; removed empty testimonial
+  placeholder. Cleaned 4 stale "pending testimonial" cross-references
+  (b59fcd8).
+- New `docs/wealth-mgmt-pivot/09-capabilities-deck.md` — partner-facing
+  1-pager (who/what/who-for/proof/integrations/contact) (b59fcd8).
+
+### Verification
+Browser-verified against a local static server using the same SPA fallback
+as Vercel:
+- Clean tab at `/case-studies/team-financial-strategies`: zero console
+  errors, assets resolve to `/app.js` `/styles.css` `/logo.svg`, 7,440
+  chars rendered, no testimonial section.
+- `navigateTo('admin')` sets `currentPage='admin'` and pushes NO url (the
+  bug's signature); `navigateTo !== navigateToPath`.
+- `/`, `/for-advisors`, browser back-button, and a real click on the
+  marketing CTA all re-verified.
+- `grep` for duplicate function declarations across app.js: none remain.
+
+### Next Session Priority
+1. **Push + merge fbba846 — both fixes are CRITICAL and still live-broken
+   in production until deployed.** Branch `feat/marketing-analytics-positioning`
+   has 3 unpushed commits; needs a fresh GitHub PAT.
+2. After deploy, hard-verify on monkflow.io: admin nav buttons, and
+   `curl -sI https://monkflow.io/case-studies/app.js` should NOT return
+   text/html for the asset path (it should 404 or serve JS).
+3. Consider adding a CI/pre-commit guard for duplicate top-level function
+   declarations in app.js — this class of bug is invisible to syntax checks.
+4. Blocked on operator: Wealthbox/Redtail sandbox creds → API sample scripts.
+
+### Metrics
+- Files modified: 3 (app.js, index.html, .claude/launch.json)
+- Files created: 1 (09-capabilities-deck.md)
+- Bugs fixed: 2 CRITICAL, 1 LOW
+- Commits: 2 (b59fcd8, fbba846)
+- Tests added: 0 (browser-verified; no test harness in repo)
