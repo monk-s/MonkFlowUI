@@ -641,7 +641,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 function resolvePageRoute(pathname) {
   if (pathname === '/for-advisors') return renderForAdvisorsPage;
   if (pathname === '/case-studies/team-financial-strategies') return renderTfsCaseStudyPage;
+  if (pathname === '/book') return renderBookPage;
   return null;
+}
+
+// monkflow.io/book — shareable booking link for outreach emails. Renders the
+// landing page and opens the existing scheduling modal (same flow as #schedule).
+function renderBookPage() {
+  renderLandingPage();
+  setTimeout(() => showSchedulingModal(), 300);
 }
 
 // Navigate to a marketing/public PATH without a full page reload. Uses
