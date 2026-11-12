@@ -633,24 +633,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 // /case-studies/...). Hash routes are reserved for IN-PAGE actions
 // (e.g. #schedule auto-opens the scheduling modal). Clean URLs require
 // the catch-all rewrite in vercel.json — every non-/api/* path serves
-// /index.html, and this router decides what to render.
+// /shell.html, and this router decides what to render. (Known public
+// routes are also prerendered to static HTML by scripts/prerender.mjs.)
 
-// Map a pathname → the render function that fills #landing-container.
-// Returns null if no page-level route matches (caller renders the
-// default landing page in that case).
-function resolvePageRoute(pathname) {
-  if (pathname === '/for-advisors') return renderForAdvisorsPage;
-  if (pathname === '/case-studies/team-financial-strategies') return renderTfsCaseStudyPage;
-  if (pathname === '/book') return renderBookPage;
-  return null;
-}
-
-// monkflow.io/book — shareable booking link for outreach emails. Renders the
-// landing page and opens the existing scheduling modal (same flow as #schedule).
-function renderBookPage() {
-  renderLandingPage();
-  setTimeout(() => showSchedulingModal(), 300);
-}
+// Public pages (home, /solutions/*, /case-studies/*, /for-advisors, ...)
+// live in /marketing: content.js (copy), pages.js (HTML builders) and
+// site.js (the MK.routes table, per-page <head> metadata, click wiring).
+// This file only decides WHEN to show the public site; MK.mount() decides
+// what to render for a pathname, including the 404 page.
 
 // Navigate to a marketing/public PATH without a full page reload. Uses
 // history.pushState so back/forward work natively; the popstate listener
@@ -663,10 +653,12 @@ function renderBookPage() {
 // previously killed every nav button in the signed-in app. Keep these two
 // routers' names distinct.
 function navigateToPath(path) {
-  if (window.location.pathname === path && !window.location.hash) return;
+  const here = window.location.pathname + window.location.hash;
+  if (here === path) { window.scrollTo(0, 0); return; }
   window.history.pushState({}, '', path);
   // Scroll to top — replaces the default scroll-restoration the
-  // browser would do on a hard navigation.
+  // browser would do on a hard navigation. MK.mount() then scrolls to
+  // the #anchor if the path carries one.
   window.scrollTo(0, 0);
   // Re-dispatch as if a fresh visit landed on this URL.
   dispatchLandingRoute();
@@ -676,12 +668,7 @@ function navigateToPath(path) {
 // pathname. Called from showLanding() on initial load AND from
 // navigateToPath() / popstate after each route change.
 function dispatchLandingRoute() {
-  const renderer = resolvePageRoute(window.location.pathname);
-  if (renderer) {
-    renderer();
-  } else {
-    renderLandingPage();
-  }
+  MK.mount(window.location.pathname);
 }
 
 // Back/forward button handling. Without this, history.pushState would
@@ -713,6 +700,10 @@ function handleHashRoute() {
     // Legacy URL — migrate to /for-advisors
     window.history.replaceState({}, '', '/for-advisors');
     dispatchLandingRoute();
+  } else if (hash === '#landing-pricing') {
+    // Legacy pricing anchor — public pricing was removed 2026-11
+    window.history.replaceState({}, '', '/how-we-work#engagements');
+    dispatchLandingRoute();
   }
 }
 window.addEventListener('hashchange', handleHashRoute);
@@ -722,6 +713,11 @@ function showLanding() {
   document.getElementById('auth-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
   document.getElementById('landing-container').classList.remove('hidden');
+  // Public-site theme hooks (marketing/marketing.css). has-session is set
+  // by an inline script in the page head to avoid flashing the public page
+  // at signed-in users; clear it now that we know there is no session.
+  document.body.classList.add('mk-active');
+  document.documentElement.classList.remove('has-session');
   // Pathname dispatch: visiting /for-advisors directly renders that
   // page, visiting /case-studies/... renders the case study, anything
   // else renders the default landing.
@@ -731,6 +727,7 @@ function showLanding() {
 }
 
 function showAuth() {
+  document.body.classList.remove('mk-active');
   document.getElementById('landing-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
   document.getElementById('auth-container').classList.remove('hidden');
@@ -738,6 +735,7 @@ function showAuth() {
 }
 
 function showApp() {
+  document.body.classList.remove('mk-active');
   document.getElementById('landing-container').classList.add('hidden');
   document.getElementById('auth-container').classList.add('hidden');
   document.getElementById('app-container').classList.remove('hidden');
@@ -920,574 +918,6 @@ function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
 }
 
-// ── Landing Page Render ──────────────────────────────────
-function renderLandingPage() {
-  const container = document.getElementById('landing-container');
-
-  // Wealth-mgmt pivot 2026-04-29: services rewritten to lead with the
-  // productized offer (digital intake forms + CRM sync). Generic
-  // "automation/chatbots/analytics" descriptions are gone — they were
-  // diluting the wealth-mgmt positioning.
-  const services = [
-    { icon: icons.users, title: 'Digital Intake Forms', desc: 'New-client intake with conditional logic, document upload, and e-signature. Pre-fills directly into your CRM. Eliminates the 30–45 min paper-to-Redtail re-key per onboarding.' },
-    { icon: icons.workflow, title: 'CRM Auto-Sync', desc: 'Redtail, Wealthbox, Salesforce Financial Services Cloud. Contact + financial profile + custodian-of-record forms populate automatically — no manual entry.' },
-    { icon: icons.clock, title: 'Signed-PDF Generation', desc: 'Custodian forms, ADV delivery, IPS, beneficiary designations. Pre-filled, e-signed, archived in your CRM. Compliance-friendly out of the box.' },
-    { icon: icons.agents, title: 'Risk-Tolerance + IPS Drafting', desc: 'Scored questionnaire feeds an investment policy statement draft your CIO can review and ship in minutes — not 90.' },
-    { icon: icons.analytics, title: 'Onboarding Analytics', desc: 'Real-time dashboard: time-per-onboarding, drop-off points, partial-field rates. Quantifies the gain so you can defend the line item.' },
-    { icon: icons.help, title: 'Ongoing Care', desc: 'Direct line to the founder for bug fixes, custom-field additions, and CRM workflow tweaks. No ticket queues, no offshore teams.' },
-  ];
-
-  container.innerHTML = `
-    <nav class="landing-nav">
-      <div class="landing-nav-inner">
-        <div class="landing-nav-logo">
-          <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
-          <div class="logo-text">Monk<span>Flow</span></div>
-        </div>
-        <div class="landing-nav-links">
-          <a href="#landing-services" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Services</a>
-          <a href="#landing-testimonials" onclick="event.preventDefault();document.getElementById('landing-testimonials').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">Why MonkFlow</a>
-          <a href="#landing-about" onclick="event.preventDefault();document.getElementById('landing-about').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">About</a>
-          <a href="#landing-pricing" onclick="event.preventDefault();document.getElementById('landing-pricing').scrollIntoView({behavior:'smooth'});document.querySelector('.landing-nav-links').classList.remove('open');document.querySelector('.landing-nav-actions').classList.remove('open');">How It Works</a>
-        </div>
-        <div class="landing-nav-actions">
-          <button class="btn btn-ghost" onclick="showAuth()">Sign In</button>
-          <button class="btn btn-primary btn-sm" onclick="showSchedulingModal()">Schedule a Call</button>
-        </div>
-        <button class="landing-menu-btn" onclick="document.querySelector('.landing-nav-links').classList.toggle('open');document.querySelector('.landing-nav-actions').classList.toggle('open')">
-          ${icons.menu}
-        </button>
-      </div>
-    </nav>
-
-    <!-- Hero -->
-    <section class="landing-hero">
-      <div class="landing-hero-content">
-        <div class="hero-badge">For Independent Advisor Firms</div>
-        <h1 class="landing-hero-title">Digital Intake Forms +<br/>Redtail / Wealthbox <span class="text-accent">Auto-Sync</span></h1>
-        <p class="landing-hero-subtitle">MonkFlow builds the new-client onboarding stack for independent RIAs. Cut intake from 45 minutes to under 5. CRM populates automatically. Compliance-friendly signed PDFs out of the box.</p>
-        <div class="hero-actions">
-          <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Book a 15-min Intro Call</button>
-          <button class="btn btn-secondary btn-lg" onclick="navigateToPath('/for-advisors')">${icons.eye} View the $1,500 Audit →</button>
-        </div>
-        <div class="landing-hero-stats">
-          <div class="landing-stat"><div class="landing-stat-val">45→5 min</div><div class="landing-stat-label">Onboarding time (TFS, real client)</div></div>
-          <div class="landing-stat"><div class="landing-stat-val">2 weeks</div><div class="landing-stat-label">Typical build time</div></div>
-          <div class="landing-stat"><div class="landing-stat-val">Fixed-fee</div><div class="landing-stat-label">No hourly surprises</div></div>
-          <div class="landing-stat"><div class="landing-stat-val">Founder-led</div><div class="landing-stat-label">Direct line to the builder</div></div>
-        </div>
-      </div>
-      <div class="hero-glow"></div>
-    </section>
-
-    <!-- Services -->
-    <section id="landing-services" class="landing-section">
-      <div class="landing-section-inner">
-        <div class="section-header">
-          <div class="hero-badge">What We Build</div>
-          <h2 class="section-title">Custom Software Solutions</h2>
-          <p class="section-subtitle">Every tool we build is purpose-built for your workflows — not a one-size-fits-all template.</p>
-        </div>
-        <div class="landing-services-grid">
-          ${services.map(s => `
-            <div class="landing-service-card">
-              <div class="landing-service-icon">${s.icon}</div>
-              <h3>${s.title}</h3>
-              <p>${s.desc}</p>
-            </div>
-          `).join('')}
-        </div>
-
-        <div class="landing-ai-banner">
-          <div class="ai-banner-icon">${icons.zap}</div>
-          <div>
-            <h3>We Don't Just Use AI — We Implement It Where It Matters</h3>
-            <p>We study your operations, identify where AI can create real impact, and build custom tools that integrate intelligence into your existing processes. No gimmicks — just practical AI that solves real problems.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Why MonkFlow -->
-    <section id="landing-testimonials" class="landing-section landing-section-alt">
-      <div class="landing-section-inner">
-        <div class="section-header">
-          <div class="hero-badge">Why MonkFlow</div>
-          <h2 class="section-title">Built Different</h2>
-          <p class="section-subtitle">We're not a big agency. We're a focused founder-led shop that builds new-client onboarding for RIAs — and only that.</p>
-        </div>
-        <div class="landing-testimonials-grid">
-          <div class="landing-testimonial-card">
-            <div class="testimonial-quote" style="font-size:20px;font-weight:600;color:var(--accent);">No Templates</div>
-            <div style="color:var(--text-secondary);margin-top:8px;">Every tool we build is custom. We study your business first, then write code specifically for your workflows. You'll never get a reskinned template.</div>
-          </div>
-          <div class="landing-testimonial-card">
-            <div class="testimonial-quote" style="font-size:20px;font-weight:600;color:var(--accent);">Fixed-Fee Pricing</div>
-            <div style="color:var(--text-secondary);margin-top:8px;">No hourly billing, no surprise invoices. We scope the project, quote a price, and deliver. You know exactly what you're paying before we start.</div>
-          </div>
-          <div class="landing-testimonial-card">
-            <div class="testimonial-quote" style="font-size:20px;font-weight:600;color:var(--accent);">Real Support</div>
-            <div style="color:var(--text-secondary);margin-top:8px;">We don't disappear after launch. You get a direct line to the person who built your tool — not a support ticket queue.</div>
-          </div>
-        </div>
-        <!-- Client Results — TFS only (the one real, named client) -->
-        <div style="margin-top:40px;text-align:center;">
-          <p style="font-size:14px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;">Real Result — Team Financial Strategies (4-advisor RIA, Abilene TX)</p>
-          <div style="display:flex;justify-content:center;gap:32px;flex-wrap:wrap;">
-            <div style="text-align:center;">
-              <div style="font-size:28px;font-weight:700;color:var(--accent);">45 min → 5 min</div>
-              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">New-client setup time</div>
-            </div>
-            <div style="text-align:center;">
-              <div style="font-size:28px;font-weight:700;color:var(--accent);">2 weeks</div>
-              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">From kickoff to live</div>
-            </div>
-            <div style="text-align:center;">
-              <div style="font-size:28px;font-weight:700;color:var(--accent);">Redtail</div>
-              <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">CRM auto-sync + signed PDFs</div>
-            </div>
-          </div>
-          <div style="margin-top:24px;">
-            <a href="/case-studies/team-financial-strategies" onclick="event.preventDefault();navigateToPath('/case-studies/team-financial-strategies');" style="font-size:14px;color:var(--accent);text-decoration:underline;">Read the full case study →</a>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- About / AI Approach -->
-    <section id="landing-about" class="landing-section">
-      <div class="landing-section-inner">
-        <div class="section-header">
-          <div class="hero-badge">Our Approach</div>
-          <h2 class="section-title">How We Work</h2>
-          <p class="section-subtitle">Every project follows our proven four-step process.</p>
-        </div>
-        <div class="landing-process-grid">
-          <div class="landing-process-step">
-            <div class="process-number">1</div>
-            <div class="process-icon">${icons.search}</div>
-            <h3>Discover</h3>
-            <p>We learn your business inside and out before writing a single line of code.</p>
-          </div>
-          <div class="landing-process-step">
-            <div class="process-number">2</div>
-            <div class="process-icon">${icons.agents}</div>
-            <h3>Implement AI</h3>
-            <p>We integrate AI where it genuinely solves your problems — not everywhere.</p>
-          </div>
-          <div class="landing-process-step">
-            <div class="process-number">3</div>
-            <div class="process-icon">${icons.workflow}</div>
-            <h3>Build & Deploy</h3>
-            <p>Every tool is purpose-built for your specific workflows and processes.</p>
-          </div>
-          <div class="landing-process-step">
-            <div class="process-number">4</div>
-            <div class="process-icon">${icons.zap}</div>
-            <h3>Iterate & Scale</h3>
-            <p>We stay with you, refining tools as your business grows and evolves.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Advisor offer-ladder teaser — full ladder lives at /for-advisors -->
-    <section class="landing-section">
-      <div class="landing-section-inner" style="text-align:center;">
-        <div class="hero-badge">For Independent Advisor Firms</div>
-        <h2 class="section-title">Three productized tiers. Public pricing.</h2>
-        <p class="section-subtitle" style="max-width:720px;margin:0 auto 28px;">
-          Onboarding Audit · Intake Pro · Onboarding System.<br/>
-          Refundable audit anchor. Fixed-fee delivery. Founder-led builds for RIAs on Redtail, Wealthbox, or Salesforce FSC.
-        </p>
-        <button class="btn btn-primary btn-lg" onclick="navigateToPath('/for-advisors')">
-          ${icons.eye} See pricing + offer ladder →
-        </button>
-      </div>
-    </section>
-
-    <!-- Legacy id aliases so #wealth-intake and #landing-pricing anchors from
-         external links (LinkedIn posts, emails already sent) still land on a
-         reasonable place. The handleHashRoute shim above will catch
-         #wealth-intake specifically and redirect to /for-advisors. -->
-    <span id="wealth-intake"></span>
-    <span id="landing-pricing"></span>
-
-    <!-- Schedule CTA -->
-    <section id="landing-schedule" class="landing-section landing-section-alt">
-      <div class="landing-section-inner">
-        <div class="landing-cta">
-          <h2>Ready to Build Something Great?</h2>
-          <p>Every tool we build starts with a conversation. Tell us about your business, and we'll show you what's possible.</p>
-          <div class="landing-cta-actions">
-            <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Schedule Your Free Consultation</button>
-            <button class="btn btn-secondary btn-lg" onclick="showAuth()">${icons.eye} Sign In to Dashboard</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="landing-footer">
-      <div class="landing-footer-inner">
-        <div class="landing-footer-brand">
-          <div class="landing-nav-logo">
-            <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
-            <div class="logo-text">Monk<span>Flow</span></div>
-          </div>
-          <p>Custom software tools built around your business — not the other way around.</p>
-        </div>
-        <div class="landing-footer-links">
-          <div>
-            <h4>Offers</h4>
-            <a href="/for-advisors" onclick="event.preventDefault();navigateToPath('/for-advisors')">Onboarding Audit · $1,500</a>
-            <a href="/for-advisors" onclick="event.preventDefault();navigateToPath('/for-advisors')">Intake Pro · $7,500</a>
-            <a href="/for-advisors" onclick="event.preventDefault();navigateToPath('/for-advisors')">Onboarding System · $14,500</a>
-            <a href="#" onclick="event.preventDefault();document.getElementById('landing-services').scrollIntoView({behavior:'smooth'})">All services</a>
-          </div>
-          <div>
-            <h4>Company</h4>
-            <a href="#" onclick="event.preventDefault();document.getElementById('landing-about').scrollIntoView({behavior:'smooth'})">How We Work</a>
-            <a href="#" onclick="event.preventDefault();document.getElementById('landing-testimonials').scrollIntoView({behavior:'smooth'})">Why MonkFlow</a>
-            <a href="#" onclick="event.preventDefault();showSchedulingModal()">Schedule a Call</a>
-            <a href="#" onclick="event.preventDefault();showAuth()">Sign In</a>
-          </div>
-        </div>
-        <div class="landing-footer-bottom">
-          <span>&copy; 2026 MonkFlow. All rights reserved.</span>
-          <div style="display:flex;gap:16px;margin-top:8px;">
-            <a href="#" onclick="event.preventDefault();showLegalPage('privacy')" style="font-size:12px;color:var(--text-tertiary);">Privacy Policy</a>
-            <a href="#" onclick="event.preventDefault();showLegalPage('terms')" style="font-size:12px;color:var(--text-tertiary);">Terms of Service</a>
-          </div>
-        </div>
-      </div>
-    </footer>
-  `;
-}
-
-// ============================================================
-// PUBLISHED CASE STUDY — Team Financial Strategies
-// ============================================================
-// Reachable at monkflow.io/case-studies/team-financial-strategies. Permission to publish
-// granted by Jody Team (founding partner) on 2026-04-29 — full case
-// study draft is in docs/wealth-mgmt-pivot/02-tfs-case-study.md and
-// must be kept in sync with this page. The "What Jody said"
-// blockquote is intentionally placeholder text until Jody's exact
-// testimonial wording lands; do NOT AI-generate or paraphrase.
-function renderTfsCaseStudyPage() {
-  const container = document.getElementById('landing-container');
-  container.innerHTML = `
-    <nav class="landing-nav">
-      <div class="landing-nav-inner">
-        <div class="landing-nav-logo" onclick="navigateToPath('/')" style="cursor:pointer;">
-          <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
-          <div class="logo-text">Monk<span>Flow</span></div>
-        </div>
-        <div class="landing-nav-actions">
-          <button class="btn btn-ghost" onclick="navigateToPath('/')">← Back to MonkFlow</button>
-          <button class="btn btn-primary btn-sm" onclick="showSchedulingModal()">Schedule a Call</button>
-        </div>
-      </div>
-    </nav>
-
-    <article style="max-width:740px;margin:60px auto 80px;padding:0 24px;line-height:1.7;color:var(--text-primary);font-family:Georgia,serif;">
-      <div style="font-size:13px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px;">Case Study</div>
-      <h1 style="font-size:36px;line-height:1.2;margin:0 0 24px;font-family:-apple-system,sans-serif;">How Team Financial Strategies cut new-client onboarding from 45 minutes to under 5</h1>
-
-      <div style="background:var(--bg-secondary);padding:20px 24px;border-radius:8px;margin:24px 0 32px;font-size:14px;color:var(--text-secondary);">
-        <div style="display:grid;grid-template-columns:140px 1fr;gap:6px 16px;">
-          <div><strong>Firm:</strong></div><div>Team Financial Strategies</div>
-          <div><strong>Size:</strong></div><div>4 advisors, Abilene, TX</div>
-          <div><strong>Contact:</strong></div><div>Jody Team, founding partner</div>
-          <div><strong>CRM:</strong></div><div>Redtail</div>
-          <div><strong>Project length:</strong></div><div>2 weeks</div>
-          <div><strong>Outcome:</strong></div><div style="color:var(--accent);font-weight:600;">45 minutes → under 5 minutes per new-client onboarding</div>
-        </div>
-      </div>
-
-      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">The problem</h2>
-      <p>Team Financial Strategies, like most independent RIAs in their size bracket, ran new-client onboarding on a hybrid paper/PDF/CRM workflow. A new prospect coming on board meant:</p>
-      <ul style="margin:16px 0 16px 20px;font-family:-apple-system,sans-serif;">
-        <li style="margin-bottom:8px;">Paper or PDF intake forms — about 7 pages of personal, financial, beneficiary, and risk-tolerance data</li>
-        <li style="margin-bottom:8px;">An ops manager re-typing the data into Redtail one field at a time (≈25 min per client)</li>
-        <li style="margin-bottom:8px;">Schwab custodian-of-record forms signed one-by-one in DocuSign</li>
-        <li style="margin-bottom:8px;">Risk-tolerance questionnaire scored on a calculator</li>
-        <li style="margin-bottom:8px;">IPS drafted from a Word template by hand</li>
-      </ul>
-      <p>The total: roughly <strong>45 minutes per new-client onboarding</strong> — and the firm is the kind of place where the founding partner ends up doing the last leg of it personally.</p>
-      <p>The pain wasn't that this workflow was broken. The pain was that the firm couldn't scale it. Each new advisor added meant another set of clients meant another bottleneck on the ops manager's afternoon.</p>
-
-      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">What we built</h2>
-      <p>In 2 weeks, MonkFlow built:</p>
-      <ol style="margin:16px 0 16px 20px;font-family:-apple-system,sans-serif;">
-        <li style="margin-bottom:12px;"><strong>Custom intake form</strong> — branded to TFS, hosted on a TFS-controlled subdomain. 28 fields with conditional logic (joint vs individual, employed vs retired, beneficiary tree). Document upload (driver's license, trust docs). E-signature on submission.</li>
-        <li style="margin-bottom:12px;"><strong>Redtail auto-sync</strong> — on form submission, MonkFlow's webhook creates the Contact record in Redtail with all 28 fields populated. Household relationships built automatically. Custom fields the firm uses for client segmentation populated from form answers.</li>
-        <li style="margin-bottom:12px;"><strong>Signed-PDF generation</strong> — Schwab account application, beneficiary designation, IPS, and the firm's own engagement letter pre-filled from the intake data. Bundled into a single signing flow. Signed PDFs auto-archived to the Redtail client folder.</li>
-        <li style="margin-bottom:12px;"><strong>Compliance trail</strong> — every form submission, sync, and signature logged with timestamp and IP. Partial-field detection blocks incomplete intakes from reaching the CIO's inbox.</li>
-      </ol>
-
-      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">The result</h2>
-      <p style="font-size:22px;font-weight:600;color:var(--accent);font-family:-apple-system,sans-serif;margin:24px 0;">Onboarding time: 45 minutes → under 5 minutes.</p>
-      <p>That's 5 minutes for the ops manager to <em>review</em> the auto-populated record, not to do the work. The form does the work.</p>
-      <p>Other downstream wins:</p>
-      <ul style="margin:16px 0 16px 20px;font-family:-apple-system,sans-serif;">
-        <li style="margin-bottom:8px;"><strong>Funding speed:</strong> new accounts now fund within 2 business days of signing, vs 5–7 days under the old NIGO-prone workflow.</li>
-        <li style="margin-bottom:8px;"><strong>Compliance:</strong> Jody can pull a complete audit trail for any new client in under 30 seconds.</li>
-        <li style="margin-bottom:8px;"><strong>New-client experience:</strong> clients fill the intake on their own schedule (often before the kickoff meeting), so the meeting itself becomes about strategy, not paperwork.</li>
-      </ul>
-
-      <h2 style="font-family:-apple-system,sans-serif;font-size:24px;margin:40px 0 16px;">What we'd do differently</h2>
-      <p>The intake-form conditional logic was over-engineered in v1. We shipped 9 conditional branches when 4 would have covered 95% of client types. Jody's ops manager flagged it during week 1 of go-live; we collapsed branches the following week.</p>
-      <p><em>Lesson: ship fewer branches, add only when clients actually hit edge cases.</em></p>
-
-      <div style="margin-top:48px;padding:32px;background:var(--bg-secondary);border-radius:12px;text-align:center;">
-        <h3 style="font-family:-apple-system,sans-serif;font-size:22px;margin:0 0 12px;">Want this for your firm?</h3>
-        <p style="margin:0 0 20px;color:var(--text-secondary);">We took the same scope MonkFlow built for TFS and packaged it into three productized tiers. Public pricing. Fixed delivery windows. Refundable audit anchor.</p>
-        <button class="btn btn-primary btn-lg" onclick="navigateToPath('/for-advisors')">View the offer ladder →</button>
-        <button class="btn btn-secondary btn-lg" style="margin-left:12px;" onclick="showSchedulingModal()">Or book a 15-min call</button>
-      </div>
-
-      <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border-color);font-size:13px;color:var(--text-tertiary);text-align:center;">
-        Jody Team, Founding Partner · Team Financial Strategies · Abilene, TX
-      </div>
-    </article>
-
-    <footer class="landing-footer">
-      <div class="landing-footer-inner">
-        <div class="landing-footer-bottom">
-          <span>&copy; 2026 MonkFlow. All rights reserved.</span>
-        </div>
-      </div>
-    </footer>
-  `;
-}
-
-// ============================================================
-// FOR ADVISORS — Custom CRM extensions umbrella page
-// ============================================================
-// Reachable at monkflow.io/for-advisors. The deep partnership-friendly
-// page that the Wealthbox/Redtail playbook references — this is the URL
-// in cold outreach, LinkedIn DMs, and the partner pitch deck. Sections:
-// hero (CRM-extensions framing), product matrix (4 rows), built-around
-// CRM strip (text-as-logo to stay on safe ground for nominative fair use),
-// TFS case study summary card, offer ladder (relocated from the landing
-// page's #wealth-intake section), security teaser, CTA.
-function renderForAdvisorsPage() {
-  // Analytics: track /for-advisors views (the deep advisor pitch page that
-  // partnership emails + LinkedIn link to). Guarded no-op until Plausible live.
-  try { window.plausible && window.plausible('For Advisors View'); } catch (_) {}
-  const container = document.getElementById('landing-container');
-  container.innerHTML = `
-    <nav class="landing-nav">
-      <div class="landing-nav-inner">
-        <div class="landing-nav-logo" onclick="navigateToPath('/')" style="cursor:pointer;">
-          <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
-          <div class="logo-text">Monk<span>Flow</span></div>
-        </div>
-        <div class="landing-nav-actions">
-          <button class="btn btn-ghost" onclick="navigateToPath('/')">← Back to MonkFlow</button>
-          <button class="btn btn-primary btn-sm" onclick="showSchedulingModal()">Schedule a Call</button>
-        </div>
-      </div>
-    </nav>
-
-    <!-- Hero -->
-    <section class="landing-hero">
-      <div class="landing-hero-content">
-        <div class="hero-badge">Custom CRM extensions for independent advisors</div>
-        <h1 class="landing-hero-title">Make your Wealthbox<br/>or Redtail <span class="text-accent">fit your practice</span></h1>
-        <p class="landing-hero-subtitle">Your CRM does what it's built to do. We build the layer above it — digital intake, signed-PDF generation, custodian-of-record automation, client portals — that turns your CRM into the new-client onboarding system your firm actually needs. Real result: 45 min → under 5 min per onboarding for Team Financial Strategies (Abilene TX).</p>
-        <div class="hero-actions">
-          <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Book a 15-min intro call</button>
-          <button class="btn btn-secondary btn-lg" onclick="navigateToPath('/case-studies/team-financial-strategies')">${icons.eye} Read the TFS case study →</button>
-        </div>
-      </div>
-      <div class="hero-glow"></div>
-    </section>
-
-    <!-- Product matrix -->
-    <section class="landing-section">
-      <div class="landing-section-inner">
-        <div class="section-header">
-          <div class="hero-badge">What we build</div>
-          <h2 class="section-title">Forms · Portals · Automations · Deployments</h2>
-          <p class="section-subtitle">Four buckets. Everything we ship sits inside one of them.</p>
-        </div>
-        <div class="grid-2" style="max-width:1100px;margin:0 auto;gap:16px;">
-          <div class="card" style="padding:28px;">
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Forms</div>
-            <h3 style="margin:8px 0 10px;font-size:22px;">Digital intake + signed PDFs</h3>
-            <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0;">New-client intake forms with conditional logic, document upload, e-signature. Custodian-of-record paperwork pre-filled and bulk-signed. Forms write directly to your CRM — no re-typing, no NIGO rework.</p>
-          </div>
-          <div class="card" style="padding:28px;">
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Portals</div>
-            <h3 style="margin:8px 0 10px;font-size:22px;">Branded client portals</h3>
-            <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0;">Secure document vaults, signed-agreement archives, quarterly review prep, beneficiary updates. Branded to your firm. Clients sign in once and see everything that matters in one place.</p>
-          </div>
-          <div class="card" style="padding:28px;">
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Automations</div>
-            <h3 style="margin:8px 0 10px;font-size:22px;">CRM workflow automation</h3>
-            <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0;">Reminder sequences, household-relationship sync, risk-tolerance scoring, IPS draft generation. Built on your CRM's API — extends what you bought, doesn't replace it.</p>
-          </div>
-          <div class="card" style="padding:28px;">
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Deployments</div>
-            <h3 style="margin:8px 0 10px;font-size:22px;">Implementation + ongoing care</h3>
-            <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0;">We handle the build, the deploy, the training, and the bug-fix calls. Founder-led — direct line to the person who wrote the code. No ticket queues, no offshore teams, no "your CSM will get back to you in 48 hours."</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Built around (CRM logo strip — text-as-logo for nominative fair use) -->
-    <section class="landing-section landing-section-alt">
-      <div class="landing-section-inner">
-        <div class="section-header">
-          <div class="hero-badge">Built around your stack</div>
-          <h2 class="section-title">We work where your firm already works</h2>
-          <p class="section-subtitle">We don't sell a new CRM. We extend the one you've already invested in.</p>
-        </div>
-        <div style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;max-width:1000px;margin:0 auto;">
-          ${['Wealthbox', 'Redtail', 'Salesforce FSC', 'eMoney', 'RightCapital', 'MoneyGuidePro', 'Schwab Advisor Center', 'Fidelity AdvisorChannel'].map(name => `
-            <div style="padding:12px 20px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;font-size:14px;font-weight:600;color:var(--text-primary);">${name}</div>
-          `).join('')}
-        </div>
-        <p style="text-align:center;margin-top:24px;font-size:12px;color:var(--text-tertiary);max-width:700px;margin-left:auto;margin-right:auto;">
-          Don't see your stack? We've integrated with ten-plus advisor-platform APIs. If it has an API, we can build to it.
-        </p>
-      </div>
-    </section>
-
-    <!-- TFS case study summary -->
-    <section class="landing-section">
-      <div class="landing-section-inner">
-        <div class="section-header">
-          <div class="hero-badge">Proof</div>
-          <h2 class="section-title">One real client. One real number.</h2>
-        </div>
-        <div class="card" style="max-width:900px;margin:0 auto;padding:36px;">
-          <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:center;">
-            <div style="flex:1;min-width:280px;">
-              <div style="font-size:13px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Team Financial Strategies · 4 advisors, Abilene TX</div>
-              <h3 style="margin:0 0 12px;font-size:24px;">45 minutes → under 5 minutes per new-client onboarding</h3>
-              <p style="font-size:14px;color:var(--text-secondary);line-height:1.7;margin:0 0 20px;">Custom intake form + Redtail CRM auto-sync + signed-PDF generation. Built in two weeks. Jody Team (founding partner) available for reference calls to serious prospects.</p>
-              <button class="btn btn-primary" onclick="navigateToPath('/case-studies/team-financial-strategies')">Read the full case study →</button>
-            </div>
-            <div style="flex:0 0 auto;text-align:center;">
-              <div style="font-size:48px;font-weight:700;color:var(--accent);line-height:1;">9×</div>
-              <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px;">faster onboarding</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Offer ladder (relocated from landing page #wealth-intake) -->
-    <section class="landing-section landing-section-alt">
-      <div class="landing-section-inner">
-        <div class="section-header">
-          <div class="hero-badge">Productized offers · Public pricing</div>
-          <h2 class="section-title">Fixed-fee tiers — pick the scope that fits</h2>
-          <p class="section-subtitle">No discovery dance. No "let's hop on a call to scope it." Public pricing, fixed delivery windows, refundable audit anchor.</p>
-        </div>
-        <div class="grid-3" style="max-width:1100px;margin:0 auto;gap:16px;">
-          <!-- Tier 1: Audit -->
-          <div class="card" style="padding:28px;">
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 1 · Entry</div>
-            <h3 style="margin:8px 0 6px;font-size:22px;">Onboarding Audit</h3>
-            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$1,500</div>
-            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">7-day delivery</div>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
-              90-min Loom walkthrough of your current new-client onboarding flow + written report on the 3 highest-ROI fixes for your firm's stack.<br/><br/>
-              <strong style="color:var(--text-primary);">Refundable</strong> against any project tier booked within 30 days.
-            </div>
-            <button class="btn btn-secondary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book audit call</button>
-          </div>
-          <!-- Tier 2: Intake Pro (highlighted) -->
-          <div class="card" style="padding:28px;border:1px solid var(--accent);position:relative;">
-            <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;padding:4px 12px;border-radius:12px;font-size:11px;font-weight:700;">MOST POPULAR</div>
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 2 · Core</div>
-            <h3 style="margin:8px 0 6px;font-size:22px;">Intake Pro</h3>
-            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$7,500</div>
-            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">14-day delivery</div>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
-              Digital intake form + one CRM sync (Redtail, Wealthbox, or Salesforce FSC).<br/><br/>
-              Includes document upload, e-signature, conditional logic, automated CRM record creation, custodian-of-record form pre-fill.
-            </div>
-            <button class="btn btn-primary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book intro call</button>
-          </div>
-          <!-- Tier 3: Onboarding System -->
-          <div class="card" style="padding:28px;">
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Tier 3 · Full</div>
-            <h3 style="margin:8px 0 6px;font-size:22px;">Onboarding System</h3>
-            <div style="font-size:32px;font-weight:700;color:var(--accent);margin:8px 0;">$14,500</div>
-            <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:16px;">28-day delivery</div>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.7;">
-              The full TFS scope: intake + CRM sync + contract auto-population + signed-PDF generation + reminder sequences + financial-profile sync.<br/><br/>
-              The same system that took TFS from 45 min to under 5 per onboarding.
-            </div>
-            <button class="btn btn-secondary" style="width:100%;margin-top:20px;" onclick="showSchedulingModal()">Book intro call</button>
-          </div>
-        </div>
-        <!-- Optional retainer -->
-        <div style="max-width:1100px;margin:24px auto 0;padding:20px 28px;background:var(--bg-secondary);border-radius:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-          <div>
-            <div style="font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:1px;">Optional add-on</div>
-            <div style="font-size:18px;font-weight:600;margin-top:4px;">Care Retainer · $750/mo</div>
-            <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">Bug fixes, minor changes (≤4 hrs/mo), CRM custom-field additions. Cancel anytime.</div>
-          </div>
-        </div>
-        <!-- Founding Partner tier -->
-        <div style="max-width:1100px;margin:24px auto 0;padding:24px 28px;border:2px dashed var(--accent);border-radius:12px;background:rgba(0,204,106,0.05);">
-          <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;font-weight:700;">Founding Partner Tier · May 2026 Only</div>
-          <h3 style="margin:8px 0 6px;font-size:20px;">Onboarding System at $5,000 (vs $14,500 list)</h3>
-          <div style="font-size:14px;color:var(--text-secondary);line-height:1.7;">
-            First 2 RIA firms to engage in May 2026 get the full Tier 3 build at <strong style="color:var(--text-primary);">$5,000</strong> in exchange for: written case study with logo + advisor name, 30-min joint video testimonial, and 2–4 reference calls per quarter to future MonkFlow prospects.
-            <br/><br/>
-            <em>Not a discount — a partnership. We build the case-study evidence base together.</em>
-          </div>
-          <button class="btn btn-primary" style="margin-top:16px;" onclick="showSchedulingModal()">Apply for Founding Partner</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- Compliance / security teaser -->
-    <section class="landing-section">
-      <div class="landing-section-inner">
-        <div class="section-header">
-          <div class="hero-badge">Security posture</div>
-          <h2 class="section-title">What happens to client PII?</h2>
-        </div>
-        <div style="max-width:820px;margin:0 auto;font-size:15px;color:var(--text-secondary);line-height:1.7;text-align:center;">
-          <p>MonkFlow is a workflow layer, not a data store. Client information moves directly into your CRM — we don't persist PII or financial data on our infrastructure beyond the implementation window. TLS in transit, AES-256 at rest, single-operator access with 2FA. Cyber liability insurance and DPA on file.</p>
-          <p style="font-size:13px;color:var(--text-tertiary);margin-top:24px;">Full security overview available on request for CCO review.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Final CTA -->
-    <section class="landing-section landing-section-alt">
-      <div class="landing-section-inner">
-        <div class="landing-cta">
-          <h2>Ready to extend your CRM?</h2>
-          <p>Two ways to start. Both honest. Both fixed-fee. Both refundable against the next tier up.</p>
-          <div class="landing-cta-actions">
-            <button class="btn btn-primary btn-lg" onclick="showSchedulingModal()">${icons.clock} Book a 15-min intro call</button>
-            <button class="btn btn-secondary btn-lg" onclick="showSchedulingModal()">${icons.eye} Book the $1,500 Audit</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <footer class="landing-footer">
-      <div class="landing-footer-inner">
-        <div class="landing-footer-bottom">
-          <span>&copy; 2026 MonkFlow. All rights reserved.</span>
-        </div>
-      </div>
-    </footer>
-  `;
-}
-
 // ============================================================
 // AUTH PAGES
 // ============================================================
@@ -1622,7 +1052,7 @@ function renderAuthSignup() {
             </div>
             <div class="auth-feature">
               <div class="feature-check">${icons.check}</div>
-              Fixed-fee projects, no surprises
+              A clear scope before any build starts
             </div>
             <div class="auth-feature">
               <div class="feature-check">${icons.check}</div>
@@ -5604,11 +5034,16 @@ function showLegalPage(type) {
   requestAnimationFrame(() => { overlay.style.opacity = '1'; });
 }
 
-function showSchedulingModal() {
+// opts (all optional, passed by the public site's [data-book] buttons):
+//   intent   'audit' pre-selects the Workflow audit meeting type
+//   vertical pre-selects the "Your firm" option, e.g. 'Bank'
+function showSchedulingModal(opts) {
+  const schedIntent = (opts && opts.intent) || '';
+  const schedVertical = (opts && opts.vertical) || '';
   // Analytics: the highest-intent action on the site. Guarded — no-op until
   // the Plausible account is live (see index.html). Safe if window.plausible
   // is undefined because the inline stub in index.html always defines it.
-  try { window.plausible && window.plausible('Schedule Modal Opened'); } catch (_) {}
+  try { window.plausible && window.plausible('Schedule Modal Opened', { props: { intent: schedIntent || 'call', vertical: schedVertical || 'unspecified' } }); } catch (_) {}
   let currentStep = 1;
   let selectedDate = null;
   let selectedSlot = null;
@@ -5622,9 +5057,9 @@ function showSchedulingModal() {
         ${[1,2,3].map(s => `
           <div style="display:flex;align-items:center;gap:8px;">
             <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;
-              ${s < currentStep ? 'background:#00cc6a;color:#000;' : s === currentStep ? 'background:#00cc6a;color:#000;' : 'background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.4);'}
+              ${s < currentStep ? 'background:#7cc4ae;color:#000;' : s === currentStep ? 'background:#7cc4ae;color:#000;' : 'background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.4);'}
             ">${s < currentStep ? '&#10003;' : s}</div>
-            ${s < 3 ? `<div style="width:32px;height:2px;background:${s < currentStep ? '#00cc6a' : 'rgba(255,255,255,0.1)'};"></div>` : ''}
+            ${s < 3 ? `<div style="width:32px;height:2px;background:${s < currentStep ? '#7cc4ae' : 'rgba(255,255,255,0.1)'};"></div>` : ''}
           </div>
         `).join('')}
       </div>
@@ -5669,9 +5104,9 @@ function showSchedulingModal() {
       if (isDisabled) {
         style += 'opacity:0.25;cursor:not-allowed;';
       } else if (isSelected) {
-        style += 'background:#00cc6a;color:#000;font-weight:700;';
+        style += 'background:#7cc4ae;color:#000;font-weight:700;';
       } else if (isToday) {
-        style += 'border:2px solid #00cc6a;font-weight:600;';
+        style += 'border:2px solid #7cc4ae;font-weight:600;';
       }
       calendarCells += `<button style="${style}" ${isDisabled ? 'disabled' : `onclick="window._schedSelectDate('${dateStr}')"`}>${d}</button>`;
     }
@@ -5680,7 +5115,7 @@ function showSchedulingModal() {
 
     showModal(`
       <div class="modal-header">
-        <h2 class="modal-title">Schedule a Consultation</h2>
+        <h2 class="modal-title">Book a Working Session</h2>
         <button class="modal-close" onclick="closeModal()">${icons.x}</button>
       </div>
       ${stepIndicator}
@@ -5705,7 +5140,7 @@ function showSchedulingModal() {
     let slotsHtml = '';
     if (availableSlots === 'loading') {
       slotsHtml = `<div style="text-align:center;padding:40px 0;color:rgba(255,255,255,0.5);">
-        <div style="width:24px;height:24px;border:3px solid rgba(255,255,255,0.15);border-top-color:#00cc6a;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
+        <div style="width:24px;height:24px;border:3px solid rgba(255,255,255,0.15);border-top-color:#7cc4ae;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
         Loading available times...
       </div>`;
     } else if (availableSlots.every(s => s.booked)) {
@@ -5724,8 +5159,8 @@ function showSchedulingModal() {
           }
           const isActive = selectedSlot && selectedSlot.start === slot.start;
           return `<button onclick="window._schedSelectSlot('${slot.start}','${slot.end}')"
-            style="padding:10px 0;border-radius:8px;border:1px solid ${isActive ? '#00cc6a' : 'rgba(255,255,255,0.12)'};
-            background:${isActive ? '#00cc6a' : 'rgba(255,255,255,0.04)'};color:${isActive ? '#000' : 'rgba(255,255,255,0.85)'};
+            style="padding:10px 0;border-radius:8px;border:1px solid ${isActive ? '#7cc4ae' : 'rgba(255,255,255,0.12)'};
+            background:${isActive ? '#7cc4ae' : 'rgba(255,255,255,0.04)'};color:${isActive ? '#000' : 'rgba(255,255,255,0.85)'};
             font-size:13px;font-weight:${isActive ? '700' : '500'};cursor:pointer;transition:all 0.15s;text-align:center;">${slot.start} – ${slot.end}</button>`;
         }).join('')}
       </div>`;
@@ -5733,13 +5168,13 @@ function showSchedulingModal() {
 
     showModal(`
       <div class="modal-header">
-        <h2 class="modal-title">Schedule a Consultation</h2>
+        <h2 class="modal-title">Book a Working Session</h2>
         <button class="modal-close" onclick="closeModal()">${icons.x}</button>
       </div>
       ${stepIndicator}
       <div style="text-align:center;margin-bottom:16px;">
         <span style="font-size:13px;color:rgba(255,255,255,0.5);">${formattedDate}</span>
-        <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#00cc6a;cursor:pointer;font-size:12px;margin-left:8px;">Change</button>
+        <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#7cc4ae;cursor:pointer;font-size:12px;margin-left:8px;">Change</button>
       </div>
       ${slotsHtml}
       <div style="text-align:center;margin-top:8px;font-size:11px;color:rgba(255,255,255,0.35);">All times shown in Central Time (CT)</div>
@@ -5755,15 +5190,14 @@ function showSchedulingModal() {
 
     showModal(`
       <div class="modal-header">
-        <h2 class="modal-title">Schedule a Consultation</h2>
+        <h2 class="modal-title">Book a Working Session</h2>
         <button class="modal-close" onclick="closeModal()">${icons.x}</button>
       </div>
       ${stepIndicator}
-      <div style="background:rgba(0,204,106,0.08);border:1px solid rgba(0,204,106,0.2);border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
-        <div style="font-size:20px;">&#128197;</div>
+      <div style="background:rgba(124,196,174,0.08);border:1px solid rgba(124,196,174,0.2);border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
         <div>
           <div style="font-size:13px;font-weight:600;color:rgba(255,255,255,0.9);">${formattedDate} &middot; ${selectedSlot.start} - ${selectedSlot.end} CT</div>
-          <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#00cc6a;cursor:pointer;font-size:11px;padding:0;">Change date &amp; time</button>
+          <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#7cc4ae;cursor:pointer;font-size:11px;padding:0;">Change date &amp; time</button>
         </div>
       </div>
       <div class="form-group">
@@ -5779,12 +5213,16 @@ function showSchedulingModal() {
         <input type="text" id="sched-company" placeholder="Acme Corp (optional)" style="width:100%;" />
       </div>
       <div class="form-group">
+        <label class="form-label">Your firm</label>
+        <select id="sched-vertical">
+          <option value="">Select one (optional)</option>
+          ${['Commercial real estate', 'Bank', 'Investment firm', 'RIA / advisory firm', 'Other'].map(v => `<option value="${v}"${v === schedVertical ? ' selected' : ''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
         <label class="form-label">Meeting Type</label>
         <select id="sched-type">
-          <option value="Free Consultation">Free Consultation</option>
-          <option value="Technical Review">Technical Review</option>
-          <option value="Strategy Session">Strategy Session</option>
-          <option value="Quick Chat">Quick Chat</option>
+          ${[['Working session', 'Working session (20 min)'], ['Workflow audit', 'Ask about a workflow audit'], ['Project scoping', 'Project scoping'], ['Security review', 'Security or compliance questions']].map(([v, label]) => `<option value="${v}"${(schedIntent === 'audit' && v === 'Workflow audit') ? ' selected' : ''}>${label}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -5860,6 +5298,9 @@ function showSchedulingModal() {
     const company = document.getElementById('sched-company')?.value?.trim();
     const notes = document.getElementById('sched-notes')?.value?.trim();
     const meetingType = document.getElementById('sched-type')?.value;
+    // The booking API has no firm-type field, so it travels in the notes.
+    const firmType = document.getElementById('sched-vertical')?.value;
+    const notesWithFirm = [firmType ? `Firm type: ${firmType}` : '', notes || ''].filter(Boolean).join('\n');
 
     if (!name) { showToast('Please enter your name', 'error'); return; }
     if (!email || !email.includes('@')) { showToast('Please enter a valid email', 'error'); return; }
@@ -5879,7 +5320,7 @@ function showSchedulingModal() {
           bookerName: name,
           bookerEmail: email,
           company: company || undefined,
-          notes: notes || undefined,
+          notes: notesWithFirm || undefined,
           meetingType: meetingType,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago',
         }),
@@ -5892,7 +5333,7 @@ function showSchedulingModal() {
       const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
       showModal(`
         <div style="text-align:center;padding:20px 0;">
-          <div style="width:56px;height:56px;border-radius:50%;background:rgba(0,204,106,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">&#10003;</div>
+          <div style="width:56px;height:56px;border-radius:50%;background:rgba(124,196,174,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">&#10003;</div>
           <h2 style="margin:0 0 8px;font-size:20px;color:#fff;">You're Booked!</h2>
           <p style="color:rgba(255,255,255,0.6);font-size:14px;margin:0 0 24px;">Your consultation has been scheduled.</p>
           <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:16px;text-align:left;margin-bottom:24px;">
@@ -5916,6 +5357,7 @@ function showSchedulingModal() {
           <button class="btn btn-primary" onclick="closeModal()" style="min-width:160px;text-align:center;display:flex;align-items:center;justify-content:center;">Done</button>
         </div>
       `);
+      try { window.plausible && window.plausible('Booking Submitted', { props: { type: meetingType, vertical: firmType || 'unspecified' } }); } catch (_) {}
       showToast('Consultation booked successfully!');
     } catch (err) {
       const msg = err.message || 'Failed to book consultation';
