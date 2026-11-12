@@ -1,0 +1,9 @@
+# Only the static front end is deployed to Vercel. Everything below was
+# being served publicly at monkflow.io/<file> (for example /SALES_SCRIPT.md
+# and /CLAUDE.md). The API deploys separately on Railway from server/.
+server
+trading-bot
+docs
+scripts
+Client Kickoff
+*.md

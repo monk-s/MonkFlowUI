@@ -1,4 +1,8 @@
 {
+  "redirects": [
+    { "source": "/sprint", "destination": "/", "permanent": true },
+    { "source": "/sprint.html", "destination": "/", "permanent": true }
+  ],
   "rewrites": [
     {
       "source": "/api/:path*",
@@ -6,7 +10,7 @@
     },
     {
       "source": "/(.*)",
-      "destination": "/index.html"
+      "destination": "/shell.html"
     }
   ]
 }

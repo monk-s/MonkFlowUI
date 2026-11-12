@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- ============================================================
+       shell.html is the SOURCE for every public page's <head> and the
+       fallback Vercel serves for any path that has no static file
+       (the signed-in app, /book, unknown URLs).
+
+       index.html and the folders solutions/, case-studies/, for-advisors/,
+       capabilities/, how-we-work/ and security/ are GENERATED from this
+       file by `node scripts/prerender.mjs`. Edit this file and the files
+       in /marketing, then re-run the script. Do not edit the generated
+       pages by hand.
+
+       The tags between mk:head markers are rewritten per page by the
+       script (and at runtime by MK.setMeta in marketing/site.js).
+       ============================================================ -->
+  <!-- mk:head -->
+  <title>MonkFlow | Custom Software &amp; Practical AI for CRE, Banks and Investment Firms</title>
+  <meta name="description" content="Founder-led custom software, integrations and document automation for commercial real estate firms, banks and investment firms. Built around the systems you already run." />
+  <meta name="robots" content="noindex" />
+  <link rel="canonical" href="https://monkflow.io/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="MonkFlow" />
+  <meta property="og:title" content="MonkFlow | Custom Software &amp; Practical AI for CRE, Banks and Investment Firms" />
+  <meta property="og:description" content="Founder-led custom software, integrations and document automation for commercial real estate firms, banks and investment firms. Built around the systems you already run." />
+  <meta property="og:url" content="https://monkflow.io/" />
+  <meta property="og:image" content="https://monkflow.io/assets/og/home.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="MonkFlow | Custom Software &amp; Practical AI for CRE, Banks and Investment Firms" />
+  <meta name="twitter:description" content="Founder-led custom software, integrations and document automation for commercial real estate firms, banks and investment firms. Built around the systems you already run." />
+  <meta name="twitter:image" content="https://monkflow.io/assets/og/home.png" />
+  <script type="application/ld+json" id="mk-jsonld">{}</script>
+  <!-- /mk:head -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/lucide.min.css" />
+  <!-- Asset paths MUST be root-absolute (/foo), not relative (foo). On a
+       nested route like /case-studies/team-financial-strategies a relative
+       path resolves to /case-studies/app.js, which the vercel.json catch-all
+       rewrite serves as shell.html — the app then never boots and the page
+       renders blank. Single-segment routes (/for-advisors) happen to work
+       either way, which is what hid this. Keep the leading slash. -->
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+  <link rel="apple-touch-icon" href="/logo.svg" />
+  <meta name="theme-color" content="#12233a" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/marketing/marketing.css" />
+  <!-- Signed-in users go straight to the app: hide the prerendered public
+       page before first paint. showLanding() in app.js clears this class
+       if the session turns out to be invalid. -->
+  <script>try { if (localStorage.getItem('accessToken')) document.documentElement.classList.add('has-session'); } catch (e) {}</script>
+  <!-- Plausible analytics (privacy-first, no cookie banner). Tagged-events
+       build supports manual window.plausible('Event') calls for funnel
+       tracking. INERT until monkflow.io is added in the Plausible dashboard —
+       no API key needed in code; Plausible identifies by data-domain. -->
+  <script defer data-domain="monkflow.io" src="https://plausible.io/js/script.tagged-events.js"></script>
+  <script>window.plausible = window.plausible || function () { (window.plausible.q = window.plausible.q || []).push(arguments) };</script>
+</head>
+<body>
+  <!-- LANDING PAGE -->
+  <div id="landing-container" class="hidden"></div>
+
+  <!-- AUTH SCREENS -->
+  <div id="auth-container" class="hidden">
+    <div id="auth-login"></div>
+    <div id="auth-signup" class="hidden"></div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="app-container" class="app-layout hidden">
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar"></aside>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <header id="topbar" class="topbar"></header>
+      <main id="main-content" class="main-content"></main>
+    </div>
+  </div>
+
+  <!-- Modal Overlay -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div id="modal-content" class="modal-box"></div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Public site: copy, page builders, routes. Must load before app.js.
+       Root-absolute paths, same reason as above. -->
+  <script src="/marketing/content.js"></script>
+  <script src="/marketing/pages.js"></script>
+  <script src="/marketing/site.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

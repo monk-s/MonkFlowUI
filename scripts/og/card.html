@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<!-- Link-preview card (1200x630). Rendered to PNG by scripts/og/build.sh.
+     ?e=<eyebrow>&t=<headline> -->
+<html lang="en"><head><meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; }
+  body { width: 1200px; height: 630px; background: #f6f5f1; color: #0f1b2d; font-family: Inter, sans-serif; display: flex; flex-direction: column; justify-content: space-between; padding: 72px 80px; box-sizing: border-box; border-bottom: 14px solid #12233a; }
+  .brand { display: flex; align-items: center; gap: 16px; font-size: 34px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand img { width: 52px; height: 57px; }
+  .eyebrow { font-size: 21px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #5f6b7a; display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+  .eyebrow::before { content: ""; width: 44px; height: 2px; background: #8a682b; }
+  h1 { font-family: "Source Serif 4", Georgia, serif; font-weight: 600; font-size: 70px; line-height: 1.06; letter-spacing: -0.015em; margin: 0; max-width: 980px; text-wrap: balance; }
+  .foot { font-size: 23px; color: #3d4a5c; }
+</style></head>
+<body>
+  <div class="brand"><img src="../../logo-mark.svg" alt="">MonkFlow</div>
+  <div><div class="eyebrow" id="e"></div><h1 id="t"></h1></div>
+  <div class="foot">Custom software, integrations and practical AI &nbsp;·&nbsp; monkflow.io</div>
+  <script>const q = new URLSearchParams(location.search); e.textContent = q.get('e') || ''; t.textContent = q.get('t') || '';</script>
+</body></html>

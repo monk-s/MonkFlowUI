@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /shell.html
+
+Sitemap: https://monkflow.io/sitemap.xml

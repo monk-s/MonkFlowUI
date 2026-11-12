@@ -430,9 +430,24 @@ migrations/    (34 files) — 001 through 034
 
 ### Frontend
 ```
-app.js         (7,400+ lines) — Entire SPA
-styles.css     (3,570 lines)  — All styles
-index.html     (40 lines)     — Shell
+app.js         — Signed-in dashboard, auth screens, booking modal, router glue
+styles.css     — Dashboard styles (dark theme)
+shell.html     — Page shell + <head> source; Vercel's fallback for app/unknown URLs
+marketing/     — Public site (light theme, scoped under .mk)
+  content.js   — ALL public copy and data. Read its header rules before editing:
+                 no fabricated proof, no prices, no "fixed-fee", limited security claims
+  pages.js     — Pure HTML string builders (MK.pages.*)
+  site.js      — MK.routes (URLs + per-page metadata + JSON-LD), mount, click wiring
+  marketing.css
+scripts/
+  prerender.mjs                 — Generates index.html, <route>/index.html, sitemap.xml,
+                                  robots.txt. RUN AFTER ANY CHANGE to shell.html or marketing/.
+                                  `--check` fails if generated files are stale.
+  check-duplicate-functions.mjs — Guards the shared global scope
+  dev-server.mjs                — Local preview that mimics Vercel routing
+  og/build.sh                   — Regenerates assets/og/*.png link-preview images
+index.html, solutions/, case-studies/, for-advisors/, capabilities/,
+how-we-work/, security/ — GENERATED. Do not edit by hand.
 ```
 
 ### Database Tables (24 tables)
@@ -472,6 +487,7 @@ OWNER_USER_ID, STONKBOT_URL, STONKBOT_API_KEY, (+ Railway system vars)
 
 ### Before Every Commit:
 1. Run syntax check on ALL modified files
+1a. If shell.html or anything in marketing/ changed: `node scripts/prerender.mjs`, then `node scripts/check-duplicate-functions.mjs`
 2. Run affected SQL queries against production DB to verify they work
 3. `git diff` to review all changes
 4. Stage only relevant files (never `git add .`)
