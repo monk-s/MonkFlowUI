@@ -998,3 +998,77 @@ deployment itself.
 - Files created: 4 marketing sources, 4 scripts, 5 images, logo-mark.svg, .vercelignore, 13 generated
 - Bugs fixed: 1 HIGH, 3 MEDIUM, 2 LOW
 - Tests added: 0 (browser-verified; duplicate-function and prerender `--check` guards added)
+
+## Session: 2026-11-12 (2) — client sign-in and portal refresh
+
+Scope: owner-directed. Sign-in screens rebuilt, signed-in portal re-themed to
+match the public site, account creation made invite-only at the UI level.
+The 12-category audit was not run.
+
+### Audit Findings
+- [HIGH] **Password-reset emails led nowhere.** The server sends
+  `<FRONTEND_URL>?reset=<token>` but the front end never read `?reset=`, so
+  the link opened the homepage and the password could not be changed. FIXED:
+  new "Choose a new password" screen wired to `POST /auth/reset-password`.
+- [HIGH] **Help Center made false claims to every signed-in client:** "SOC 2
+  compliance", "end-to-end encryption", "data never leaves your designated
+  region", "SSO and 2FA for all accounts", "50+ integrations", CSV/JSON/PDF
+  exports, automatic retries, a 24-hour response promise, and a pricing FAQ.
+  It also told clients to build their own workflows in an editor they cannot
+  open. FIXED: rewritten for clients with only statements that are true today.
+- [MEDIUM] Team-invite emails link to `?invite=<token>`, also unhandled. It now
+  opens the create-login screen. NOT FIXED: there is no server endpoint that
+  accepts an invite token, so the new account is not linked to the inviting
+  team. Needs a server change.
+- [MEDIUM] Client dashboard "Quick Actions" offered admin actions (Create New
+  Workflow, Open Workflow Editor, Browse Integrations). FIXED: clients now get
+  project status, tools, analytics, message us, schedule a check-in.
+- [LOW] "Remember me" checkbox did nothing. Removed.
+- [LOW] Sign-in had no URL of its own. FIXED: `/sign-in` (bookmarkable; back
+  button returns to the site).
+- [LOW] Top bar showed "Dashboard" on tool/agent detail pages. FIXED.
+- [LOW] On phones the open sidebar was hidden behind the top bar. FIXED.
+
+### Improvements Made
+- Auth screens: one renderer (`renderAuthView`) with login, forgot, forgot-sent,
+  reset and join views; real `<form>`s with labels, autocomplete hints for
+  password managers, show/hide password, inline errors announced to screen
+  readers, busy state on submit, email carried between views, 16px inputs so
+  iOS does not zoom.
+- Invite-only: no link to account creation anywhere. `/join` still works when
+  shared directly. The `/auth/signup` API is unchanged (still open).
+- Portal theme: `styles.css` tokens re-pointed to the public site's palette
+  (off-white, white cards, navy ink, evergreen accent, navy sidebar via scoped
+  tokens). ~310 hard-coded neon/dark colors in `app.js` converted. Primary
+  buttons are navy. Glows removed. Serif page titles.
+- Client-facing emoji replaced with icons (onboarding modal, dashboard status
+  tiles, agents, booking). Admin-only screens still use some emoji.
+- Booking modal follows the light theme everywhere; titled "Schedule a
+  check-in" when opened inside the portal.
+
+### Verification
+Headless Chrome against `scripts/dev-server.mjs` plus a throwaway mock API with
+sample data (not committed). Sign-in: empty/invalid input, wrong password,
+success, sign-out, forgot → sent, reset (short, mismatch, success, expired
+link → send new), join, `?invite=`, signed-in visit to `/sign-in`, back and
+forward buttons, 390px. Portal: every client page and modal screenshotted and
+reviewed; admin dashboard, outreach, integrations, workflow editor and agent
+detail smoke-tested. Public-site regression suite re-run: all pass, zero
+console errors. NOT verified: anything against the real API or real data, the
+Stonk Bot page, and real email links end to end.
+
+### Next Session Priority
+1. After deploy: sign in on monkflow.io/sign-in with a real account; request a
+   reset email and follow the link.
+2. Decide whether clients should see Run Now / Pause / Delete / Edit in Builder
+   and the "Est. Cost (incl. 10% fee)" tile on a tool's detail page.
+3. Settings → Notifications toggles do not save anything. Wire up or remove.
+4. Privacy/Terms text names getmonkflow.com and nathan@getmonkflow.com.
+5. Server: close public `/auth/signup` (invite token), add invite acceptance,
+   and restyle the transactional emails (still neon green).
+6. Remove unused `.landing-*` rules from `styles.css`.
+
+### Metrics
+- Files modified: 6 (app.js, styles.css, shell.html, marketing/marketing.css, CLAUDE.md, AUDIT_LOG.md) + 11 regenerated pages
+- Bugs fixed: 2 HIGH, 1 MEDIUM, 4 LOW (1 MEDIUM needs server work)
+- Tests added: 0 (browser-verified)

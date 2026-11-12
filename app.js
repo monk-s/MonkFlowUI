@@ -606,27 +606,38 @@ async function loadAgentsData() {
 
 // ── Initialize ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  // A password-reset link always opens the reset screen, signed in or not.
+  const bootAuth = authViewForLocation();
+  if (bootAuth && bootAuth.view === 'reset') { showAuth(bootAuth); return; }
   if (isAuthenticated) {
     try {
       const data = await api.get('/users/me');
       if (data && data.user) {
         currentUser = data.user;
+        // A signed-in visitor to /sign-in or /join belongs in the portal.
+        if (authViewForLocation()) window.history.replaceState({}, '', '/');
         showApp();
       } else {
         api.clearTokens();
         isAuthenticated = false;
-        showLanding();
+        showPublic();
       }
     } catch {
       // Token invalid — show landing
       api.clearTokens();
       isAuthenticated = false;
-      showLanding();
+      showPublic();
     }
   } else {
-    showLanding();
+    showPublic();
   }
 });
+
+// Not signed in: the URL decides between the auth screens and the site.
+function showPublic() {
+  const auth = authViewForLocation();
+  if (auth) showAuth(auth); else showLanding();
+}
 
 // ── Client-side router ────────────────────────────────────
 // Pathname-based dispatch for top-level pages (landing, /for-advisors,
@@ -674,11 +685,9 @@ function dispatchLandingRoute() {
 // Back/forward button handling. Without this, history.pushState would
 // change the URL but the page wouldn't re-render on browser back.
 window.addEventListener('popstate', () => {
-  // Only re-dispatch when we're showing the landing/public surface —
-  // auth-container and app-container have their own state.
-  if (!document.getElementById('landing-container').classList.contains('hidden')) {
-    dispatchLandingRoute();
-  }
+  // The signed-in portal has its own state and ignores the address bar.
+  if (!document.getElementById('app-container').classList.contains('hidden')) return;
+  showPublic();
 });
 
 // ── Hash route handler (for in-page actions only) ─────────
@@ -718,6 +727,8 @@ function showLanding() {
   // at signed-in users; clear it now that we know there is no session.
   document.body.classList.add('mk-active');
   document.documentElement.classList.remove('has-session');
+  // /sign-in and /join are not public pages; e.g. after signing out.
+  if (authViewForLocation()) window.history.replaceState({}, '', '/');
   // Pathname dispatch: visiting /for-advisors directly renders that
   // page, visiting /case-studies/... renders the case study, anything
   // else renders the default landing.
@@ -726,15 +737,22 @@ function showLanding() {
   handleHashRoute();
 }
 
-function showAuth() {
+// Show the auth screens. `opts` picks the view ({ view, resetToken });
+// with no opts it is the sign-in screen, and the address becomes /sign-in
+// so the screen can be bookmarked and the back button returns to the site.
+function showAuth(opts) {
   document.body.classList.remove('mk-active');
+  document.documentElement.classList.remove('has-session');
   document.getElementById('landing-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
   document.getElementById('auth-container').classList.remove('hidden');
-  renderAuthLogin();
+  if (!opts && !authViewForLocation()) window.history.pushState({}, '', '/sign-in');
+  window.scrollTo(0, 0);
+  renderAuthView((opts && opts.view) || 'login', opts && opts.resetToken ? { resetToken: opts.resetToken } : undefined);
 }
 
 function showApp() {
+  document.title = 'Client portal | MonkFlow';
   document.body.classList.remove('mk-active');
   document.getElementById('landing-container').classList.add('hidden');
   document.getElementById('auth-container').classList.add('hidden');
@@ -770,22 +788,22 @@ function showOnboarding() {
   if (isAdmin()) { closeOnboarding(); return; }
 
   const steps = [
-    { icon: '&#128640;', title: 'Your Client Portal', desc: 'This is your dedicated dashboard where you can monitor all the tools we build for your business — workflows, AI agents, and more.', action: 'navigateTo("workflows")', btn: 'View My Tools' },
-    { icon: '&#128200;', title: 'Real-Time Analytics', desc: 'Track exactly how your tools are performing — execution counts, success rates, and trends over time.', action: 'navigateTo("analytics")', btn: 'View Analytics' },
-    { icon: '&#128172;', title: 'Direct Support', desc: 'Need changes or have questions? You have a direct line to the team that built your tools. No ticket queues.', action: 'navigateTo("help")', btn: 'Get Help' },
+    { icon: icons.dashboard, title: 'Your tools', desc: 'Everything we have built for your firm, with what is live and what is still in progress.', action: 'navigateTo("workflows")', btn: 'View My Tools' },
+    { icon: icons.analytics, title: 'How they are running', desc: 'Run counts, success rates and trends, so you can see the work your tools are doing.', action: 'navigateTo("analytics")', btn: 'View Analytics' },
+    { icon: icons.help, title: 'A direct line', desc: 'Questions or changes go straight to the engineer who built your system. There is no ticket queue.', action: 'navigateTo("help")', btn: 'Get Help' },
   ];
 
   showModal(`
     <div class="modal-header">
-      <h2 class="modal-title">Welcome to Your Portal!</h2>
+      <h2 class="modal-title">Welcome to your portal</h2>
       <button class="modal-close" onclick="closeOnboarding()">${icons.x}</button>
     </div>
     <div style="padding:24px;">
-      <p style="color:var(--text-secondary);margin-bottom:24px;font-size:14px;">Your custom tools and automation dashboard is ready. Here's what you'll find:</p>
+      <p style="color:var(--text-secondary);margin-bottom:24px;font-size:14px;">Here is what you will find inside.</p>
       <div style="display:flex;flex-direction:column;gap:16px;">
         ${steps.map((s, i) => `
           <div style="display:flex;align-items:flex-start;gap:16px;padding:16px;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border);">
-            <div style="font-size:28px;flex-shrink:0;width:40px;text-align:center;">${s.icon}</div>
+            <div style="flex-shrink:0;width:40px;height:40px;border-radius:8px;background:var(--accent-glow);color:var(--accent);display:flex;align-items:center;justify-content:center;">${s.icon}</div>
             <div style="flex:1;">
               <h4 style="margin:0 0 4px;font-size:14px;color:var(--text-primary);">${s.title}</h4>
               <p style="margin:0 0 10px;font-size:13px;color:var(--text-tertiary);">${s.desc}</p>
@@ -807,42 +825,57 @@ function closeOnboarding() {
 }
 
 // ── Auth Handlers ──────────────────────────────────────
+function authValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || ''); }
+
 async function handleLogin() {
-  const emailEl = document.querySelector('#auth-login input[type="email"]');
-  const passEl = document.querySelector('#auth-login input[type="password"]');
-  const email = emailEl?.value?.trim();
-  const password = passEl?.value;
-  if (!email || !password) { showToast('Please enter email and password', 'error'); return; }
+  const email = document.getElementById('auth-email')?.value?.trim();
+  const password = document.getElementById('auth-password')?.value;
+  if (!authValidEmail(email)) return authError('Enter the email address you sign in with.', 'auth-email');
+  if (!password) return authError('Enter your password.', 'auth-password');
+  authError('');
+  const done = authBusy('Signing in…');
   try {
     const data = await api.post('/auth/login', { email, password });
     api.setTokens(data.accessToken, data.refreshToken);
     currentUser = data.user;
     isAuthenticated = true;
+    authState = { view: 'login', email: '', resetToken: '', notice: '' };
+    // The portal has no URLs of its own; leave /sign-in so a refresh or a
+    // later sign-out lands somewhere sensible.
+    window.history.replaceState({}, '', '/');
     showApp();
     showToast(`Welcome back, ${data.user.first_name}!`);
   } catch (err) {
-    showToast(err.message || 'Login failed', 'error');
+    done();
+    const offline = err instanceof TypeError;
+    authError(offline ? 'We could not reach the server. Check your connection and try again.' : (err.message || 'That email and password do not match.'), offline ? null : 'auth-password');
   }
 }
 
 async function handleSignup() {
-  const inputs = document.querySelectorAll('#auth-signup input');
-  const firstName = inputs[0]?.value?.trim();
-  const lastName = inputs[1]?.value?.trim();
-  const email = inputs[2]?.value?.trim();
-  const password = inputs[3]?.value;
-  const company = inputs[4]?.value?.trim();
-  if (!firstName || !lastName || !email || !password) { showToast('Please fill all required fields', 'error'); return; }
-  if (password.length < 8) { showToast('Password must be at least 8 characters', 'error'); return; }
+  const val = (id) => document.getElementById(id)?.value?.trim();
+  const firstName = val('auth-first-name');
+  const lastName = val('auth-last-name');
+  const email = val('auth-email');
+  const company = val('auth-company');
+  const password = document.getElementById('auth-password')?.value;
+  if (!firstName) return authError('Enter your first name.', 'auth-first-name');
+  if (!lastName) return authError('Enter your last name.', 'auth-last-name');
+  if (!authValidEmail(email)) return authError('Enter a valid work email address.', 'auth-email');
+  if (!password || password.length < 8) return authError('Choose a password of at least 8 characters.', 'auth-password');
+  authError('');
+  const done = authBusy('Creating your login…');
   try {
     const data = await api.post('/auth/signup', { email, password, firstName, lastName, company });
     api.setTokens(data.accessToken, data.refreshToken);
     currentUser = data.user;
     isAuthenticated = true;
+    window.history.replaceState({}, '', '/');
     showApp();
-    showToast('Account created! Welcome to Monk Flow.');
+    showToast('Your login is ready. Welcome to MonkFlow.');
   } catch (err) {
-    showToast(err.message || 'Signup failed', 'error');
+    done();
+    authError(err instanceof TypeError ? 'We could not reach the server. Check your connection and try again.' : (err.message || 'We could not create your login. Please try again.'));
   }
 }
 
@@ -859,14 +892,39 @@ async function handleLogout() {
 }
 
 async function handleForgotPassword() {
-  const emailEl = document.querySelector('#auth-login input[type="email"]');
-  const email = emailEl?.value?.trim();
-  if (!email) { showToast('Please enter your email address first', 'error'); return; }
+  const email = document.getElementById('auth-email')?.value?.trim();
+  if (!authValidEmail(email)) return authError('Enter the email address you sign in with.', 'auth-email');
+  authError('');
+  const done = authBusy('Sending…');
   try {
     await api.post('/auth/forgot-password', { email });
-    showToast('If that email exists, a password reset link has been sent.', 'info');
-  } catch {
-    showToast('If that email exists, a password reset link has been sent.', 'info');
+  } catch (err) {
+    // A network failure is worth telling the person about. Anything else
+    // gets the same neutral confirmation, so this screen cannot be used to
+    // find out which emails have accounts.
+    if (err instanceof TypeError) { done(); return authError('We could not reach the server. Check your connection and try again.'); }
+  }
+  renderAuthView('forgot-sent', { email });
+}
+
+async function handleResetPassword() {
+  const password = document.getElementById('auth-password')?.value || '';
+  const confirm = document.getElementById('auth-password-confirm')?.value || '';
+  if (password.length < 8) return authError('Choose a password of at least 8 characters.', 'auth-password');
+  if (password !== confirm) return authError('The two passwords do not match.', 'auth-password-confirm');
+  authError('');
+  const done = authBusy('Saving…');
+  try {
+    await api.post('/auth/reset-password', { token: authState.resetToken, newPassword: password });
+    // Drop the one-time token from the address bar and history.
+    window.history.replaceState({}, '', '/sign-in');
+    renderAuthView('login', { resetToken: '', notice: 'Your password has been updated. Sign in with your new password.' });
+  } catch (err) {
+    done();
+    if (err instanceof TypeError) return authError('We could not reach the server. Check your connection and try again.');
+    const box = document.getElementById('auth-error');
+    box.innerHTML = 'This reset link has expired or has already been used. <button type="button" class="auth-link" onclick="window.history.replaceState({}, \'\', \'/sign-in\');renderAuthView(\'forgot\')">Send a new link</button>';
+    box.hidden = false;
   }
 }
 
@@ -919,150 +977,230 @@ function closeModal() {
 }
 
 // ============================================================
-// AUTH PAGES
+// AUTH SCREENS
 // ============================================================
-function renderAuthLogin() {
-  document.getElementById('auth-login').innerHTML = `
-    <div class="auth-screen">
-      <div class="auth-left">
-        <div class="auth-form-wrapper">
-          <div class="auth-logo">
-            <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
-            <div class="logo-text">Monk<span>Flow</span></div>
-          </div>
-          <h1 class="auth-heading">Welcome back</h1>
-          <p class="auth-subheading">Sign in to your MonkFlow dashboard to manage your projects.</p>
-          <div class="auth-form">
-            <div class="form-group">
-              <label class="form-label">Email</label>
-              <input type="email" placeholder="you@company.com" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Password</label>
-              <input type="password" placeholder="Enter your password" onkeydown="if(event.key==='Enter')handleLogin()" />
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
-                <input type="checkbox" style="width:auto;" /> Remember me
-              </label>
-              <a href="#" onclick="event.preventDefault();handleForgotPassword();" style="font-size:12px;">Forgot password?</a>
-            </div>
-            <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="handleLogin()">
-              Sign In
-            </button>
-          </div>
-          <div class="auth-footer">
-            Don't have an account? <a href="#" onclick="event.preventDefault();renderAuthSignup()">Sign up free</a>
-          </div>
-          <div style="text-align:center;margin-top:12px;">
-            <a href="#" onclick="event.preventDefault();showLanding();" style="font-size:12px;color:var(--text-tertiary);">&larr; Back to home</a>
-          </div>
-        </div>
-      </div>
-      <div class="auth-right">
-        <div class="auth-hero-content">
-          <h2>Custom Software<br/><span style="color:var(--accent)">Built for You</span></h2>
-          <p>We build curated tools for businesses — onboarding portals, scheduling systems, AI chatbots, and more. Not templates. Not generic SaaS. Software built around your business.</p>
-          <div class="auth-features">
-            <div class="auth-feature">
-              <div class="feature-check">${icons.check}</div>
-              Custom onboarding & scheduling tools
-            </div>
-            <div class="auth-feature">
-              <div class="feature-check">${icons.check}</div>
-              AI implemented where it matters most
-            </div>
-            <div class="auth-feature">
-              <div class="feature-check">${icons.check}</div>
-              Founder-led — direct line to the builder
-            </div>
-            <div class="auth-feature">
-              <div class="feature-check">${icons.check}</div>
-              Focused on independent advisor firms (RIAs)
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-  document.getElementById('auth-login').classList.remove('hidden');
-  document.getElementById('auth-signup').classList.add('hidden');
+// One renderer, four views, all drawn into #auth-login:
+//   login   /sign-in            the client sign-in screen
+//   forgot  /sign-in (in place) request a password-reset email
+//   reset   /?reset=<token>     set a new password (link from that email)
+//   join    /join, /?invite=…   create an account
+//
+// Accounts are invite-only: nothing on the public site or the sign-in
+// screen links to the join view. Send a client monkflow.io/join to let
+// them create their login. (The signup API itself is still open; closing
+// it needs a server change.)
+//
+// Styles: the AUTH SCREENS block in styles.css.
+const AUTH_PATHS = { '/sign-in': 'login', '/join': 'join' };
+let authState = { view: 'login', email: '', resetToken: '', notice: '' };
+
+// Which auth view, if any, does this URL ask for?
+function authViewForLocation() {
+  const q = new URLSearchParams(window.location.search);
+  if (q.get('reset')) return { view: 'reset', resetToken: q.get('reset') };
+  if (q.get('invite')) return { view: 'join' };
+  const view = AUTH_PATHS[window.location.pathname.replace(/\/+$/, '') || '/'];
+  return view ? { view } : null;
 }
 
-function renderAuthSignup() {
-  document.getElementById('auth-login').classList.add('hidden');
-  document.getElementById('auth-signup').classList.remove('hidden');
-  document.getElementById('auth-signup').innerHTML = `
+function authShell(formHtml) {
+  return `
     <div class="auth-screen">
       <div class="auth-left">
-        <div class="auth-form-wrapper">
-          <div class="auth-logo">
-            <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
-            <div class="logo-text">Monk<span>Flow</span></div>
-          </div>
-          <h1 class="auth-heading">Get started</h1>
-          <p class="auth-subheading">Create your account to explore what MonkFlow can build for your business.</p>
-          <div class="auth-form">
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">First Name</label>
-                <input type="text" placeholder="Nathan" />
-              </div>
-              <div class="form-group">
-                <label class="form-label">Last Name</label>
-                <input type="text" placeholder="Linder" />
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Work Email</label>
-              <input type="email" placeholder="you@company.com" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Password</label>
-              <input type="password" placeholder="Min 8 characters" />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Company Name</label>
-              <input type="text" placeholder="Your company" onkeydown="if(event.key==='Enter')handleSignup()" />
-            </div>
-            <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;" onclick="handleSignup()">
-              Create Account
-            </button>
-          </div>
-          <div class="auth-footer">
-            Already have an account? <a href="#" onclick="event.preventDefault();renderAuthLogin()">Sign in</a>
-          </div>
-          <div style="text-align:center;margin-top:12px;">
-            <a href="#" onclick="event.preventDefault();showLanding();" style="font-size:12px;color:var(--text-tertiary);">&larr; Back to home</a>
-          </div>
+        <div class="auth-top">
+          <a href="/" class="auth-logo" onclick="event.preventDefault();leaveAuth()"><img src="/logo-mark.svg" alt="" width="28" height="31">MonkFlow</a>
+          <a href="/" class="auth-back" onclick="event.preventDefault();leaveAuth()">&larr; Back to monkflow.io</a>
+        </div>
+        <div class="auth-form-wrapper">${formHtml}</div>
+        <div class="auth-legal">
+          <a href="#" onclick="event.preventDefault();showLegalPage('privacy')">Privacy policy</a> &nbsp;·&nbsp;
+          <a href="#" onclick="event.preventDefault();showLegalPage('terms')">Terms of service</a>
         </div>
       </div>
       <div class="auth-right">
         <div class="auth-hero-content">
-          <h2>Let's Build<br/><span style="color:var(--accent)">Something Great</span></h2>
-          <p>We build custom software tools around your business — not the other way around.</p>
+          <div class="auth-eyebrow">Client portal</div>
+          <h2>Everything we have built for you, in one place.</h2>
           <div class="auth-features">
-            <div class="auth-feature">
-              <div class="feature-check">${icons.check}</div>
-              Free consultation call
-            </div>
-            <div class="auth-feature">
-              <div class="feature-check">${icons.check}</div>
-              AI-powered custom solutions
-            </div>
-            <div class="auth-feature">
-              <div class="feature-check">${icons.check}</div>
-              A clear scope before any build starts
-            </div>
-            <div class="auth-feature">
-              <div class="feature-check">${icons.check}</div>
-              Ongoing support & iteration
-            </div>
+            <div class="auth-feature"><strong>Project status</strong><span>Where each build stands, with updates and files from us.</span></div>
+            <div class="auth-feature"><strong>Your tools</strong><span>What is live, how often it runs and whether anything needs attention.</span></div>
+            <div class="auth-feature"><strong>A direct line</strong><span>Reach the engineer who built your system. There is no ticket queue.</span></div>
           </div>
         </div>
       </div>
-    </div>
-  `;
+    </div>`;
+}
+
+function authPasswordField(id, label, autocomplete, extra) {
+  return `
+    <div class="form-group">
+      <label class="form-label" for="${id}"><span>${label}</span>${extra || ''}</label>
+      <div class="auth-password">
+        <input type="password" id="${id}" name="${id}" autocomplete="${autocomplete}" required />
+        <button type="button" class="auth-password-toggle" aria-controls="${id}" aria-pressed="false" onclick="toggleAuthPassword(this)">Show</button>
+      </div>
+    </div>`;
+}
+
+function authViewHtml() {
+  const email = escapeHtml(authState.email || '');
+  const notice = authState.notice ? `<div class="auth-message success" role="status">${escapeHtml(authState.notice)}</div>` : '';
+  const error = '<div class="auth-message error" id="auth-error" role="alert" hidden></div>';
+
+  if (authState.view === 'forgot') {
+    return `
+      <h1 class="auth-heading">Reset your password</h1>
+      <p class="auth-subheading">Enter the email you sign in with and we will send you a link to choose a new password.</p>
+      <form class="auth-form" onsubmit="event.preventDefault();handleForgotPassword()" novalidate>
+        ${error}
+        <div class="form-group">
+          <label class="form-label" for="auth-email">Email</label>
+          <input type="email" id="auth-email" name="email" autocomplete="username" inputmode="email" value="${email}" required />
+        </div>
+        <button type="submit" class="btn btn-primary" id="auth-submit">Send reset link</button>
+      </form>
+      <div class="auth-footer"><button type="button" class="auth-link" onclick="renderAuthView('login')">&larr; Back to sign in</button></div>`;
+  }
+
+  if (authState.view === 'forgot-sent') {
+    return `
+      <h1 class="auth-heading">Check your email</h1>
+      <p class="auth-subheading">If there is an account for <strong>${email}</strong>, a reset link is on its way. The link works for one hour.</p>
+      <p class="auth-subheading">Nothing after a few minutes? Check your spam folder, or try again with the address your account was set up with.</p>
+      <div class="auth-form">
+        <button type="button" class="btn btn-primary" onclick="renderAuthView('login')">Back to sign in</button>
+        <button type="button" class="auth-link" style="align-self:center" onclick="renderAuthView('forgot')">Use a different email</button>
+      </div>`;
+  }
+
+  if (authState.view === 'reset') {
+    return `
+      <h1 class="auth-heading">Choose a new password</h1>
+      <p class="auth-subheading">You will use it to sign in to your MonkFlow client portal.</p>
+      <form class="auth-form" onsubmit="event.preventDefault();handleResetPassword()" novalidate>
+        ${error}
+        ${authPasswordField('auth-password', 'New password', 'new-password')}
+        <div class="auth-hint" style="margin-top:-10px">At least 8 characters.</div>
+        ${authPasswordField('auth-password-confirm', 'Confirm new password', 'new-password')}
+        <button type="submit" class="btn btn-primary" id="auth-submit">Save new password</button>
+      </form>
+      <div class="auth-footer"><button type="button" class="auth-link" onclick="renderAuthView('login')">&larr; Back to sign in</button></div>`;
+  }
+
+  if (authState.view === 'join') {
+    return `
+      <h1 class="auth-heading">Create your login</h1>
+      <p class="auth-subheading">Set up your access to the MonkFlow client portal.</p>
+      <form class="auth-form" onsubmit="event.preventDefault();handleSignup()" novalidate>
+        ${error}
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="auth-first-name">First name</label>
+            <input type="text" id="auth-first-name" name="given-name" autocomplete="given-name" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="auth-last-name">Last name</label>
+            <input type="text" id="auth-last-name" name="family-name" autocomplete="family-name" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="auth-email">Work email</label>
+          <input type="email" id="auth-email" name="email" autocomplete="username" inputmode="email" value="${email}" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="auth-company">Firm</label>
+          <input type="text" id="auth-company" name="organization" autocomplete="organization" />
+        </div>
+        ${authPasswordField('auth-password', 'Password', 'new-password')}
+        <div class="auth-hint" style="margin-top:-10px">At least 8 characters.</div>
+        <button type="submit" class="btn btn-primary" id="auth-submit">Create login</button>
+      </form>
+      <div class="auth-footer">Already have a login? <button type="button" class="auth-link" onclick="renderAuthView('login')">Sign in</button></div>`;
+  }
+
+  // login
+  return `
+    <h1 class="auth-heading">Sign in</h1>
+    <p class="auth-subheading">Welcome back to your MonkFlow client portal.</p>
+    <form class="auth-form" onsubmit="event.preventDefault();handleLogin()" novalidate>
+      ${notice}
+      ${error}
+      <div class="form-group">
+        <label class="form-label" for="auth-email">Email</label>
+        <input type="email" id="auth-email" name="email" autocomplete="username" inputmode="email" value="${email}" required />
+      </div>
+      ${authPasswordField('auth-password', 'Password', 'current-password',
+        '<button type="button" class="auth-link" onclick="renderAuthView(\'forgot\')">Forgot password?</button>')}
+      <button type="submit" class="btn btn-primary" id="auth-submit">Sign in</button>
+    </form>
+    <div class="auth-footer">
+      Not a client yet? The portal is for firms we are already working with.
+      <button type="button" class="auth-link" onclick="leaveAuth(true)">Book a working session</button>
+    </div>`;
+}
+
+// Draw an auth view. `patch` updates authState first (email, notice, …).
+function renderAuthView(view, patch) {
+  // Carry the typed email between views so nobody types it twice.
+  const typed = document.getElementById('auth-email')?.value?.trim();
+  if (typed) authState.email = typed;
+  authState = { ...authState, notice: '', ...(patch || {}), view };
+
+  const title = { login: 'Sign in', forgot: 'Reset your password', 'forgot-sent': 'Check your email', reset: 'Choose a new password', join: 'Create your login' }[view] || 'Sign in';
+  document.title = `${title} | MonkFlow`;
+
+  const el = document.getElementById('auth-login');
+  el.innerHTML = authShell(authViewHtml());
+  el.classList.remove('hidden');
+  document.getElementById('auth-signup').classList.add('hidden');
+
+  // Focus the first thing the person needs to type.
+  const first = el.querySelector(authState.email && view === 'login' ? '#auth-password' : 'input');
+  if (first) first.focus();
+}
+
+// Kept for older call sites.
+function renderAuthLogin() { renderAuthView('login'); }
+function renderAuthSignup() { renderAuthView('join'); }
+
+function toggleAuthPassword(btn) {
+  const input = document.getElementById(btn.getAttribute('aria-controls'));
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.textContent = show ? 'Hide' : 'Show';
+  btn.setAttribute('aria-pressed', String(show));
+  input.focus();
+}
+
+// Inline error under the heading, announced to screen readers. Pass a
+// field id to mark that field invalid and move focus to it.
+function authError(message, fieldId) {
+  const box = document.getElementById('auth-error');
+  document.querySelectorAll('#auth-login [aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
+  if (!box) return;
+  box.textContent = message || '';
+  box.hidden = !message;
+  const field = fieldId && document.getElementById(fieldId);
+  if (field) { field.setAttribute('aria-invalid', 'true'); field.focus(); }
+}
+
+// Disable the submit button while a request is in flight; returns a
+// function that restores it.
+function authBusy(label) {
+  const btn = document.getElementById('auth-submit');
+  if (!btn) return () => {};
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label;
+  return () => { btn.disabled = false; btn.textContent = original; };
+}
+
+// Leave the auth screens for the public site; optionally open booking.
+function leaveAuth(book) {
+  window.history.pushState({}, '', '/');
+  showLanding();
+  window.scrollTo(0, 0);
+  if (book) setTimeout(() => showSchedulingModal(), 200);
 }
 
 // ── Sidebar (Client Dashboard — no marketing pages) ──────
@@ -1070,8 +1208,8 @@ function renderSidebar() {
   const sidebar = document.getElementById('sidebar');
   sidebar.innerHTML = `
     <div class="sidebar-logo">
-      <img src="/logo.svg" alt="MonkFlow" class="logo-icon-img">
-      <div class="logo-text">Monk<span>Flow</span></div>
+      <img src="/logo-mark.svg" alt="" class="logo-icon-img">
+      <div class="logo-text">MonkFlow</div>
     </div>
     <nav class="sidebar-nav">
       <div class="nav-section-label">Main</div>
@@ -1167,6 +1305,11 @@ function renderTopbar() {
     admin: 'Admin Dashboard',
     'admin-account': 'Account Detail',
     billing: 'Billing',
+    'workflow-detail': 'My Tools',
+    'agent-detail': 'AI Agents',
+    outreach: 'Outreach',
+    'outreach-analytics': 'Outreach Analytics',
+    stonkbot: 'Stonk Bot',
   };
   const unreadCount = notifications.filter(n => !n.read).length;
   const topbar = document.getElementById('topbar');
@@ -1561,7 +1704,7 @@ function renderProjects() {
   // If viewing a specific project
   if (currentProjectDetail && currentPage === 'projects') {
     const p = currentProjectDetail;
-    const statusColors = { discovery: '#6366f1', in_progress: '#f59e0b', review: '#3b82f6', delivered: '#10b981', completed: '#22c55e' };
+    const statusColors = { discovery: '#4f46e5', in_progress: '#a86a12', review: '#2563eb', delivered: '#2b6a59', completed: '#2b6a59' };
     const statusLabels = { discovery: 'Discovery', in_progress: 'In Progress', review: 'Under Review', delivered: 'Delivered', completed: 'Completed' };
 
     const filesHtml = (p.files || []).map(f => `
@@ -1654,7 +1797,7 @@ function renderProjects() {
     return `<div class="page-header"><div><h1>Projects</h1><p class="page-desc">Loading...</p></div></div>`;
   }
 
-  const statusColors = { discovery: '#6366f1', in_progress: '#f59e0b', review: '#3b82f6', delivered: '#10b981', completed: '#22c55e' };
+  const statusColors = { discovery: '#4f46e5', in_progress: '#a86a12', review: '#2563eb', delivered: '#2b6a59', completed: '#2b6a59' };
   const statusLabels = { discovery: 'Discovery', in_progress: 'In Progress', review: 'Under Review', delivered: 'Delivered', completed: 'Completed' };
 
   const projectCards = projectsData.length === 0
@@ -1775,24 +1918,24 @@ function renderDashboard() {
   const hasAgents = (agents?.total || 0) > 0;
   const showChecklist = !localStorage.getItem('checklist_dismissed');
   const checklistHtml = showChecklist && !isAdmin() ? `
-    <div class="card" style="margin-bottom:24px;border:1px solid rgba(0,204,106,0.3);background:linear-gradient(135deg,var(--bg-secondary),rgba(0,204,106,0.05));">
+    <div class="card" style="margin-bottom:24px;border-left:3px solid var(--accent);">
       <div style="padding:20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
           <h3 style="margin:0;font-size:16px;color:var(--text-primary);">Your Custom Tools</h3>
           <button class="btn btn-ghost" style="font-size:11px;padding:2px 8px;" onclick="localStorage.setItem('checklist_dismissed','true');navigateTo('dashboard');">Dismiss</button>
         </div>
-        <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:16px;">The MonkFlow team is building and deploying custom automation tools for your business. Here's your current status:</p>
+        <p style="font-size:13px;color:var(--text-tertiary);margin-bottom:16px;">What we are building and running for your firm:</p>
         <div style="display:flex;gap:16px;flex-wrap:wrap;">
           <div style="flex:1;min-width:200px;padding:14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-              <div style="font-size:18px;">${hasWorkflows ? '&#9989;' : '&#128736;'}</div>
+              <span class="badge-status ${hasWorkflows ? 'active' : 'draft'}"><span class="dot"></span> ${hasWorkflows ? 'Live' : 'In progress'}</span>
               <div style="font-size:14px;font-weight:600;color:var(--text-primary);">Workflows</div>
             </div>
             <div style="font-size:12px;color:var(--text-tertiary);">${hasWorkflows ? `${workflows.active} active tool${workflows.active !== 1 ? 's' : ''} running` : 'Being built — check back soon'}</div>
           </div>
           <div style="flex:1;min-width:200px;padding:14px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-              <div style="font-size:18px;">${hasAgents ? '&#9989;' : '&#128736;'}</div>
+              <span class="badge-status ${hasAgents ? 'active' : 'draft'}"><span class="dot"></span> ${hasAgents ? 'Live' : 'In progress'}</span>
               <div style="font-size:14px;font-weight:600;color:var(--text-primary);">AI Agents</div>
             </div>
             <div style="font-size:12px;color:var(--text-tertiary);">${hasAgents ? `${agents.total} agent${agents.total !== 1 ? 's' : ''} deployed` : 'Being configured — check back soon'}</div>
@@ -1805,7 +1948,7 @@ function renderDashboard() {
     <div class="page-header">
       <div>
         <h1>Welcome back, ${currentUser?.first_name || 'there'}</h1>
-        <p class="page-desc">Here's an overview of your projects and team performance.</p>
+        <p class="page-desc">${isAdmin() ? 'An overview of projects and platform activity.' : 'Here is what we are building and running for your firm.'}</p>
       </div>
       ${isAdmin() ? `<div class="page-actions"><button class="btn btn-primary btn-sm" onclick="showNewWorkflowModal()">${icons.plus} New Workflow</button></div>` : ''}
     </div>
@@ -1910,6 +2053,7 @@ function renderDashboard() {
           <div class="card-title">Quick Actions</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;padding-top:8px;">
+          ${isAdmin() ? `
           <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="showNewWorkflowModal()">
             ${icons.plus} Create New Workflow
           </button>
@@ -1925,6 +2069,23 @@ function renderDashboard() {
           <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="navigateTo('analytics')">
             ${icons.analytics} View Analytics Report
           </button>
+          ` : `
+          <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="navigateTo('projects')">
+            ${icons.book} See project status
+          </button>
+          <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="navigateTo('workflows')">
+            ${icons.workflow} View my tools
+          </button>
+          <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="navigateTo('analytics')">
+            ${icons.analytics} See how they are running
+          </button>
+          <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="navigateTo('help')">
+            ${icons.send} Send us a message
+          </button>
+          <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="showSchedulingModal()">
+            ${icons.clock} Schedule a check-in
+          </button>
+          `}
         </div>
       </div>
     </div>
@@ -2180,7 +2341,7 @@ function renderAgents() {
   const cards = agents.map(a => {
     const status = a.status || 'draft';
     const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
-    const agentIcon = a.icon || '🤖';
+    const agentIcon = a.icon || icons.agents;
     return `
       <div class="agent-card" onclick="currentAgentId='${a.id}';currentAgentDetail=null;agentDetailExecutions=null;navigateTo('agent-detail')" style="cursor:pointer;">
         <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -2211,7 +2372,7 @@ function renderAgents() {
 
   const emptyState = agents.length === 0 ? `
     <div style="text-align:center;padding:60px 20px;color:var(--text-secondary);">
-      <div style="font-size:48px;margin-bottom:16px;">🤖</div>
+      <div style="width:56px;height:56px;border-radius:12px;background:var(--accent-glow);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px;">${icons.agents}</div>
       <h3 style="color:var(--text-primary);margin-bottom:8px;">${admin ? 'No agents yet' : 'Your AI agents are being configured'}</h3>
       <p style="font-size:13px;margin-bottom:20px;">${admin ? 'Create an AI agent to deploy to a client.' : 'The MonkFlow team is building custom AI agents for your business. They\'ll appear here once deployed.'}</p>
       ${admin ? `<button class="btn btn-primary" onclick="showNewAgentModal()">${icons.plus} Create Agent</button>` : `<button class="btn btn-secondary" onclick="showSchedulingModal()">Schedule a Check-In</button>`}
@@ -2316,7 +2477,7 @@ function renderAgentDetail() {
   // Execution history rows
   const executionRows = execs.length > 0 ? execs.map(e => {
     const eStatus = e.status || 'pending';
-    const eStatusColor = { completed: '#00ff88', failed: '#ef4444', running: '#3b82f6', pending: '#fbbf24' };
+    const eStatusColor = { completed: '#2b6a59', failed: '#c53030', running: '#2563eb', pending: '#a86a12' };
     const duration = e.started_at && e.completed_at ? ((new Date(e.completed_at) - new Date(e.started_at)) / 1000).toFixed(1) + 's' : e.started_at ? 'Running...' : '\u2014';
     const rawInput = e.input_data || e.input || e.input_text || '';
     const inputText = typeof rawInput === 'object' ? JSON.stringify(rawInput, null, 2) : String(rawInput);
@@ -2336,7 +2497,7 @@ function renderAgentDetail() {
         <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${inputText.replace(/"/g, '&quot;')}">${inputTrunc || '\u2014'}</td>
         <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${outputText.replace(/"/g, '&quot;')}">${outputTrunc || '\u2014'}</td>
         <td>${tokens}</td>
-        <td style="color:#00cc6a;font-size:11px;">${costStr}</td>
+        <td style="color:#2b6a59;font-size:11px;">${costStr}</td>
         <td>${duration}</td>
         <td>${e.started_at ? timeAgo(e.started_at) : '\u2014'}</td>
       </tr>
@@ -2344,7 +2505,7 @@ function renderAgentDetail() {
         <td colspan="8" style="padding:12px 16px;background:var(--bg-tertiary);border-radius:8px;">
           <div style="margin-bottom:8px;"><strong style="color:var(--text-secondary);font-size:11px;">Full Input:</strong><pre style="margin:4px 0;font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);max-height:200px;overflow-y:auto;">${inputText || 'No input'}</pre></div>
           <div style="margin-bottom:8px;"><strong style="color:var(--text-secondary);font-size:11px;">Full Output:</strong><pre style="margin:4px 0;font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);max-height:200px;overflow-y:auto;">${outputText || 'No output'}</pre></div>
-          <div style="font-size:11px;color:var(--text-tertiary);">Tokens: ${e.tokens_input || 0} in / ${e.tokens_output || 0} out | Base: ${formatCost(execCost.baseCost)} + Fee: ${formatCost(execCost.fee)} = <strong style="color:#00cc6a;">${formatCost(execCost.total)}</strong></div>
+          <div style="font-size:11px;color:var(--text-tertiary);">Tokens: ${e.tokens_input || 0} in / ${e.tokens_output || 0} out | Base: ${formatCost(execCost.baseCost)} + Fee: ${formatCost(execCost.fee)} = <strong style="color:#2b6a59;">${formatCost(execCost.total)}</strong></div>
         </td>
       </tr>
     `;
@@ -2364,7 +2525,7 @@ function renderAgentDetail() {
       <div class="page-actions" style="display:flex;gap:8px;">
         <button class="btn btn-primary btn-sm" onclick="document.getElementById('agent-run-section').scrollIntoView({behavior:'smooth'})">${icons.play} Run Agent</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleAgentStatus('${agent.id}','${status}')">${status === 'active' ? icons.pause + ' Pause' : icons.zap + ' Activate'}</button>
-        <button class="btn btn-ghost btn-sm" style="color:#ef4444;" onclick="deleteAgentFromDetail('${agent.id}','${(agent.name || '').replace(/'/g, "\\'")}')">${icons.trash} Delete</button>
+        <button class="btn btn-ghost btn-sm" style="color:#c53030;" onclick="deleteAgentFromDetail('${agent.id}','${(agent.name || '').replace(/'/g, "\\'")}')">${icons.trash} Delete</button>
       </div>
     </div>
 
@@ -2372,9 +2533,9 @@ function renderAgentDetail() {
     <div class="stats-grid" style="margin-bottom:24px;">
       <div class="stat-card"><div class="stat-value">${totalTasks}</div><div class="stat-label">Total Tasks</div></div>
       <div class="stat-card"><div class="stat-value">${totalTokens.toLocaleString()}</div><div class="stat-label">Total Tokens Used</div></div>
-      <div class="stat-card" style="border:1px solid rgba(0,204,106,0.2);"><div class="stat-value" style="color:#00cc6a;">${formatCost(agentCost.total)}</div><div class="stat-label">Est. Cost (incl. 10% fee)</div></div>
+      <div class="stat-card" style="border:1px solid rgba(43,106,89,0.2);"><div class="stat-value" style="color:#2b6a59;">${formatCost(agentCost.total)}</div><div class="stat-label">Est. Cost (incl. 10% fee)</div></div>
       <div class="stat-card"><div class="stat-value">${avgDuration}</div><div class="stat-label">Avg Duration</div></div>
-      <div class="stat-card"><div class="stat-value" style="color:${status === 'active' ? '#00ff88' : status === 'error' ? '#ef4444' : '#fbbf24'};">${statusLabel}</div><div class="stat-label">Status</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:${status === 'active' ? '#2b6a59' : status === 'error' ? '#c53030' : '#a86a12'};">${statusLabel}</div><div class="stat-label">Status</div></div>
     </div>
 
     <!-- Configuration Panel -->
@@ -2552,12 +2713,12 @@ async function executeAgentFromDetail(agentId) {
             const rawOut = latest.output_data || latest.output || latest.output_text || latest.result || '';
             const output = typeof rawOut === 'object' ? (rawOut.text || JSON.stringify(rawOut, null, 2)) : String(rawOut) || 'Completed (no output returned)';
             if (statusEl) statusEl.textContent = 'Completed!';
-            if (statusEl) statusEl.style.color = '#00ff88';
+            if (statusEl) statusEl.style.color = '#2b6a59';
             if (outputPre) outputPre.textContent = output;
             if (resultDiv) resultDiv.style.display = 'block';
           } else {
             if (statusEl) statusEl.textContent = 'Failed: ' + (latest.error_message || latest.error || 'Unknown error');
-            if (statusEl) statusEl.style.color = '#ef4444';
+            if (statusEl) statusEl.style.color = '#c53030';
           }
           // Refresh execution history
           loadAgentDetail();
@@ -2755,7 +2916,7 @@ function showIntegrationConfigModal(providerKey) {
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);opacity:0;transition:opacity 0.2s;';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:rgba(15,27,45,0.45);opacity:0;transition:opacity 0.2s;';
   overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); } };
 
   overlay.innerHTML = `
@@ -2768,7 +2929,7 @@ function showIntegrationConfigModal(providerKey) {
         </div>
       </div>
 
-      ${isConnected ? `<div style="padding:10px 14px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:8px;margin-bottom:16px;font-size:12px;color:#22c55e;">
+      ${isConnected ? `<div style="padding:10px 14px;background:rgba(43,106,89,0.1);border:1px solid rgba(43,106,89,0.2);border-radius:8px;margin-bottom:16px;font-size:12px;color:#2b6a59;">
         Connected ${existing.connectedAt ? 'since ' + new Date(existing.connectedAt).toLocaleDateString() : ''}
       </div>` : ''}
 
@@ -2786,7 +2947,7 @@ function showIntegrationConfigModal(providerKey) {
       </div>
 
       ${isConnected ? `
-        <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px;color:#ef4444;" onclick="disconnectIntegration('${providerKey}')">
+        <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px;color:#c53030;" onclick="disconnectIntegration('${providerKey}')">
           Disconnect
         </button>
       ` : ''}
@@ -2825,23 +2986,23 @@ async function testIntegrationConnection(providerKey) {
     if (resultEl) {
       resultEl.style.display = 'block';
       if (json.data?.success) {
-        resultEl.style.background = 'rgba(34,197,94,0.1)';
-        resultEl.style.border = '1px solid rgba(34,197,94,0.2)';
-        resultEl.style.color = '#22c55e';
+        resultEl.style.background = 'rgba(43,106,89,0.1)';
+        resultEl.style.border = '1px solid rgba(43,106,89,0.2)';
+        resultEl.style.color = '#2b6a59';
         resultEl.textContent = 'Connection successful!';
       } else {
-        resultEl.style.background = 'rgba(239,68,68,0.1)';
-        resultEl.style.border = '1px solid rgba(239,68,68,0.2)';
-        resultEl.style.color = '#ef4444';
+        resultEl.style.background = 'rgba(197,48,48,0.1)';
+        resultEl.style.border = '1px solid rgba(197,48,48,0.2)';
+        resultEl.style.color = '#c53030';
         resultEl.textContent = json.data?.error || 'Connection failed';
       }
     }
   } catch (err) {
     if (resultEl) {
       resultEl.style.display = 'block';
-      resultEl.style.background = 'rgba(239,68,68,0.1)';
-      resultEl.style.border = '1px solid rgba(239,68,68,0.2)';
-      resultEl.style.color = '#ef4444';
+      resultEl.style.background = 'rgba(197,48,48,0.1)';
+      resultEl.style.border = '1px solid rgba(197,48,48,0.2)';
+      resultEl.style.color = '#c53030';
       resultEl.textContent = err.message;
     }
   } finally {
@@ -2954,17 +3115,17 @@ function renderAnalytics() {
   // Per-workflow table
   const wfRows = (d.perWorkflow || []).map(w => {
     const rate = w.executions > 0 ? Math.round((w.completed / w.executions) * 100) : 0;
-    const statusColor = w.workflow_status === 'active' ? '#00cc6a' : w.workflow_status === 'paused' ? '#fbbf24' : 'var(--text-tertiary)';
+    const statusColor = w.workflow_status === 'active' ? '#2b6a59' : w.workflow_status === 'paused' ? '#a86a12' : 'var(--text-tertiary)';
     return `<tr style="border-bottom:1px solid var(--border);">
       <td style="padding:10px 12px;font-size:13px;font-weight:500;color:var(--text-primary);">${w.name || 'Unnamed'}</td>
       <td style="padding:10px 12px;font-size:12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};margin-right:6px;"></span>${w.workflow_status}</td>
       <td style="padding:10px 12px;font-size:13px;text-align:center;">${w.executions}</td>
-      <td style="padding:10px 12px;font-size:13px;text-align:center;color:#00cc6a;">${w.completed}</td>
+      <td style="padding:10px 12px;font-size:13px;text-align:center;color:#2b6a59;">${w.completed}</td>
       <td style="padding:10px 12px;font-size:13px;text-align:center;color:var(--error);">${w.failed}</td>
       <td style="padding:10px 12px;font-size:13px;text-align:center;">
         <div style="display:flex;align-items:center;gap:6px;justify-content:center;">
           <div style="width:40px;height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden;">
-            <div style="height:100%;width:${rate}%;background:${rate > 80 ? '#00cc6a' : rate > 50 ? '#fbbf24' : 'var(--error)'};"></div>
+            <div style="height:100%;width:${rate}%;background:${rate > 80 ? '#2b6a59' : rate > 50 ? '#a86a12' : 'var(--error)'};"></div>
           </div>
           <span style="font-size:11px;color:var(--text-tertiary);">${rate}%</span>
         </div>
@@ -2976,7 +3137,7 @@ function renderAnalytics() {
   // Top errors
   const errorRows = (d.topErrors || []).map(e => `
     <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
-      <span style="background:rgba(239,68,68,0.15);color:var(--error);font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;flex-shrink:0;">${e.count}</span>
+      <span style="background:rgba(197,48,48,0.15);color:var(--error);font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;flex-shrink:0;">${e.count}</span>
       <span style="font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${e.message}</span>
     </div>
   `).join('');
@@ -3013,7 +3174,7 @@ function renderAnalytics() {
         <div class="stat-label">Avg Duration</div>
       </div>
       <div class="stat-card">
-        <div class="stat-header"><div class="stat-icon" style="background:rgba(239,68,68,0.15);color:var(--error);">${icons.x}</div></div>
+        <div class="stat-header"><div class="stat-icon" style="background:rgba(197,48,48,0.15);color:var(--error);">${icons.x}</div></div>
         <div class="stat-value">${failedExec}</div>
         <div class="stat-label">Failed</div>
       </div>
@@ -3177,80 +3338,76 @@ async function reloadLogs(queryParams) {
 // ============================================================
 // HELP CENTER PAGE
 // ============================================================
+// Help Center, as a client sees it. Clients do not build anything here:
+// MonkFlow builds and runs their tools, so this page explains the portal
+// and gets them to a person quickly.
+//
+// Every answer below must be true today (CLAUDE.md §0 applies to product
+// copy too). Do not add certifications, response-time promises or
+// integration counts we cannot back up.
 function renderHelpCenter() {
   const faqs = [
-    { q: 'How do I create a new workflow?', a: 'Navigate to the Workflows page and click "New Workflow". You can start from a blank canvas or choose from our pre-built templates. The visual editor lets you drag and drop nodes to design your automation.' },
-    { q: 'How do AI agents work?', a: 'AI agents are intelligent assistants that perform specific tasks automatically. Each agent is configured with a role, model, and parameters. They process incoming data, make decisions, and execute actions based on your business rules.' },
-    { q: 'Can I connect my existing tools?', a: 'Yes! MonkFlow integrates with 50+ popular tools including Slack, Salesforce, Google Sheets, Stripe, and more. Visit the Integrations page to connect your accounts and start building workflows across your tools.' },
-    { q: 'How is pricing structured?', a: 'MonkFlow offers custom pricing based on your business needs. We start with a free consultation to understand your requirements, then provide a tailored quote. No hidden fees or per-seat charges.' },
-    { q: 'What happens when a workflow fails?', a: 'Failed workflows are automatically retried based on your configuration. You receive real-time notifications via the bell icon and email. Check the Logs page for detailed error information and debugging.' },
-    { q: 'How do I invite team members?', a: 'Go to Team Management and click "Invite Member". Enter their email and assign a role (Viewer, Editor, or Admin). They will receive an invitation email to join your workspace.' },
-    { q: 'Is my data secure?', a: 'Absolutely. We use end-to-end encryption, SOC 2 compliance, and your data never leaves your designated region. API keys are encrypted at rest, and we support SSO and 2FA for all accounts.' },
-    { q: 'Can I export my data?', a: 'Yes, you can export logs, analytics reports, and workflow configurations from their respective pages. We support CSV, JSON, and PDF formats for all exports.' },
+    { q: 'What will I find in this portal?', a: 'The tools we have built for your firm and whether each one is live, the status of projects in progress with updates and files from us, how your tools have been running, and a direct way to reach us.' },
+    { q: 'Something is not working, or I need a change. What do I do?', a: 'Send a message from the top of this page or schedule a check-in. It goes to the engineer who built your system, not a support queue.' },
+    { q: 'What do the statuses mean?', a: 'Active means the tool is live and running. Paused means it is switched off for now and can be resumed. Draft means we are still building it. Error means the last run failed and needs attention.' },
+    { q: 'What happens when a run fails?', a: 'The failure is recorded on the Logs page with the error detail, and it counts against the success rate you see in Analytics. If you see the same failure more than once, send us a message.' },
+    { q: 'How do I give a colleague access?', a: 'Open Team and choose Invite Member. Enter their email address and pick a role. They receive an email invitation.' },
+    { q: 'How is our data protected?', a: 'Data is encrypted in transit with TLS and at rest with AES-256, and access is limited by role. What we build is designed so your records live in your own systems. The security page on monkflow.io has the full description, and we are glad to walk your compliance or security team through it.' },
+    { q: 'How does billing work?', a: 'Your engagement sets out how you are billed. The Billing page shows usage for the current period and your invoice history. Ask us if anything there does not match what you expect.' },
+    { q: 'Can I export my data?', a: 'Logs can be exported to CSV from the Logs page. For anything else, ask us and we will get it to you.' },
   ];
 
   const topics = [
-    { icon: icons.workflow, title: 'Workflows', desc: 'Learn how to create, manage, and monitor automated workflows.', page: 'workflows' },
-    { icon: icons.agents, title: 'AI Agents', desc: 'Configure intelligent agents to automate complex tasks.', page: 'agents' },
-    { icon: icons.integrations, title: 'Integrations', desc: 'Connect your favorite tools and services.', page: 'integrations' },
-    { icon: icons.analytics, title: 'Analytics', desc: 'Understand your performance metrics and ROI.', page: 'analytics' },
-    { icon: icons.settings, title: 'Account & Security', desc: 'Manage your profile, API keys, and security settings.', page: 'settings' },
-    { icon: icons.users, title: 'Team Management', desc: 'Invite members, manage roles, and permissions.', page: 'team' },
+    { icon: icons.workflow, title: 'My Tools', desc: 'Everything we have built for you and whether it is live.', page: 'workflows' },
+    { icon: icons.book, title: 'Projects', desc: 'Where each build stands, with updates and files.', page: 'projects' },
+    { icon: icons.analytics, title: 'Analytics', desc: 'How often your tools run and how reliably.', page: 'analytics' },
+    { icon: icons.logs, title: 'Logs', desc: 'A record of each run, including any errors.', page: 'logs' },
+    { icon: icons.users, title: 'Team', desc: 'Give colleagues access and set their roles.', page: 'team' },
+    { icon: icons.settings, title: 'Settings', desc: 'Your profile and password.', page: 'settings' },
   ];
+
+  const fullName = currentUser ? `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() : '';
 
   return `
     <div class="page-header">
       <div>
         <h1>Help Center</h1>
-        <p class="page-desc">Find answers, learn best practices, and get support.</p>
+        <p class="page-desc">Reach the person who built your system, and find your way around the portal.</p>
       </div>
+      <button class="btn btn-secondary" onclick="showSchedulingModal()">${icons.clock} Schedule a check-in</button>
     </div>
 
-    <!-- Getting Started -->
-    <div class="card" style="margin-bottom:28px;border-color:var(--border-accent);box-shadow:0 0 30px var(--accent-glow);">
+    <!-- Contact -->
+    <div class="card" id="contact-support-card" style="margin-bottom:28px;">
       <div class="card-header">
-        <div class="card-title">Getting Started</div>
+        <div class="card-title">Send us a message</div>
       </div>
-      <div class="getting-started-grid">
-        <div class="getting-started-step">
-          <div class="step-number">1</div>
-          <div class="step-content">
-            <h4>Connect Your Tools</h4>
-            <p>Link your existing software — Slack, Salesforce, Google Sheets, and more.</p>
-            <button class="btn btn-ghost btn-sm" onclick="navigateTo('integrations')">Browse Integrations</button>
-          </div>
+      <p style="font-size:14px;color:var(--text-secondary);margin-bottom:16px;">Questions, problems and change requests all come here. Your message goes straight to the engineer who built your system.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="contact-name">Name</label>
+          <input type="text" id="contact-name" autocomplete="name" value="${escapeHtml(fullName)}" />
         </div>
-        <div class="getting-started-step">
-          <div class="step-number">2</div>
-          <div class="step-content">
-            <h4>Create Your First Workflow</h4>
-            <p>Use our visual editor to design automated processes with drag-and-drop nodes.</p>
-            <button class="btn btn-ghost btn-sm" onclick="navigateTo('workflow-editor')">Open Editor</button>
-          </div>
-        </div>
-        <div class="getting-started-step">
-          <div class="step-number">3</div>
-          <div class="step-content">
-            <h4>Deploy AI Agents</h4>
-            <p>Configure intelligent agents to handle repetitive tasks automatically.</p>
-            <button class="btn btn-ghost btn-sm" onclick="navigateTo('agents')">View Agents</button>
-          </div>
-        </div>
-        <div class="getting-started-step">
-          <div class="step-number">4</div>
-          <div class="step-content">
-            <h4>Monitor & Optimize</h4>
-            <p>Track performance, review logs, and continuously improve your automations.</p>
-            <button class="btn btn-ghost btn-sm" onclick="navigateTo('analytics')">View Analytics</button>
-          </div>
+        <div class="form-group">
+          <label class="form-label" for="contact-email">Email</label>
+          <input type="email" id="contact-email" autocomplete="email" value="${escapeHtml(currentUser?.email || '')}" />
         </div>
       </div>
+      <div class="form-group">
+        <label class="form-label" for="contact-subject">Subject</label>
+        <input type="text" id="contact-subject" placeholder="What is this about?" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="contact-message">Message</label>
+        <textarea id="contact-message" rows="4" placeholder="Tell us what you are seeing or what you need changed." style="resize:vertical;"></textarea>
+      </div>
+      <button class="btn btn-primary" id="contact-submit" onclick="handleContactSubmit()">${icons.send} Send message</button>
     </div>
 
-    <!-- Documentation Topics -->
+    <!-- Finding your way around -->
     <div class="card" style="margin-bottom:28px;">
       <div class="card-header">
-        <div class="card-title">Documentation Topics</div>
+        <div class="card-title">Finding your way around</div>
       </div>
       <div class="grid-3" style="margin-top:8px;">
         ${topics.map(t => `
@@ -3264,17 +3421,17 @@ function renderHelpCenter() {
     </div>
 
     <!-- FAQ -->
-    <div class="card" style="margin-bottom:28px;">
+    <div class="card">
       <div class="card-header">
-        <div class="card-title">Frequently Asked Questions</div>
+        <div class="card-title">Common questions</div>
         <div class="topbar-search" style="position:relative;max-width:260px;">
           ${icons.search}
-          <input type="text" placeholder="Search FAQs..." oninput="filterFaqs(this.value)" style="font-size:12px;" />
+          <input type="text" placeholder="Search questions" aria-label="Search questions" oninput="filterFaqs(this.value)" style="font-size:13px;" />
         </div>
       </div>
       <div id="faq-list">
-        ${faqs.map((f, i) => `
-          <div class="faq-item" data-keywords="${f.q.toLowerCase()} ${f.a.toLowerCase()}">
+        ${faqs.map((f) => `
+          <div class="faq-item" data-keywords="${escapeHtml((f.q + ' ' + f.a).toLowerCase())}">
             <div class="faq-question" onclick="toggleFaq(this)">
               <span>${f.q}</span>
               <span class="faq-chevron">${icons.chevronDown}</span>
@@ -3285,33 +3442,6 @@ function renderHelpCenter() {
           </div>
         `).join('')}
       </div>
-    </div>
-
-    <!-- Contact Support -->
-    <div class="card" id="contact-support-card">
-      <div class="card-header">
-        <div class="card-title">Contact Support</div>
-      </div>
-      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">Can't find what you're looking for? Send us a message and we'll get back to you within 24 hours.</p>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Name</label>
-          <input type="text" placeholder="Your name" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Email</label>
-          <input type="email" placeholder="you@company.com" />
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Subject</label>
-        <input type="text" placeholder="What do you need help with?" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Message</label>
-        <textarea rows="4" placeholder="Describe your issue or question..." style="resize:vertical;"></textarea>
-      </div>
-      <button class="btn btn-primary" onclick="handleContactSubmit()">${icons.send} Send Message</button>
     </div>
   `;
 }
@@ -3331,21 +3461,24 @@ function filterFaqs(query) {
 }
 
 async function handleContactSubmit() {
-  const card = document.getElementById('contact-support-card');
-  const textInputs = card.querySelectorAll('input');
-  const textarea = card.querySelector('textarea');
-  const name = textInputs[0]?.value?.trim();
-  const email = textInputs[1]?.value?.trim();
-  const subject = textInputs[2]?.value?.trim();
-  const message = textarea?.value?.trim();
-  if (!name || !email || !subject || !message) { showToast('Please fill all fields', 'error'); return; }
+  const val = (id) => document.getElementById(id)?.value?.trim();
+  const name = val('contact-name');
+  const email = val('contact-email');
+  const subject = val('contact-subject');
+  const message = val('contact-message');
+  if (!name || !email || !subject || !message) { showToast('Please fill in every field', 'error'); return; }
+  const btn = document.getElementById('contact-submit');
+  const label = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   try {
     await api.post('/contact', { name, email, subject, message });
-    showToast('Support message sent! We\'ll respond within 24 hours.');
-    textInputs.forEach(i => i.value = '');
-    textarea.value = '';
+    showToast('Message sent. It has gone straight to the engineer who built your system.');
+    document.getElementById('contact-subject').value = '';
+    document.getElementById('contact-message').value = '';
   } catch (err) {
-    showToast(err.message || 'Failed to send message', 'error');
+    showToast(err.message || 'We could not send your message. Please try again.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = label; }
   }
 }
 
@@ -3412,13 +3545,13 @@ function renderWorkflowEditor() {
           <!-- Empty canvas prompt -->
           <div id="editor-empty-prompt" style="display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;opacity:0;transition:opacity 0.3s ease;">
             <div style="font-size:48px;margin-bottom:12px;opacity:0.3;">&#8592;</div>
-            <div style="font-size:15px;color:rgba(255,255,255,0.5);font-weight:500;">Start by dragging a trigger node from the palette</div>
+            <div style="font-size:15px;color:var(--text-secondary);font-weight:500;">Start by dragging a trigger node from the palette</div>
           </div>
         </div>
         <!-- Floating help button -->
-        <button id="editor-help-btn" onclick="showWorkflowGuide()" style="position:absolute;bottom:24px;right:24px;width:40px;height:40px;border-radius:50%;background:#00cc6a;color:#fff;border:none;font-size:18px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,204,106,0.4);z-index:100;display:flex;align-items:center;justify-content:center;transition:transform 0.2s ease,box-shadow 0.2s ease;"
-          onmouseenter="this.style.transform='scale(1.1)';this.style.boxShadow='0 6px 16px rgba(0,204,106,0.5)'"
-          onmouseleave="this.style.transform='scale(1)';this.style.boxShadow='0 4px 12px rgba(0,204,106,0.4)'"
+        <button id="editor-help-btn" onclick="showWorkflowGuide()" style="position:absolute;bottom:24px;right:24px;width:40px;height:40px;border-radius:50%;background:#2b6a59;color:#fff;border:none;font-size:18px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(43,106,89,0.4);z-index:100;display:flex;align-items:center;justify-content:center;transition:transform 0.2s ease,box-shadow 0.2s ease;"
+          onmouseenter="this.style.transform='scale(1.1)';this.style.boxShadow='0 6px 16px rgba(43,106,89,0.5)'"
+          onmouseleave="this.style.transform='scale(1)';this.style.boxShadow='0 4px 12px rgba(43,106,89,0.4)'"
           title="Reopen workflow guide">?</button>
       </div>
     </div>
@@ -3458,24 +3591,24 @@ function renderWorkflowGuide() {
   const isFirst = workflowGuideStep === 0;
   const isLast = workflowGuideStep === workflowGuideSteps.length - 1;
   const dotIndicators = workflowGuideSteps.map((_, i) =>
-    `<div style="width:8px;height:8px;border-radius:50%;background:${i === workflowGuideStep ? '#00cc6a' : 'rgba(255,255,255,0.25)'};transition:background 0.2s ease;"></div>`
+    `<div style="width:8px;height:8px;border-radius:50%;background:${i === workflowGuideStep ? '#2b6a59' : 'var(--border-light)'};transition:background 0.2s ease;"></div>`
   ).join('');
 
-  overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(10,10,30,0.85);z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.3s ease;';
+  overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(15,27,45,0.45);z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.3s ease;';
   overlay.innerHTML = `
-    <div style="background:#1a1a2e;border:1px solid rgba(0,204,106,0.3);border-radius:16px;padding:40px 48px;max-width:440px;width:90%;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,0.5);position:relative;">
-      <div style="position:absolute;top:-20px;left:50%;transform:translateX(-50%);background:#00cc6a;color:#fff;font-size:11px;font-weight:700;padding:4px 14px;border-radius:20px;text-transform:uppercase;letter-spacing:1px;">Step ${workflowGuideStep + 1} of ${workflowGuideSteps.length}</div>
-      <div style="font-size:24px;font-weight:700;color:#fff;margin-bottom:12px;">${step.title}</div>
-      <div style="font-size:14px;color:rgba(255,255,255,0.7);line-height:1.6;margin-bottom:28px;">${step.text}</div>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:40px 48px;max-width:440px;width:90%;text-align:center;box-shadow:0 16px 48px rgba(15,27,45,0.16);position:relative;">
+      <div style="position:absolute;top:-20px;left:50%;transform:translateX(-50%);background:#2b6a59;color:#fff;font-size:11px;font-weight:700;padding:4px 14px;border-radius:20px;text-transform:uppercase;letter-spacing:1px;">Step ${workflowGuideStep + 1} of ${workflowGuideSteps.length}</div>
+      <div style="font-size:24px;font-weight:700;color:var(--text-primary);margin-bottom:12px;">${step.title}</div>
+      <div style="font-size:14px;color:var(--text-secondary);line-height:1.6;margin-bottom:28px;">${step.text}</div>
       <div style="display:flex;gap:6px;justify-content:center;margin-bottom:24px;">${dotIndicators}</div>
       <div style="display:flex;gap:10px;justify-content:center;">
-        ${!isFirst ? '<button onclick="workflowGuideStep--;renderWorkflowGuide()" style="padding:8px 20px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#fff;font-size:13px;cursor:pointer;transition:background 0.2s ease;" onmouseenter="this.style.background=\'rgba(255,255,255,0.1)\'" onmouseleave="this.style.background=\'transparent\'">Back</button>' : ''}
+        ${!isFirst ? '<button onclick="workflowGuideStep--;renderWorkflowGuide()" style="padding:8px 20px;border-radius:8px;border:1px solid var(--border-light);background:transparent;color:#fff;font-size:13px;cursor:pointer;transition:background 0.2s ease;" onmouseenter="this.style.background=\'var(--border)\'" onmouseleave="this.style.background=\'transparent\'">Back</button>' : ''}
         ${!isLast
-          ? '<button onclick="workflowGuideStep++;renderWorkflowGuide()" style="padding:8px 24px;border-radius:8px;border:none;background:#00cc6a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.2s ease;" onmouseenter="this.style.background=\'#00e676\'" onmouseleave="this.style.background=\'#00cc6a\'">Next</button>'
-          : '<button onclick="dismissWorkflowGuide()" style="padding:8px 24px;border-radius:8px;border:none;background:#00cc6a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.2s ease;" onmouseenter="this.style.background=\'#00e676\'" onmouseleave="this.style.background=\'#00cc6a\'">Got it!</button>'
+          ? '<button onclick="workflowGuideStep++;renderWorkflowGuide()" style="padding:8px 24px;border-radius:8px;border:none;background:#2b6a59;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.2s ease;" onmouseenter="this.style.background=\'#1f5245\'" onmouseleave="this.style.background=\'#2b6a59\'">Next</button>'
+          : '<button onclick="dismissWorkflowGuide()" style="padding:8px 24px;border-radius:8px;border:none;background:#2b6a59;color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.2s ease;" onmouseenter="this.style.background=\'#1f5245\'" onmouseleave="this.style.background=\'#2b6a59\'">Got it!</button>'
         }
       </div>
-      <button onclick="dismissWorkflowGuide()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:rgba(255,255,255,0.4);font-size:18px;cursor:pointer;padding:4px;" title="Dismiss guide">&times;</button>
+      <button onclick="dismissWorkflowGuide()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:var(--text-tertiary);font-size:18px;cursor:pointer;padding:4px;" title="Dismiss guide">&times;</button>
     </div>
   `;
   // Fade in
@@ -3610,17 +3743,17 @@ function renderEditorNodes() {
 
   const colorMap = {
     green: 'rgba(0,255,136,0.15)',
-    blue: 'rgba(59,130,246,0.15)',
+    blue: 'rgba(37,99,235,0.15)',
     purple: 'rgba(147,51,234,0.15)',
     orange: 'rgba(249,115,22,0.15)',
-    yellow: 'rgba(251,191,36,0.15)',
+    yellow: 'rgba(168,106,18,0.15)',
   };
   const textColorMap = {
     green: 'var(--accent)',
-    blue: '#3b82f6',
-    purple: '#a855f7',
+    blue: '#2563eb',
+    purple: '#7c3aed',
     orange: '#f97316',
-    yellow: '#fbbf24',
+    yellow: '#a86a12',
   };
 
   container.innerHTML = editorState.nodes.map(n => `
@@ -3920,7 +4053,7 @@ function showExecutionStatusBar(status, executionId) {
     if (editorMain) editorMain.appendChild(bar);
     else return;
   }
-  const statusColors = { running: '#3b82f6', completed: '#00ff88', failed: '#ef4444', pending: '#fbbf24' };
+  const statusColors = { running: '#2563eb', completed: '#2b6a59', failed: '#c53030', pending: '#a86a12' };
   const statusIcons = { running: '⟳', completed: '✓', failed: '✗', pending: '◌' };
   bar.style.cssText = `position:absolute;bottom:0;left:0;right:0;height:40px;background:var(--bg-secondary);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:10px;font-size:12px;z-index:10;`;
   bar.innerHTML = `
@@ -3977,10 +4110,10 @@ function highlightExecutionNodes(nodeResults) {
     if (!el) return;
     if (result.status === 'completed' || result.success) {
       el.style.boxShadow = '0 0 12px rgba(0,255,136,0.4)';
-      el.style.borderColor = '#00ff88';
+      el.style.borderColor = '#2b6a59';
     } else if (result.status === 'failed' || result.error) {
-      el.style.boxShadow = '0 0 12px rgba(239,68,68,0.4)';
-      el.style.borderColor = '#ef4444';
+      el.style.boxShadow = '0 0 12px rgba(197,48,48,0.4)';
+      el.style.borderColor = '#c53030';
     }
   });
 }
@@ -4112,7 +4245,7 @@ function renderNodeConfigPanel() {
     </div>
     <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;">Type: ${selectedNode.type}</div>
     ${fields}
-    <button class="btn btn-ghost btn-sm" style="color:#ef4444;width:100%;margin-top:8px;" onclick="if(confirm('Delete this node?')){editorState.nodes=editorState.nodes.filter(n=>n.id!==${nodeId});editorState.connections=editorState.connections.filter(c=>c.from!==${nodeId}&&c.to!==${nodeId});editorState.selectedNodeId=null;renderEditorNodes();renderEditorConnections();showToast('Node deleted','info');}">Delete Node</button>
+    <button class="btn btn-ghost btn-sm" style="color:#c53030;width:100%;margin-top:8px;" onclick="if(confirm('Delete this node?')){editorState.nodes=editorState.nodes.filter(n=>n.id!==${nodeId});editorState.connections=editorState.connections.filter(c=>c.from!==${nodeId}&&c.to!==${nodeId});editorState.selectedNodeId=null;renderEditorNodes();renderEditorConnections();showToast('Node deleted','info');}">Delete Node</button>
   `;
 }
 
@@ -4234,14 +4367,14 @@ function renderWorkflowDetail() {
     const label = n.label || n.type || 'Step ' + (i + 1);
     const desc = n.description || '';
     const arrow = i < orderedNodes.length - 1 ? `<div style="display:flex;align-items:center;padding:0 4px;color:var(--accent);font-size:18px;flex-shrink:0;">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00cc6a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2b6a59" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
     </div>` : '';
     return `<div style="display:flex;align-items:center;flex-shrink:0;">
       <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:10px 14px;min-width:120px;text-align:center;position:relative;">
         <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:4px;color:var(--accent);">${icon}</div>
         <div style="font-size:12px;font-weight:600;color:var(--text-primary);line-height:1.3;">${label}</div>
         ${desc ? `<div style="font-size:10px;color:var(--text-tertiary);margin-top:3px;line-height:1.3;">${desc}</div>` : ''}
-        <div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;font-size:9px;font-weight:700;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;">${i + 1}</div>
+        <div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;font-size:9px;font-weight:700;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;">${i + 1}</div>
       </div>
       ${arrow}
     </div>`;
@@ -4249,7 +4382,7 @@ function renderWorkflowDetail() {
 
   const executionRows = execs.length > 0 ? execs.map(e => {
     const eStatus = e.status || 'pending';
-    const eStatusColor = { completed: '#00ff88', failed: '#ef4444', running: '#3b82f6', pending: '#fbbf24' };
+    const eStatusColor = { completed: '#2b6a59', failed: '#c53030', running: '#2563eb', pending: '#a86a12' };
     const duration = e.started_at && e.completed_at ? ((new Date(e.completed_at) - new Date(e.started_at)) / 1000).toFixed(1) + 's' : e.started_at ? 'Running...' : '\u2014';
     const execCost = calculateWorkflowExecCost(e);
     const costStr = (execCost.totalInput + execCost.totalOutput) > 0 ? formatCost(execCost.total) : '\u2014';
@@ -4259,7 +4392,7 @@ function renderWorkflowDetail() {
         <td><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${eStatusColor[eStatus] || '#666'};"></span> ${eStatus}</span></td>
         <td>${e.started_at ? new Date(e.started_at).toLocaleString() : '\u2014'}</td>
         <td>${duration}</td>
-        <td style="font-size:11px;color:#00cc6a;">${costStr}</td>
+        <td style="font-size:11px;color:#2b6a59;">${costStr}</td>
         <td style="font-size:11px;color:var(--text-secondary);">${e.error_message ? e.error_message.slice(0, 60) : '\u2014'}</td>
       </tr>
     `;
@@ -4279,7 +4412,7 @@ function renderWorkflowDetail() {
         <button class="btn btn-secondary btn-sm" onclick="loadWorkflowInEditor('${wf.id}')">${icons.edit} Edit in Builder</button>
         <button class="btn btn-primary btn-sm" onclick="executeWorkflowFromDetail('${wf.id}')">${icons.play} Run Now</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleWorkflowPause('${wf.id}','${status}')">${status === 'active' ? icons.clock + ' Pause' : icons.zap + ' Activate'}</button>
-        <button class="btn btn-ghost btn-sm" style="color:#ef4444;" onclick="deleteWorkflowFromDetail('${wf.id}','${(wf.name||'').replace(/'/g,"\\'")}')">${icons.trash} Delete</button>
+        <button class="btn btn-ghost btn-sm" style="color:#c53030;" onclick="deleteWorkflowFromDetail('${wf.id}','${(wf.name||'').replace(/'/g,"\\'")}')">${icons.trash} Delete</button>
       </div>
     </div>
 
@@ -4291,7 +4424,7 @@ function renderWorkflowDetail() {
       <div class="stat-card"><div class="stat-value">${nodeCount}</div><div class="stat-label">Nodes</div></div>
       ${scheduleReadable ? `<div class="stat-card"><div class="stat-value" style="font-size:16px;">${scheduleReadable}</div><div class="stat-label">Schedule</div></div>` : ''}
       ${nextRunStr ? `<div class="stat-card"><div class="stat-value" style="font-size:14px;">${nextRunStr}</div><div class="stat-label">Next Run</div></div>` : ''}
-      <div class="stat-card" style="border:1px solid rgba(0,204,106,0.2);"><div class="stat-value" style="color:#00cc6a;">${formatCost(wfCost.total)}</div><div class="stat-label">Est. Cost (incl. 10% fee)</div></div>
+      <div class="stat-card" style="border:1px solid rgba(43,106,89,0.2);"><div class="stat-value" style="color:#2b6a59;">${formatCost(wfCost.total)}</div><div class="stat-label">Est. Cost (incl. 10% fee)</div></div>
     </div>
 
     ${orderedNodes.length > 0 ? `
@@ -4411,7 +4544,7 @@ function renderSettings() {
     <div class="settings-section" data-settings-tab="general">
       <h3>Profile Information</h3>
       <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;">
-        <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#00cc6a,#00a3ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:22px;">
+        <div style="width:64px;height:64px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:22px;">
           ${(currentUser?.first_name || 'U')[0]}${(currentUser?.last_name || '')[0] || ''}
         </div>
         <div>
@@ -4512,7 +4645,7 @@ function renderSettings() {
     </div>
 
     <!-- Danger Zone -->
-    <div class="settings-section" data-settings-tab="general" style="border-color:rgba(239,68,68,0.2);">
+    <div class="settings-section" data-settings-tab="general" style="border-color:rgba(197,48,48,0.2);">
       <h3 style="color:var(--error);">Danger Zone</h3>
       <div class="settings-row">
         <div class="setting-info">
@@ -4708,7 +4841,7 @@ function showTeamMemberMenu(event, memberId, currentRole, memberName) {
     <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:flex-start;font-size:12px;" onclick="changeTeamMemberRole('${memberId}','${newRole}');this.closest('.team-member-popup').remove();">
       ${icons.settings} Change to ${newRole}
     </button>
-    <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:flex-start;font-size:12px;color:#ef4444;" onclick="removeTeamMember('${memberId}','${memberName.replace(/'/g, "\\'")}');this.closest('.team-member-popup').remove();">
+    <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:flex-start;font-size:12px;color:#c53030;" onclick="removeTeamMember('${memberId}','${memberName.replace(/'/g, "\\'")}');this.closest('.team-member-popup').remove();">
       ${icons.trash} Remove Member
     </button>
   `;
@@ -5021,7 +5154,7 @@ function showLegalPage(type) {
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);opacity:0;transition:opacity 0.2s;';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:rgba(15,27,45,0.45);opacity:0;transition:opacity 0.2s;';
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
   overlay.innerHTML = `<div class="modal" style="width:640px;max-width:90vw;max-height:85vh;overflow-y:auto;padding:32px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -5040,6 +5173,8 @@ function showLegalPage(type) {
 function showSchedulingModal(opts) {
   const schedIntent = (opts && opts.intent) || '';
   const schedVertical = (opts && opts.vertical) || '';
+  // Clients open this from inside the portal; prospects from the public site.
+  const schedTitle = isAuthenticated ? 'Schedule a check-in' : 'Book a working session';
   // Analytics: the highest-intent action on the site. Guarded — no-op until
   // the Plausible account is live (see index.html). Safe if window.plausible
   // is undefined because the inline stub in index.html always defines it.
@@ -5057,13 +5192,13 @@ function showSchedulingModal(opts) {
         ${[1,2,3].map(s => `
           <div style="display:flex;align-items:center;gap:8px;">
             <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;
-              ${s < currentStep ? 'background:#7cc4ae;color:#000;' : s === currentStep ? 'background:#7cc4ae;color:#000;' : 'background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.4);'}
+              ${s < currentStep ? 'background:#2b6a59;color:#fff;' : s === currentStep ? 'background:#2b6a59;color:#fff;' : 'background:var(--border);color:var(--text-tertiary);'}
             ">${s < currentStep ? '&#10003;' : s}</div>
-            ${s < 3 ? `<div style="width:32px;height:2px;background:${s < currentStep ? '#7cc4ae' : 'rgba(255,255,255,0.1)'};"></div>` : ''}
+            ${s < 3 ? `<div style="width:32px;height:2px;background:${s < currentStep ? '#2b6a59' : 'var(--border)'};"></div>` : ''}
           </div>
         `).join('')}
       </div>
-      <div style="text-align:center;font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:16px;">
+      <div style="text-align:center;font-size:12px;color:var(--text-secondary);margin-bottom:16px;">
         Step ${currentStep} of 3 — ${currentStep === 1 ? 'Choose a Date' : currentStep === 2 ? 'Pick a Time' : 'Your Details'}
       </div>
     `;
@@ -5087,7 +5222,7 @@ function showSchedulingModal(opts) {
 
     let calendarCells = '';
     ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => {
-      calendarCells += `<div style="text-align:center;font-size:11px;color:rgba(255,255,255,0.4);padding:6px 0;font-weight:600;">${d}</div>`;
+      calendarCells += `<div style="text-align:center;font-size:11px;color:var(--text-tertiary);padding:6px 0;font-weight:600;">${d}</div>`;
     });
     for (let i = 0; i < startDow; i++) {
       calendarCells += `<div></div>`;
@@ -5100,13 +5235,13 @@ function showSchedulingModal(opts) {
       const isDisabled = isPast || isWeekend;
       const isToday = cellDate.toDateString() === today.toDateString();
       const isSelected = selectedDate === dateStr;
-      let style = 'width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;margin:2px auto;cursor:pointer;transition:all 0.15s;border:none;background:transparent;color:rgba(255,255,255,0.85);';
+      let style = 'width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;margin:2px auto;cursor:pointer;transition:all 0.15s;border:none;background:transparent;color:var(--text-primary);';
       if (isDisabled) {
         style += 'opacity:0.25;cursor:not-allowed;';
       } else if (isSelected) {
-        style += 'background:#7cc4ae;color:#000;font-weight:700;';
+        style += 'background:#2b6a59;color:#fff;font-weight:700;';
       } else if (isToday) {
-        style += 'border:2px solid #7cc4ae;font-weight:600;';
+        style += 'border:2px solid #2b6a59;font-weight:600;';
       }
       calendarCells += `<button style="${style}" ${isDisabled ? 'disabled' : `onclick="window._schedSelectDate('${dateStr}')"`}>${d}</button>`;
     }
@@ -5115,14 +5250,14 @@ function showSchedulingModal(opts) {
 
     showModal(`
       <div class="modal-header">
-        <h2 class="modal-title">Book a Working Session</h2>
+        <h2 class="modal-title">${schedTitle}</h2>
         <button class="modal-close" onclick="closeModal()">${icons.x}</button>
       </div>
       ${stepIndicator}
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <button onclick="window._schedPrevMonth()" style="background:none;border:none;color:${canGoPrev ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.15)'};cursor:${canGoPrev ? 'pointer' : 'default'};font-size:18px;padding:4px 8px;" ${canGoPrev ? '' : 'disabled'}>&larr;</button>
-        <span style="font-weight:600;font-size:15px;color:rgba(255,255,255,0.9);">${monthNames[calendarMonth]} ${calendarYear}</span>
-        <button onclick="window._schedNextMonth()" style="background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:18px;padding:4px 8px;">&rarr;</button>
+        <button onclick="window._schedPrevMonth()" style="background:none;border:none;color:${canGoPrev ? 'var(--text-secondary)' : 'var(--text-tertiary)'};cursor:${canGoPrev ? 'pointer' : 'default'};font-size:18px;padding:4px 8px;" ${canGoPrev ? '' : 'disabled'}>&larr;</button>
+        <span style="font-weight:600;font-size:15px;color:var(--text-primary);">${monthNames[calendarMonth]} ${calendarYear}</span>
+        <button onclick="window._schedNextMonth()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:18px;padding:4px 8px;">&rarr;</button>
       </div>
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">
         ${calendarCells}
@@ -5139,13 +5274,12 @@ function showSchedulingModal(opts) {
 
     let slotsHtml = '';
     if (availableSlots === 'loading') {
-      slotsHtml = `<div style="text-align:center;padding:40px 0;color:rgba(255,255,255,0.5);">
-        <div style="width:24px;height:24px;border:3px solid rgba(255,255,255,0.15);border-top-color:#7cc4ae;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
+      slotsHtml = `<div style="text-align:center;padding:40px 0;color:var(--text-secondary);">
+        <div style="width:24px;height:24px;border:3px solid var(--border);border-top-color:#2b6a59;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
         Loading available times...
       </div>`;
     } else if (availableSlots.every(s => s.booked)) {
-      slotsHtml = `<div style="text-align:center;padding:40px 0;color:rgba(255,255,255,0.5);">
-        <div style="font-size:32px;margin-bottom:8px;">&#128549;</div>
+      slotsHtml = `<div style="text-align:center;padding:40px 0;color:var(--text-secondary);">
         Fully booked on this date. Please choose another day.
       </div>`;
     } else {
@@ -5159,8 +5293,8 @@ function showSchedulingModal(opts) {
           }
           const isActive = selectedSlot && selectedSlot.start === slot.start;
           return `<button onclick="window._schedSelectSlot('${slot.start}','${slot.end}')"
-            style="padding:10px 0;border-radius:8px;border:1px solid ${isActive ? '#7cc4ae' : 'rgba(255,255,255,0.12)'};
-            background:${isActive ? '#7cc4ae' : 'rgba(255,255,255,0.04)'};color:${isActive ? '#000' : 'rgba(255,255,255,0.85)'};
+            style="padding:10px 0;border-radius:8px;border:1px solid ${isActive ? '#2b6a59' : 'var(--border)'};
+            background:${isActive ? '#2b6a59' : 'var(--bg-tertiary)'};color:${isActive ? '#fff' : 'var(--text-primary)'};
             font-size:13px;font-weight:${isActive ? '700' : '500'};cursor:pointer;transition:all 0.15s;text-align:center;">${slot.start} – ${slot.end}</button>`;
         }).join('')}
       </div>`;
@@ -5168,16 +5302,16 @@ function showSchedulingModal(opts) {
 
     showModal(`
       <div class="modal-header">
-        <h2 class="modal-title">Book a Working Session</h2>
+        <h2 class="modal-title">${schedTitle}</h2>
         <button class="modal-close" onclick="closeModal()">${icons.x}</button>
       </div>
       ${stepIndicator}
       <div style="text-align:center;margin-bottom:16px;">
-        <span style="font-size:13px;color:rgba(255,255,255,0.5);">${formattedDate}</span>
-        <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#7cc4ae;cursor:pointer;font-size:12px;margin-left:8px;">Change</button>
+        <span style="font-size:13px;color:var(--text-secondary);">${formattedDate}</span>
+        <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#2b6a59;cursor:pointer;font-size:12px;margin-left:8px;">Change</button>
       </div>
       ${slotsHtml}
-      <div style="text-align:center;margin-top:8px;font-size:11px;color:rgba(255,255,255,0.35);">All times shown in Central Time (CT)</div>
+      <div style="text-align:center;margin-top:8px;font-size:11px;color:var(--text-tertiary);">All times shown in Central Time (CT)</div>
       ${selectedSlot ? `<div style="margin-top:12px;text-align:center;">
         <button class="btn btn-primary" onclick="window._schedGoStep3()" style="min-width:160px;">Continue</button>
       </div>` : ''}
@@ -5190,14 +5324,14 @@ function showSchedulingModal(opts) {
 
     showModal(`
       <div class="modal-header">
-        <h2 class="modal-title">Book a Working Session</h2>
+        <h2 class="modal-title">${schedTitle}</h2>
         <button class="modal-close" onclick="closeModal()">${icons.x}</button>
       </div>
       ${stepIndicator}
-      <div style="background:rgba(124,196,174,0.08);border:1px solid rgba(124,196,174,0.2);border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
+      <div style="background:rgba(43,106,89,0.08);border:1px solid rgba(43,106,89,0.2);border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
         <div>
-          <div style="font-size:13px;font-weight:600;color:rgba(255,255,255,0.9);">${formattedDate} &middot; ${selectedSlot.start} - ${selectedSlot.end} CT</div>
-          <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#7cc4ae;cursor:pointer;font-size:11px;padding:0;">Change date &amp; time</button>
+          <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${formattedDate} &middot; ${selectedSlot.start} - ${selectedSlot.end} CT</div>
+          <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#2b6a59;cursor:pointer;font-size:11px;padding:0;">Change date &amp; time</button>
         </div>
       </div>
       <div class="form-group">
@@ -5333,25 +5467,25 @@ function showSchedulingModal(opts) {
       const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
       showModal(`
         <div style="text-align:center;padding:20px 0;">
-          <div style="width:56px;height:56px;border-radius:50%;background:rgba(124,196,174,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">&#10003;</div>
-          <h2 style="margin:0 0 8px;font-size:20px;color:#fff;">You're Booked!</h2>
-          <p style="color:rgba(255,255,255,0.6);font-size:14px;margin:0 0 24px;">Your consultation has been scheduled.</p>
-          <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:16px;text-align:left;margin-bottom:24px;">
+          <div style="width:56px;height:56px;border-radius:50%;background:rgba(43,106,89,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">&#10003;</div>
+          <h2 style="margin:0 0 8px;font-size:20px;color:var(--text-primary);">You're booked</h2>
+          <p style="color:var(--text-secondary);font-size:14px;margin:0 0 24px;">Your consultation has been scheduled.</p>
+          <div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:left;margin-bottom:24px;">
             <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-              <span style="color:rgba(255,255,255,0.5);font-size:13px;">Date</span>
-              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">${formattedDate}</span>
+              <span style="color:var(--text-secondary);font-size:13px;">Date</span>
+              <span style="color:var(--text-primary);font-size:13px;font-weight:600;">${formattedDate}</span>
             </div>
             <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-              <span style="color:rgba(255,255,255,0.5);font-size:13px;">Time</span>
-              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">${selectedSlot.start} - ${selectedSlot.end} CT</span>
+              <span style="color:var(--text-secondary);font-size:13px;">Time</span>
+              <span style="color:var(--text-primary);font-size:13px;font-weight:600;">${selectedSlot.start} - ${selectedSlot.end} CT</span>
             </div>
             <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-              <span style="color:rgba(255,255,255,0.5);font-size:13px;">Type</span>
-              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">${meetingType}</span>
+              <span style="color:var(--text-secondary);font-size:13px;">Type</span>
+              <span style="color:var(--text-primary);font-size:13px;font-weight:600;">${meetingType}</span>
             </div>
             <div style="display:flex;justify-content:space-between;">
-              <span style="color:rgba(255,255,255,0.5);font-size:13px;">Confirmation</span>
-              <span style="color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;">Sent to ${email}</span>
+              <span style="color:var(--text-secondary);font-size:13px;">Confirmation</span>
+              <span style="color:var(--text-primary);font-size:13px;font-weight:600;">Sent to ${email}</span>
             </div>
           </div>
           <button class="btn btn-primary" onclick="closeModal()" style="min-width:160px;text-align:center;display:flex;align-items:center;justify-content:center;">Done</button>
@@ -5496,7 +5630,7 @@ async function loadAdminAccountDetail(userId) {
 }
 
 function renderAdminProjectsSection(projects, user) {
-  const statusColors = { discovery: '#6366f1', in_progress: '#f59e0b', review: '#3b82f6', delivered: '#10b981', completed: '#22c55e' };
+  const statusColors = { discovery: '#4f46e5', in_progress: '#a86a12', review: '#2563eb', delivered: '#2b6a59', completed: '#2b6a59' };
   const statusLabels = { discovery: 'Discovery', in_progress: 'In Progress', review: 'Review', delivered: 'Delivered', completed: 'Completed' };
 
   const projectRows = projects.length > 0 ? projects.map(p => `
@@ -5532,7 +5666,7 @@ function renderAdminProjectsSection(projects, user) {
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Create a new project and upload files in one step. Drag files here or click to select.</p>
       <div id="admin-dropzone"
         style="border:2px dashed var(--border);border-radius:12px;padding:40px;text-align:center;cursor:pointer;transition:all 0.2s;"
-        ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='rgba(0,204,106,0.05)';"
+        ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='rgba(43,106,89,0.05)';"
         ondragleave="this.style.borderColor='var(--border)';this.style.background='transparent';"
         ondrop="handleAdminFileDrop(event,'${user.id}')"
         onclick="document.getElementById('admin-file-input').click()">
@@ -5577,7 +5711,7 @@ async function adminViewProject(projectId) {
 
     const timeline = updates.map(u => `
       <div style="display:flex;gap:10px;padding:8px 0;">
-        <div style="width:8px;height:8px;border-radius:50%;background:${u.status ? '#10b981' : 'var(--border)'};margin-top:5px;flex-shrink:0;"></div>
+        <div style="width:8px;height:8px;border-radius:50%;background:${u.status ? '#2b6a59' : 'var(--border)'};margin-top:5px;flex-shrink:0;"></div>
         <div>
           <div style="font-size:13px;">${u.message}</div>
           <div style="font-size:11px;color:var(--text-tertiary);">${timeAgo(u.created_at)}</div>
@@ -5708,10 +5842,10 @@ function renderSchedulerHealthCards(rows) {
     const ageMs = Date.now() - new Date(row.last_run_at).getTime();
     const stale = ageMs > 24 * 60 * 60 * 1000;
     let color = '#888';
-    if (row.last_status === 'success') color = '#00cc6a';
-    else if (row.last_status === 'started') color = '#f59e0b';
-    else if (row.last_status === 'failed') color = '#ef4444';
-    if (stale) color = '#ef4444';
+    if (row.last_status === 'success') color = '#2b6a59';
+    else if (row.last_status === 'started') color = '#a86a12';
+    else if (row.last_status === 'failed') color = '#c53030';
+    if (stale) color = '#c53030';
     let detail = '';
     try { detail = row.last_detail ? (typeof row.last_detail === 'string' ? row.last_detail : JSON.stringify(row.last_detail)) : ''; } catch { detail = ''; }
     return `
@@ -5729,12 +5863,12 @@ function renderReplyTriageCard(replies) {
   const list = Array.isArray(replies) ? replies : [];
   const sentimentBadge = (s, ooo) => {
     if (ooo) return '<span style="background:#71717a22;color:#a1a1aa;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">💤 OOO</span>';
-    if (s === 'positive') return '<span style="background:#00cc6a22;color:#00cc6a;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">🟢 Positive</span>';
-    if (s === 'negative') return '<span style="background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">🔴 Negative</span>';
-    return '<span style="background:#3b82f622;color:#3b82f6;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">🟡 Neutral</span>';
+    if (s === 'positive') return '<span style="background:#2b6a5922;color:#2b6a59;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">🟢 Positive</span>';
+    if (s === 'negative') return '<span style="background:#c5303022;color:#c53030;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">🔴 Negative</span>';
+    return '<span style="background:#2563eb22;color:#2563eb;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">🟡 Neutral</span>';
   };
   const triageBadge = (t) => {
-    const map = { new: ['#f59e0b','New'], snoozed: ['#71717a','Snoozed'], booked: ['#00cc6a','Booked'], not_interested: ['#ef4444','Not interested'], closed: ['#52525b','Closed'] };
+    const map = { new: ['#a86a12','New'], snoozed: ['#71717a','Snoozed'], booked: ['#2b6a59','Booked'], not_interested: ['#c53030','Not interested'], closed: ['#52525b','Closed'] };
     const [c, label] = map[t] || ['#52525b', t || ''];
     return `<span style="background:${c}22;color:${c};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${label}</span>`;
   };
@@ -5760,7 +5894,7 @@ function renderReplyTriageCard(replies) {
             </summary>
             <div style="margin-top:12px;display:grid;gap:10px;">
               ${r.ai_email_subject ? `<div style="font-size:11px;color:var(--text-secondary);">Original sent: <strong>${escapeHtml(r.ai_email_subject)}</strong></div>` : ''}
-              ${r.ai_email_body ? `<details><summary style="cursor:pointer;font-size:12px;color:var(--text-secondary);">Show original AI email</summary><pre style="white-space:pre-wrap;background:#111;padding:10px;border-radius:6px;font-size:12px;margin-top:6px;">${escapeHtml(r.ai_email_body)}</pre></details>` : ''}
+              ${r.ai_email_body ? `<details><summary style="cursor:pointer;font-size:12px;color:var(--text-secondary);">Show original AI email</summary><pre style="white-space:pre-wrap;background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:12px;margin-top:6px;">${escapeHtml(r.ai_email_body)}</pre></details>` : ''}
               ${r.reply_body ? `<div><div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">Reply body</div><pre style="white-space:pre-wrap;background:#0a0a0a;border:1px solid var(--border);padding:10px;border-radius:6px;font-size:12px;">${escapeHtml(r.reply_body)}</pre></div>` : ''}
               <div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <a class="btn btn-primary btn-sm" href="mailto:${encodeURIComponent(r.contact_email || '')}?subject=${mailtoSubject}" target="_blank">📧 Reply in Gmail</a>
@@ -5776,10 +5910,10 @@ function renderReplyTriageCard(replies) {
 
   const newCount = list.filter(r => r.triage_status === 'new').length;
   return `
-    <div class="card" style="padding:0;margin-bottom:24px;border:1px solid ${newCount > 0 ? 'rgba(245,158,11,0.4)' : 'var(--border)'};">
+    <div class="card" style="padding:0;margin-bottom:24px;border:1px solid ${newCount > 0 ? 'rgba(168,106,18,0.4)' : 'var(--border)'};">
       <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
         <div>
-          <div class="card-title" style="margin:0;">📬 Reply Triage ${newCount > 0 ? `<span style="background:#f59e0b;color:#000;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;">${newCount} new</span>` : ''}</div>
+          <div class="card-title" style="margin:0;">📬 Reply Triage ${newCount > 0 ? `<span style="background:#a86a12;color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;">${newCount} new</span>` : ''}</div>
           <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Cold-email replies needing your action — respond fast for max conversion</div>
         </div>
       </div>
@@ -5797,9 +5931,9 @@ function renderLinkedInCard(stats, leads) {
 
   const statusBadge = (s) => {
     const map = {
-      discovered: '#71717a', enriched: '#71717a', personalized: '#3b82f6',
-      connect_sent: '#f59e0b', connected: '#00cc6a', dm_sent: '#0a66c2',
-      replied: '#ef4444', closed: '#52525b',
+      discovered: '#71717a', enriched: '#71717a', personalized: '#2563eb',
+      connect_sent: '#a86a12', connected: '#2b6a59', dm_sent: '#0a66c2',
+      replied: '#c53030', closed: '#52525b',
     };
     return `<span style="background:${(map[s] || '#52525b')}22;color:${map[s] || '#52525b'};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${(s || '').replace('_', ' ')}</span>`;
   };
@@ -5825,7 +5959,7 @@ function renderLinkedInCard(stats, leads) {
           : '';
         const note = preview + full;
         const postFlag = l.recent_post_snippet
-          ? `<span title="Has recent post hook" style="font-size:10px;color:#00cc6a;margin-left:6px;">● post</span>`
+          ? `<span title="Has recent post hook" style="font-size:10px;color:#2b6a59;margin-left:6px;">● post</span>`
           : '';
         return `
         <tr>
@@ -5849,8 +5983,8 @@ function renderLinkedInCard(stats, leads) {
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:16px 20px;">
         <div><div style="font-size:20px;font-weight:600;">${today.connects_sent || 0}<span style="font-size:12px;color:var(--text-secondary);"> / ${caps.connects}</span></div><div style="font-size:11px;color:var(--text-secondary);">Connects today</div></div>
         <div><div style="font-size:20px;font-weight:600;">${today.dms_sent || 0}<span style="font-size:12px;color:var(--text-secondary);"> / ${caps.dms}</span></div><div style="font-size:11px;color:var(--text-secondary);">DMs today</div></div>
-        <div><div style="font-size:20px;font-weight:600;color:#00cc6a;">${today.accepts_received || 0}</div><div style="font-size:11px;color:var(--text-secondary);">Accepts today</div></div>
-        <div><div style="font-size:20px;font-weight:600;color:#ef4444;">${today.replies_received || 0}</div><div style="font-size:11px;color:var(--text-secondary);">Replies today</div></div>
+        <div><div style="font-size:20px;font-weight:600;color:#2b6a59;">${today.accepts_received || 0}</div><div style="font-size:11px;color:var(--text-secondary);">Accepts today</div></div>
+        <div><div style="font-size:20px;font-weight:600;color:#c53030;">${today.replies_received || 0}</div><div style="font-size:11px;color:var(--text-secondary);">Replies today</div></div>
       </div>
       <table class="data-table" style="margin:0;">
         <thead><tr><th>Contact</th><th>Business</th><th>Status</th><th>Last touch</th><th></th></tr></thead>
@@ -5924,7 +6058,7 @@ function renderAdminDashboard() {
       account.total_tokens_output || 0,
       'claude-sonnet-4-20250514'
     );
-    const roleBadgeColor = account.role === 'superadmin' ? '#ef4444' : account.role === 'admin' ? '#f59e0b' : '#3b82f6';
+    const roleBadgeColor = account.role === 'superadmin' ? '#c53030' : account.role === 'admin' ? '#a86a12' : '#2563eb';
     return `
       <tr style="cursor:pointer;" onclick="loadAdminAccountDetail('${account.id}')">
         <td>
@@ -5941,7 +6075,7 @@ function renderAdminDashboard() {
         <td>${account.agent_count ?? 0}</td>
         <td>${account.runs_30d ?? 0}</td>
         <td>${account.tasks_30d ?? 0}</td>
-        <td style="color:#00cc6a;font-size:12px;">${formatCost(acctCost.baseCost)}</td>
+        <td style="color:#2b6a59;font-size:12px;">${formatCost(acctCost.baseCost)}</td>
         <td style="font-size:12px;color:var(--text-secondary);">${timeAgo(account.updated_at)}</td>
       </tr>
     `;
@@ -5984,8 +6118,8 @@ function renderAdminDashboard() {
         <div class="stat-label">Agent Executions</div>
         <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">${agentExecs.completed ?? 0} completed / ${agentExecs.failed ?? 0} failed</div>
       </div>
-      <div class="stat-card" style="border:1px solid rgba(0,204,106,0.2);">
-        <div class="stat-value" style="color:#00cc6a;">${formatCost(platformCost.baseCost)}</div>
+      <div class="stat-card" style="border:1px solid rgba(43,106,89,0.2);">
+        <div class="stat-value" style="color:#2b6a59;">${formatCost(platformCost.baseCost)}</div>
         <div class="stat-label">Platform Cost</div>
         <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">Base cost (excl. fee)</div>
       </div>
@@ -6020,13 +6154,13 @@ function renderAdminDashboard() {
           : adminClientErrors.map(e => `
             <details style="border-bottom:1px solid var(--border);padding:10px 0;">
               <summary style="cursor:pointer;">
-                <span style="color:#ef4444;font-family:monospace;">${escapeHtml(e.message || '')}</span>
+                <span style="color:#c53030;font-family:monospace;">${escapeHtml(e.message || '')}</span>
                 <span style="color:var(--text-secondary);font-size:11px;margin-left:8px;">${timeAgo(e.created_at)} — ${escapeHtml(e.user_id || 'anon')}</span>
               </summary>
               <div style="font-size:11px;color:var(--text-secondary);margin-top:6px;">
                 <div>URL: ${escapeHtml(e.url || '')}</div>
                 <div>UA: ${escapeHtml(e.user_agent || '')}</div>
-                <pre style="white-space:pre-wrap;background:#111;padding:8px;border-radius:6px;overflow:auto;max-height:240px;">${escapeHtml(e.stack || '')}</pre>
+                <pre style="white-space:pre-wrap;background:var(--bg-tertiary);padding:8px;border-radius:6px;overflow:auto;max-height:240px;">${escapeHtml(e.stack || '')}</pre>
               </div>
             </details>
           `).join('')}
@@ -6093,7 +6227,7 @@ function renderAdminDashboard() {
             <div style="font-size:14px;font-weight:600;color:var(--text-primary);">QuickBooks Online</div>
             <div style="font-size:12px;color:var(--text-secondary);">
               ${adminQboStatus?.connected
-                ? `<span style="color:#00cc6a;">Connected</span> \u2014 ${adminQboStatus.companyName || 'Company'}`
+                ? `<span style="color:#2b6a59;">Connected</span> \u2014 ${adminQboStatus.companyName || 'Company'}`
                 : '<span style="color:var(--text-tertiary);">Not connected</span> \u2014 <a href="#" onclick="connectQuickBooks();return false;" style="color:var(--accent);">Connect now</a>'}
             </div>
           </div>
@@ -6133,7 +6267,7 @@ function renderAdminAccountDetail() {
   // Workflows table
   const workflowRows = workflows.length > 0 ? workflows.map(wf => {
     const wfStatus = wf.status || 'draft';
-    const statusColor = { active: '#00ff88', draft: '#fbbf24', paused: '#f59e0b', error: '#ef4444' };
+    const statusColor = { active: '#2b6a59', draft: '#a86a12', paused: '#a86a12', error: '#c53030' };
     return `
       <tr>
         <td style="font-weight:500;">${wf.name || 'Unnamed'}</td>
@@ -6148,7 +6282,7 @@ function renderAdminAccountDetail() {
   // Agents table
   const agentRows = agents.length > 0 ? agents.map(ag => {
     const agStatus = ag.status || 'draft';
-    const statusColor = { active: '#00ff88', draft: '#fbbf24', paused: '#f59e0b', error: '#ef4444' };
+    const statusColor = { active: '#2b6a59', draft: '#a86a12', paused: '#a86a12', error: '#c53030' };
     const modelDisplayMap = {
       'claude-opus-4-20250514': 'Claude Opus 4',
       'claude-sonnet-4-20250514': 'Claude Sonnet 4',
@@ -6171,9 +6305,9 @@ function renderAdminAccountDetail() {
   // Recent executions table
   const execRows = executions.length > 0 ? executions.map(ex => {
     const eStatus = ex.status || 'pending';
-    const statusColor = { completed: '#00ff88', failed: '#ef4444', running: '#3b82f6', pending: '#fbbf24' };
+    const statusColor = { completed: '#2b6a59', failed: '#c53030', running: '#2563eb', pending: '#a86a12' };
     const duration = ex.started_at && ex.completed_at ? ((new Date(ex.completed_at) - new Date(ex.started_at)) / 1000).toFixed(1) + 's' : ex.started_at ? 'Running...' : '\u2014';
-    const errorText = ex.error ? `<span style="color:#ef4444;font-size:11px;" title="${(ex.error || '').replace(/"/g, '&quot;')}">${(ex.error || '').slice(0, 40)}${ex.error.length > 40 ? '...' : ''}</span>` : '\u2014';
+    const errorText = ex.error ? `<span style="color:#c53030;font-size:11px;" title="${(ex.error || '').replace(/"/g, '&quot;')}">${(ex.error || '').slice(0, 40)}${ex.error.length > 40 ? '...' : ''}</span>` : '\u2014';
     return `
       <tr>
         <td style="font-weight:500;font-size:12px;">${ex.workflow_name || ex.agent_name || 'Unknown'}</td>
@@ -6211,8 +6345,8 @@ function renderAdminAccountDetail() {
         <div class="stat-value">${totalTokens.toLocaleString()}</div>
         <div class="stat-label">Total Tokens Used</div>
       </div>
-      <div class="stat-card" style="border:1px solid rgba(0,204,106,0.2);">
-        <div class="stat-value" style="color:#00cc6a;">${formatCost(acctCost.baseCost)}</div>
+      <div class="stat-card" style="border:1px solid rgba(43,106,89,0.2);">
+        <div class="stat-value" style="color:#2b6a59;">${formatCost(acctCost.baseCost)}</div>
         <div class="stat-label">Est. Cost (base)</div>
       </div>
     </div>
@@ -6444,7 +6578,7 @@ function renderBilling() {
             </thead>
             <tbody>
               ${billingInvoices.map(inv => {
-                const statusColors = { draft: '#6b7280', sent: '#3b82f6', paid: '#00cc6a', overdue: '#ef4444', void: '#6b7280' };
+                const statusColors = { draft: '#6b7280', sent: '#2563eb', paid: '#2b6a59', overdue: '#c53030', void: '#6b7280' };
                 const color = statusColors[inv.status] || '#6b7280';
                 return `
                   <tr>
@@ -6515,17 +6649,17 @@ function renderOutreachPage() {
   const stats = outreachStats || {};
   const statCards = [
     { label: 'Total Leads', value: stats.total || 0, color: '#6b7280' },
-    { label: 'Active Sequences', value: stats.active || 0, color: '#3b82f6' },
-    { label: 'Priority', value: stats.priority_count || 0, color: '#f59e0b' },
-    { label: 'Replied', value: stats.replied || 0, color: '#00cc6a' },
-    { label: 'Due Now', value: stats.due_now || 0, color: stats.due_now > 0 ? '#f59e0b' : '#6b7280' },
+    { label: 'Active Sequences', value: stats.active || 0, color: '#2563eb' },
+    { label: 'Priority', value: stats.priority_count || 0, color: '#a86a12' },
+    { label: 'Replied', value: stats.replied || 0, color: '#2b6a59' },
+    { label: 'Due Now', value: stats.due_now || 0, color: stats.due_now > 0 ? '#a86a12' : '#6b7280' },
   ];
 
   const statusColors = {
-    active: { bg: '#3b82f622', fg: '#3b82f6' },
-    replied: { bg: '#00cc6a22', fg: '#00cc6a' },
+    active: { bg: '#2563eb22', fg: '#2563eb' },
+    replied: { bg: '#2b6a5922', fg: '#2b6a59' },
     closed: { bg: '#6b728022', fg: '#6b7280' },
-    unsubscribed: { bg: '#ef444422', fg: '#ef4444' },
+    unsubscribed: { bg: '#c5303022', fg: '#c53030' },
   };
 
   const touchLabels = { 1: 'Initial', 2: 'Bump', 3: 'Breakup' };
@@ -6535,13 +6669,13 @@ function renderOutreachPage() {
     const nextDate = lead.next_followup_at ? new Date(lead.next_followup_at) : null;
     const isOverdue = nextDate && nextDate <= new Date() && lead.status === 'active';
     const nextStr = nextDate
-      ? `<span style="color:${isOverdue ? '#f59e0b' : 'var(--text-tertiary)'};font-weight:${isOverdue ? '600' : '400'};">${isOverdue ? 'Due now' : nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`
+      ? `<span style="color:${isOverdue ? '#a86a12' : 'var(--text-tertiary)'};font-weight:${isOverdue ? '600' : '400'};">${isOverdue ? 'Due now' : nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`
       : '<span style="color:var(--text-tertiary);">—</span>';
 
     const aiStatus = lead.ai_email_sent_at
-      ? '<span style="padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#00cc6a22;color:#00cc6a;">Sent</span>'
+      ? '<span style="padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#2b6a5922;color:#2b6a59;">Sent</span>'
       : lead.ai_email_body
-        ? '<span style="padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#a855f722;color:#a855f7;">Ready</span>'
+        ? '<span style="padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#7c3aed22;color:#7c3aed;">Ready</span>'
         : lead.priority
           ? '<span style="padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#6b728022;color:#6b7280;">Pending</span>'
           : '';
@@ -6549,15 +6683,15 @@ function renderOutreachPage() {
     // Engagement indicators
     const engagementIcons = [];
     if (lead.touch_count >= 1) engagementIcons.push('<span title="Sent" style="color:#6b7280;">&#9993;</span>');
-    if (lead.opened_at) engagementIcons.push('<span title="Opened ' + new Date(lead.opened_at).toLocaleDateString() + '" style="color:#3b82f6;">&#128065;</span>');
-    if (lead.clicked_at) engagementIcons.push('<span title="Clicked ' + new Date(lead.clicked_at).toLocaleDateString() + '" style="color:#8b5cf6;">&#128279;</span>');
-    if (lead.replied_at || lead.status === 'replied') engagementIcons.push('<span title="Replied" style="color:#00cc6a;">&#128172;</span>');
+    if (lead.opened_at) engagementIcons.push('<span title="Opened ' + new Date(lead.opened_at).toLocaleDateString() + '" style="color:#2563eb;">&#128065;</span>');
+    if (lead.clicked_at) engagementIcons.push('<span title="Clicked ' + new Date(lead.clicked_at).toLocaleDateString() + '" style="color:#7c3aed;">&#128279;</span>');
+    if (lead.replied_at || lead.status === 'replied') engagementIcons.push('<span title="Replied" style="color:#2b6a59;">&#128172;</span>');
     const engagementStr = engagementIcons.length > 0 ? engagementIcons.join(' ') : '<span style="color:var(--text-tertiary);">—</span>';
 
     return `
       <tr onclick="viewOutreachLead('${lead.id}')" style="cursor:pointer;">
         <td>
-          <div style="font-weight:500;color:var(--text-primary);">${lead.priority ? '<span style="color:#f59e0b;margin-right:4px;" title="Priority">&#9733;</span>' : ''}${escapeHtml(lead.contact_name)}</div>
+          <div style="font-weight:500;color:var(--text-primary);">${lead.priority ? '<span style="color:#a86a12;margin-right:4px;" title="Priority">&#9733;</span>' : ''}${escapeHtml(lead.contact_name)}</div>
           <div style="font-size:11px;color:var(--text-tertiary);">${escapeHtml(lead.company || '')}</div>
         </td>
         <td style="font-size:12px;color:var(--text-secondary);">${escapeHtml(lead.contact_email)}</td>
@@ -6577,10 +6711,10 @@ function renderOutreachPage() {
         <p class="page-desc">Automated follow-up emails on a 3-touch cadence (Day 0 initial, Day 3 bump, Day 8 breakup)</p>
       </div>
       <div class="page-actions" style="display:flex;gap:8px;">
-        <button class="btn ${outreachFilterPriority ? 'btn-primary' : 'btn-ghost'}" onclick="toggleOutreachPriorityFilter()" style="${outreachFilterPriority ? '' : 'color:#f59e0b;'}">
+        <button class="btn ${outreachFilterPriority ? 'btn-primary' : 'btn-ghost'}" onclick="toggleOutreachPriorityFilter()" style="${outreachFilterPriority ? '' : 'color:#a86a12;'}">
           &#9733; ${outreachFilterPriority ? 'Show All' : 'Priority Only'}
         </button>
-        ${outreachFilterPriority ? `<button class="btn btn-ghost" onclick="generateAllAiEmails()" style="color:#a855f7;">
+        ${outreachFilterPriority ? `<button class="btn btn-ghost" onclick="generateAllAiEmails()" style="color:#7c3aed;">
           &#10024; AI Generate All
         </button>` : ''}
         <button class="btn btn-ghost" onclick="processOutreachFollowups()">
@@ -6610,7 +6744,7 @@ function renderOutreachPage() {
     </div>
 
     <!-- Sequence Info -->
-    <div class="card" style="padding:16px;margin-bottom:24px;border-left:3px solid #3b82f6;">
+    <div class="card" style="padding:16px;margin-bottom:24px;border-left:3px solid #2563eb;">
       <div style="display:flex;gap:32px;font-size:13px;color:var(--text-secondary);">
         <div><strong style="color:var(--text-primary);">Touch 1:</strong> Your initial cold email (logged when you add the lead)</div>
         <div><strong style="color:var(--text-primary);">Touch 2:</strong> Day 3 — casual bump</div>
@@ -6762,10 +6896,10 @@ async function viewOutreachLead(id) {
     const lead = res.data;
 
     const statusColors = {
-      active: { bg: '#3b82f622', fg: '#3b82f6' },
-      replied: { bg: '#00cc6a22', fg: '#00cc6a' },
+      active: { bg: '#2563eb22', fg: '#2563eb' },
+      replied: { bg: '#2b6a5922', fg: '#2b6a59' },
       closed: { bg: '#6b728022', fg: '#6b7280' },
-      unsubscribed: { bg: '#ef444422', fg: '#ef4444' },
+      unsubscribed: { bg: '#c5303022', fg: '#c53030' },
     };
     const sc = statusColors[lead.status] || statusColors.active;
     const touchLabels = { 1: 'Initial Cold Email', 2: 'Day 3 — Bump', 3: 'Day 8 — Breakup' };
@@ -6773,11 +6907,11 @@ async function viewOutreachLead(id) {
     const timeline = (lead.emails || []).map(em => {
       const engBadges = [];
       engBadges.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#6b728022;color:#6b7280;">Sent</span>');
-      if (em.opened_at) engBadges.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#3b82f622;color:#3b82f6;" title="Opened ' + new Date(em.opened_at).toLocaleString() + '">Opened</span>');
-      if (em.replied_at) engBadges.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#00cc6a22;color:#00cc6a;" title="Replied ' + new Date(em.replied_at).toLocaleString() + '">Replied</span>');
+      if (em.opened_at) engBadges.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#2563eb22;color:#2563eb;" title="Opened ' + new Date(em.opened_at).toLocaleString() + '">Opened</span>');
+      if (em.replied_at) engBadges.push('<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#2b6a5922;color:#2b6a59;" title="Replied ' + new Date(em.replied_at).toLocaleString() + '">Replied</span>');
       return `
       <div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
-        <div style="width:8px;height:8px;border-radius:50%;background:${em.replied_at ? '#00cc6a' : em.opened_at ? '#3b82f6' : '#6b7280'};margin-top:6px;flex-shrink:0;"></div>
+        <div style="width:8px;height:8px;border-radius:50%;background:${em.replied_at ? '#2b6a59' : em.opened_at ? '#2563eb' : '#6b7280'};margin-top:6px;flex-shrink:0;"></div>
         <div style="flex:1;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <span style="font-weight:600;font-size:13px;color:var(--text-primary);">${touchLabels[em.touch_number] || 'Touch ' + em.touch_number}</span>
@@ -6822,17 +6956,17 @@ async function viewOutreachLead(id) {
             <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Touches</div>
             <div style="font-size:20px;font-weight:700;color:var(--text-primary);">${lead.touch_count || 0}/3</div>
           </div>
-          <div style="background:${lead.opened_at ? '#3b82f611' : 'var(--bg-secondary)'};padding:10px;border-radius:8px;text-align:center;">
+          <div style="background:${lead.opened_at ? '#2563eb11' : 'var(--bg-secondary)'};padding:10px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Opened</div>
-            <div style="font-size:14px;font-weight:600;color:${lead.opened_at ? '#3b82f6' : 'var(--text-tertiary)'};">${lead.opened_at ? new Date(lead.opened_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
+            <div style="font-size:14px;font-weight:600;color:${lead.opened_at ? '#2563eb' : 'var(--text-tertiary)'};">${lead.opened_at ? new Date(lead.opened_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
           </div>
-          <div style="background:${lead.clicked_at ? '#8b5cf611' : 'var(--bg-secondary)'};padding:10px;border-radius:8px;text-align:center;">
+          <div style="background:${lead.clicked_at ? '#7c3aed11' : 'var(--bg-secondary)'};padding:10px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Clicked</div>
-            <div style="font-size:14px;font-weight:600;color:${lead.clicked_at ? '#8b5cf6' : 'var(--text-tertiary)'};">${lead.clicked_at ? new Date(lead.clicked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
+            <div style="font-size:14px;font-weight:600;color:${lead.clicked_at ? '#7c3aed' : 'var(--text-tertiary)'};">${lead.clicked_at ? new Date(lead.clicked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
           </div>
           <div style="background:var(--bg-secondary);padding:10px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.5px;">Score</div>
-            <div style="font-size:20px;font-weight:700;color:${(lead.lead_score || 50) >= 70 ? '#00cc6a' : (lead.lead_score || 50) >= 40 ? '#f59e0b' : 'var(--text-tertiary)'};">${lead.lead_score || '—'}</div>
+            <div style="font-size:20px;font-weight:700;color:${(lead.lead_score || 50) >= 70 ? '#2b6a59' : (lead.lead_score || 50) >= 40 ? '#a86a12' : 'var(--text-tertiary)'};">${lead.lead_score || '—'}</div>
           </div>
         </div>
 
@@ -6841,7 +6975,7 @@ async function viewOutreachLead(id) {
         <h3 style="font-size:14px;margin-bottom:12px;color:var(--text-primary);">Sequence Timeline</h3>
         <div style="margin-bottom:20px;">
           <div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);">
-            <div style="width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-top:6px;flex-shrink:0;"></div>
+            <div style="width:8px;height:8px;border-radius:50%;background:#2563eb;margin-top:6px;flex-shrink:0;"></div>
             <div style="flex:1;">
               <div style="display:flex;justify-content:space-between;align-items:center;">
                 <span style="font-weight:600;font-size:13px;color:var(--text-primary);">Initial Cold Email</span>
@@ -6875,19 +7009,19 @@ async function viewOutreachLead(id) {
             </div>
             <div style="display:flex;gap:8px;">
               ${!lead.ai_email_sent_at ? `
-                <button class="btn btn-primary btn-sm" onclick="sendOutreachAiEmail('${lead.id}')" style="background:#a855f7;">Send AI Email</button>
+                <button class="btn btn-primary btn-sm" onclick="sendOutreachAiEmail('${lead.id}')" style="background:#7c3aed;">Send AI Email</button>
                 <button class="btn btn-ghost btn-sm" onclick="generateOutreachAiEmail('${lead.id}')">Regenerate</button>
-              ` : '<span style="font-size:12px;color:#00cc6a;font-weight:600;">&#10003; AI email sent</span>'}
+              ` : '<span style="font-size:12px;color:#2b6a59;font-weight:600;">&#10003; AI email sent</span>'}
             </div>
           ` : `
-            <button class="btn btn-ghost btn-sm" onclick="generateOutreachAiEmail('${lead.id}')" style="color:#a855f7;">&#10024; Generate AI Email</button>
+            <button class="btn btn-ghost btn-sm" onclick="generateOutreachAiEmail('${lead.id}')" style="color:#7c3aed;">&#10024; Generate AI Email</button>
           `}
         </div>
         ` : ''}
 
         <div style="display:flex;gap:8px;justify-content:space-between;border-top:1px solid var(--border);padding-top:16px;">
           <div style="display:flex;gap:8px;align-items:center;">
-            <button class="btn btn-ghost btn-sm" onclick="toggleLeadPriority('${lead.id}')" style="color:#f59e0b;" title="${lead.priority ? 'Remove priority' : 'Mark as priority'}">
+            <button class="btn btn-ghost btn-sm" onclick="toggleLeadPriority('${lead.id}')" style="color:#a86a12;" title="${lead.priority ? 'Remove priority' : 'Mark as priority'}">
               ${lead.priority ? '&#9733; Priority' : '&#9734; Set Priority'}
             </button>
             ${lead.status === 'active' ? `
@@ -6903,7 +7037,7 @@ async function viewOutreachLead(id) {
               <option value="closed" ${lead.status === 'closed' ? 'selected' : ''}>Closed</option>
               <option value="unsubscribed" ${lead.status === 'unsubscribed' ? 'selected' : ''}>Unsubscribed</option>
             </select>
-            <button class="btn btn-ghost btn-sm" style="color:#ef4444;" onclick="deleteOutreachLead('${lead.id}')">
+            <button class="btn btn-ghost btn-sm" style="color:#c53030;" onclick="deleteOutreachLead('${lead.id}')">
               ${icons.trash}
             </button>
           </div>
@@ -7130,11 +7264,11 @@ function renderOutreachAnalyticsPage() {
 
   let healthStatus, healthColor, healthBg, healthIcon;
   if (bounceRate > 5 || complaintRate > 0.3) {
-    healthStatus = 'Poor'; healthColor = '#ef4444'; healthBg = '#ef444415'; healthIcon = '\u26A0';
+    healthStatus = 'Poor'; healthColor = '#c53030'; healthBg = '#c5303015'; healthIcon = '\u26A0';
   } else if (bounceRate > 2 || complaintRate > 0.1) {
-    healthStatus = 'Fair'; healthColor = '#f59e0b'; healthBg = '#f59e0b15'; healthIcon = '\u25CB';
+    healthStatus = 'Fair'; healthColor = '#a86a12'; healthBg = '#a86a1215'; healthIcon = '\u25CB';
   } else if (totalSent > 0) {
-    healthStatus = 'Good'; healthColor = '#00cc6a'; healthBg = '#00cc6a15'; healthIcon = '\u2713';
+    healthStatus = 'Good'; healthColor = '#2b6a59'; healthBg = '#2b6a5915'; healthIcon = '\u2713';
   } else {
     healthStatus = 'No Data'; healthColor = 'var(--text-tertiary)'; healthBg = 'var(--bg-secondary)'; healthIcon = '\u2014';
   }
@@ -7151,15 +7285,15 @@ function renderOutreachAnalyticsPage() {
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;">
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Delivery Rate</div>
-          <div style="font-size:22px;font-weight:700;color:${deliveryRate >= 95 ? '#00cc6a' : deliveryRate >= 90 ? '#f59e0b' : '#ef4444'};">${totalSent > 0 ? deliveryRate + '%' : '\u2014'}</div>
+          <div style="font-size:22px;font-weight:700;color:${deliveryRate >= 95 ? '#2b6a59' : deliveryRate >= 90 ? '#a86a12' : '#c53030'};">${totalSent > 0 ? deliveryRate + '%' : '\u2014'}</div>
         </div>
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Bounce Rate</div>
-          <div style="font-size:22px;font-weight:700;color:${bounceRate > 3 ? '#ef4444' : bounceRate > 1 ? '#f59e0b' : 'var(--text-primary)'};">${totalSent > 0 ? bounceRate + '%' : '\u2014'}</div>
+          <div style="font-size:22px;font-weight:700;color:${bounceRate > 3 ? '#c53030' : bounceRate > 1 ? '#a86a12' : 'var(--text-primary)'};">${totalSent > 0 ? bounceRate + '%' : '\u2014'}</div>
         </div>
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Complaint Rate</div>
-          <div style="font-size:22px;font-weight:700;color:${complaintRate > 0.1 ? '#ef4444' : 'var(--text-primary)'};">${totalSent > 0 ? complaintRate + '%' : '\u2014'}</div>
+          <div style="font-size:22px;font-weight:700;color:${complaintRate > 0.1 ? '#c53030' : 'var(--text-primary)'};">${totalSent > 0 ? complaintRate + '%' : '\u2014'}</div>
         </div>
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Total Sent</div>
@@ -7168,7 +7302,7 @@ function renderOutreachAnalyticsPage() {
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:4px;">Warming</div>
           <div style="height:8px;background:var(--bg-primary);border-radius:4px;margin-top:8px;overflow:hidden;">
-            <div style="height:100%;width:${warmingPct}%;background:${warming.phase === 'full' ? '#00cc6a' : '#3b82f6'};border-radius:4px;transition:width 0.4s ease;"></div>
+            <div style="height:100%;width:${warmingPct}%;background:${warming.phase === 'full' ? '#2b6a59' : '#2563eb'};border-radius:4px;transition:width 0.4s ease;"></div>
           </div>
           <div style="font-size:10px;color:var(--text-tertiary);margin-top:4px;">${warmingPct}%</div>
         </div>
@@ -7205,12 +7339,12 @@ function renderOutreachAnalyticsPage() {
     const botOpens = parseInt(row.bot_opens) || 0;
     const realOpenRate = parseFloat(row.real_open_rate) || 0;
     const opacity = isActive ? 1 : 0.45;
-    const borderColor = isWinner ? '#00cc6a' : 'var(--border)';
-    const bgTint = isWinner ? 'linear-gradient(135deg, rgba(0,204,106,0.06), transparent)' : 'transparent';
+    const borderColor = isWinner ? '#2b6a59' : 'var(--border)';
+    const bgTint = isWinner ? 'linear-gradient(135deg, rgba(43,106,89,0.06), transparent)' : 'transparent';
     const label = escapeHtml(row.label || row.variant);
     return `
       <div style="padding:14px 16px;border:1px solid ${borderColor};border-radius:8px;opacity:${opacity};background:${bgTint};position:relative;">
-        ${isWinner ? '<span style="position:absolute;top:-8px;right:12px;background:#00cc6a;color:#000;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.5px;">LEADER</span>' : ''}
+        ${isWinner ? '<span style="position:absolute;top:-8px;right:12px;background:#2b6a59;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.5px;">LEADER</span>' : ''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
           <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${label}</div>
           <div style="font-size:11px;color:var(--text-tertiary);">${sent} sent</div>
@@ -7218,17 +7352,17 @@ function renderOutreachAnalyticsPage() {
         <div style="display:flex;align-items:baseline;gap:20px;margin-bottom:8px;">
           <div>
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:2px;">Real Open Rate</div>
-            <div style="font-size:20px;font-weight:700;color:${realOpenRate > 15 ? '#00cc6a' : realOpenRate > 5 ? '#f59e0b' : 'var(--text-primary)'};">${realOpenRate}%</div>
+            <div style="font-size:20px;font-weight:700;color:${realOpenRate > 15 ? '#2b6a59' : realOpenRate > 5 ? '#a86a12' : 'var(--text-primary)'};">${realOpenRate}%</div>
             <div style="font-size:10px;color:var(--text-tertiary);">${realOpens} human${botOpens > 0 ? ` &middot; ${botOpens} bot filtered` : ''}</div>
           </div>
           <div>
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:2px;">Reply Rate</div>
-            <div style="font-size:20px;font-weight:700;color:${replyRate > 0 ? '#00cc6a' : 'var(--text-primary)'};">${replyRate}%</div>
+            <div style="font-size:20px;font-weight:700;color:${replyRate > 0 ? '#2b6a59' : 'var(--text-primary)'};">${replyRate}%</div>
             <div style="font-size:10px;color:var(--text-tertiary);">${replied} repl${replied === 1 ? 'y' : 'ies'}${positive > 0 ? ` (${positive}+)` : ''}</div>
           </div>
         </div>
         <div style="height:4px;background:var(--bg-primary);border-radius:2px;overflow:hidden;margin-bottom:6px;">
-          <div style="height:100%;width:${Math.min(replyRate * 10, 100)}%;background:#00cc6a;"></div>
+          <div style="height:100%;width:${Math.min(replyRate * 10, 100)}%;background:#2b6a59;"></div>
         </div>
         ${unsubs > 0 ? `<div style="font-size:10px;color:var(--text-tertiary);">${unsubs} unsub${unsubs > 1 ? 's' : ''} (${unsubRate}%)</div>` : ''}
       </div>`;
@@ -7236,11 +7370,11 @@ function renderOutreachAnalyticsPage() {
 
   // ── Funnel — actionable steps only ──
   const funnelSteps = [
-    { label: 'Total Leads', key: 'total_leads', color: '#6366f1' },
-    { label: 'Emails Sent', key: 'emails_sent', color: '#3b82f6' },
-    { label: 'Replies', key: 'replies_received', color: '#00cc6a' },
-    { label: 'Positive Replies', key: 'positive_replies', color: '#10b981' },
-    { label: 'Unsubscribed', key: 'unsubscribed', color: '#f59e0b' },
+    { label: 'Total Leads', key: 'total_leads', color: '#4f46e5' },
+    { label: 'Emails Sent', key: 'emails_sent', color: '#2563eb' },
+    { label: 'Replies', key: 'replies_received', color: '#2b6a59' },
+    { label: 'Positive Replies', key: 'positive_replies', color: '#2b6a59' },
+    { label: 'Unsubscribed', key: 'unsubscribed', color: '#a86a12' },
     { label: 'Sequence Done', key: 'sequence_completed', color: 'var(--text-tertiary)' },
   ];
   const maxFunnel = parseInt(funnel.total_leads) || 1;
@@ -7253,7 +7387,7 @@ function renderOutreachAnalyticsPage() {
       <div style="margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
           <span style="font-size:13px;font-weight:500;color:var(--text-primary);">${step.label}</span>
-          <span style="font-size:13px;color:var(--text-tertiary);">${val}${convPct !== null ? ` <span style="font-size:11px;color:${convPct >= 5 ? '#00cc6a' : convPct > 0 ? '#f59e0b' : 'var(--text-tertiary)'};">(${convPct}%)</span>` : ''}</span>
+          <span style="font-size:13px;color:var(--text-tertiary);">${val}${convPct !== null ? ` <span style="font-size:11px;color:${convPct >= 5 ? '#2b6a59' : convPct > 0 ? '#a86a12' : 'var(--text-tertiary)'};">(${convPct}%)</span>` : ''}</span>
         </div>
         <div style="height:20px;background:var(--bg-primary);border-radius:6px;overflow:hidden;">
           <div style="height:100%;width:${pct}%;background:${step.color};border-radius:6px;transition:width 0.4s ease;"></div>
@@ -7275,8 +7409,8 @@ function renderOutreachAnalyticsPage() {
     return `
       <div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:0;">
         <div style="display:flex;gap:2px;align-items:flex-end;height:80px;width:100%;">
-          <div onmouseenter="showBarTip(event,'${tip('Sent', sent, ' (' + leads + ' leads)')}')" onmouseleave="hideBarTip()" style="flex:1;background:#3b82f6;border-radius:2px 2px 0 0;height:${sentH}%;min-height:${sent > 0 ? 2 : 0}px;cursor:pointer;"></div>
-          <div onmouseenter="showBarTip(event,'${tip('Replied', replied, replied > 0 ? ' (' + replyPct + '%)' : '')}')" onmouseleave="hideBarTip()" style="flex:1;background:#00cc6a;border-radius:2px 2px 0 0;height:${repliedH}%;min-height:${replied > 0 ? 2 : 0}px;cursor:pointer;"></div>
+          <div onmouseenter="showBarTip(event,'${tip('Sent', sent, ' (' + leads + ' leads)')}')" onmouseleave="hideBarTip()" style="flex:1;background:#2563eb;border-radius:2px 2px 0 0;height:${sentH}%;min-height:${sent > 0 ? 2 : 0}px;cursor:pointer;"></div>
+          <div onmouseenter="showBarTip(event,'${tip('Replied', replied, replied > 0 ? ' (' + replyPct + '%)' : '')}')" onmouseleave="hideBarTip()" style="flex:1;background:#2b6a59;border-radius:2px 2px 0 0;height:${repliedH}%;min-height:${replied > 0 ? 2 : 0}px;cursor:pointer;"></div>
         </div>
         <div style="font-size:9px;color:var(--text-tertiary);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${dateLabel}</div>
       </div>`;
@@ -7305,7 +7439,7 @@ function renderOutreachAnalyticsPage() {
                 <td style="text-align:right;font-size:13px;color:var(--text-secondary);">${row.total || row.sent}</td>
                 <td style="text-align:right;font-size:13px;color:var(--text-secondary);">${row.sent}</td>
                 <td style="text-align:right;font-size:13px;color:var(--text-secondary);">${row.replied || 0}</td>
-                <td style="text-align:right;font-size:13px;font-weight:${highlight ? '600' : '400'};color:${highlight ? '#00cc6a' : 'var(--text-secondary)'};">${rate}%</td>
+                <td style="text-align:right;font-size:13px;font-weight:${highlight ? '600' : '400'};color:${highlight ? '#2b6a59' : 'var(--text-secondary)'};">${rate}%</td>
               </tr>`;
           }).join('')}
         </tbody>
@@ -7330,11 +7464,11 @@ function renderOutreachAnalyticsPage() {
         <div style="display:flex;align-items:center;gap:18px;">
           <div style="text-align:right;">
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Real Open</div>
-            <div style="font-size:14px;font-weight:600;color:${openRate > 15 ? '#00cc6a' : openRate > 5 ? '#f59e0b' : 'var(--text-secondary)'};">${openRate}%</div>
+            <div style="font-size:14px;font-weight:600;color:${openRate > 15 ? '#2b6a59' : openRate > 5 ? '#a86a12' : 'var(--text-secondary)'};">${openRate}%</div>
           </div>
           <div style="text-align:right;">
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Reply</div>
-            <div style="font-size:14px;font-weight:600;color:${replyRate > 3 ? '#00cc6a' : 'var(--text-secondary)'};">${replyRate}%</div>
+            <div style="font-size:14px;font-weight:600;color:${replyRate > 3 ? '#2b6a59' : 'var(--text-secondary)'};">${replyRate}%</div>
           </div>
         </div>
       </div>`;
@@ -7347,11 +7481,11 @@ function renderOutreachAnalyticsPage() {
     const senderDelivery = parseFloat(s.delivery_rate) || 0;
     let status, statusColor, statusBg;
     if (bounce > 5 || complaint > 0.5) {
-      status = 'Unhealthy'; statusColor = '#ef4444'; statusBg = '#ef444422';
+      status = 'Unhealthy'; statusColor = '#c53030'; statusBg = '#c5303022';
     } else if (bounce > 3 || complaint > 0.2) {
-      status = 'Warning'; statusColor = '#f59e0b'; statusBg = '#f59e0b22';
+      status = 'Warning'; statusColor = '#a86a12'; statusBg = '#a86a1222';
     } else {
-      status = 'Healthy'; statusColor = '#00cc6a'; statusBg = '#00cc6a22';
+      status = 'Healthy'; statusColor = '#2b6a59'; statusBg = '#2b6a5922';
     }
     return `
       <div class="card" style="padding:16px;">
@@ -7366,15 +7500,15 @@ function renderOutreachAnalyticsPage() {
           </div>
           <div>
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Delivery</div>
-            <div style="font-size:18px;font-weight:600;color:${senderDelivery >= 95 ? '#00cc6a' : senderDelivery >= 90 ? '#f59e0b' : '#ef4444'};">${parseInt(s.sent_7d) > 0 ? senderDelivery + '%' : '\u2014'}</div>
+            <div style="font-size:18px;font-weight:600;color:${senderDelivery >= 95 ? '#2b6a59' : senderDelivery >= 90 ? '#a86a12' : '#c53030'};">${parseInt(s.sent_7d) > 0 ? senderDelivery + '%' : '\u2014'}</div>
           </div>
           <div>
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Bounce</div>
-            <div style="font-size:18px;font-weight:600;color:${bounce > 3 ? '#f59e0b' : 'var(--text-secondary)'};">${bounce}%</div>
+            <div style="font-size:18px;font-weight:600;color:${bounce > 3 ? '#a86a12' : 'var(--text-secondary)'};">${bounce}%</div>
           </div>
           <div>
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);">Complaints</div>
-            <div style="font-size:18px;font-weight:600;color:${complaint > 0.2 ? '#ef4444' : 'var(--text-secondary)'};">${complaint}%</div>
+            <div style="font-size:18px;font-weight:600;color:${complaint > 0.2 ? '#c53030' : 'var(--text-secondary)'};">${complaint}%</div>
           </div>
         </div>
       </div>`;
@@ -7429,8 +7563,8 @@ function renderOutreachAnalyticsPage() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <div style="font-size:16px;font-weight:600;color:var(--text-primary);">Daily Activity</div>
         <div style="display:flex;gap:12px;font-size:11px;">
-          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;"></span> Sent</span>
-          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#00cc6a;"></span> Replied</span>
+          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#2563eb;"></span> Sent</span>
+          <span style="display:flex;align-items:center;gap:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#2b6a59;"></span> Replied</span>
         </div>
       </div>
       <div style="display:flex;gap:3px;align-items:flex-end;overflow-x:auto;padding-bottom:4px;">
@@ -7543,10 +7677,10 @@ function renderStonkBotPage() {
   const totalReturn = summary.totalReturn || 0;
 
   const statCards = [
-    { label: 'Equity', value: `$${equity.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, color: '#3b82f6' },
+    { label: 'Equity', value: `$${equity.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, color: '#2563eb' },
     { label: 'Cash', value: `$${cash.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, color: '#6b7280' },
-    { label: "Today's P&L", value: `${todayReturn >= 0 ? '+' : ''}$${todayReturn.toFixed(2)}`, color: todayReturn >= 0 ? '#00cc6a' : '#ef4444' },
-    { label: 'Total Return', value: `${totalReturn >= 0 ? '+' : ''}${totalReturn}%`, color: totalReturn >= 0 ? '#00cc6a' : '#ef4444' },
+    { label: "Today's P&L", value: `${todayReturn >= 0 ? '+' : ''}$${todayReturn.toFixed(2)}`, color: todayReturn >= 0 ? '#2b6a59' : '#c53030' },
+    { label: 'Total Return', value: `${totalReturn >= 0 ? '+' : ''}${totalReturn}%`, color: totalReturn >= 0 ? '#2b6a59' : '#c53030' },
   ];
 
   // P&L chart bars
@@ -7554,13 +7688,13 @@ function renderStonkBotPage() {
   const pnlBars = dailyPnl.map(d => {
     const change = d.ending_equity - d.starting_equity;
     const height = Math.max(2, Math.abs(change) / maxPnl * 80);
-    const color = change >= 0 ? '#00cc6a' : '#ef4444';
+    const color = change >= 0 ? '#2b6a59' : '#c53030';
     return `<div class="stonk-pnl-bar" title="${d.date}: ${change >= 0 ? '+' : ''}$${change.toFixed(2)}" style="height:${height}px;background:${color};"></div>`;
   }).join('');
 
   // Positions table rows
   const posRows = (positions || []).map(p => {
-    const plColor = p.unrealizedPl >= 0 ? '#00cc6a' : '#ef4444';
+    const plColor = p.unrealizedPl >= 0 ? '#2b6a59' : '#c53030';
     const plSign = p.unrealizedPl >= 0 ? '+' : '';
     return `<tr>
       <td style="font-weight:600;">${p.symbol}</td>
@@ -7576,8 +7710,8 @@ function renderStonkBotPage() {
   // Signals table (last 20)
   const recentSignals = (signals || []).slice(0, 20);
   const sigRows = recentSignals.map(s => {
-    const dirColor = s.direction === 'buy' ? '#00cc6a' : s.direction === 'sell' ? '#ef4444' : '#6b7280';
-    const dirBg = s.direction === 'buy' ? '#00cc6a22' : s.direction === 'sell' ? '#ef444422' : '#6b728022';
+    const dirColor = s.direction === 'buy' ? '#2b6a59' : s.direction === 'sell' ? '#c53030' : '#6b7280';
+    const dirBg = s.direction === 'buy' ? '#2b6a5922' : s.direction === 'sell' ? '#c5303022' : '#6b728022';
     const time = new Date(s.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     return `<tr>
       <td style="color:var(--text-tertiary);font-size:11px;">${time}</td>
@@ -7591,11 +7725,11 @@ function renderStonkBotPage() {
   // Trades table (last 20)
   const recentTrades = (trades || []).slice(0, 20);
   const tradeRows = recentTrades.map(t => {
-    const sideColor = t.side === 'buy' ? '#3b82f6' : '#f59e0b';
-    const sideBg = t.side === 'buy' ? '#3b82f622' : '#f59e0b22';
+    const sideColor = t.side === 'buy' ? '#2563eb' : '#a86a12';
+    const sideBg = t.side === 'buy' ? '#2563eb22' : '#a86a1222';
     const time = new Date(t.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     const pnlStr = t.realized_pnl ? `${t.realized_pnl >= 0 ? '+' : ''}$${t.realized_pnl.toFixed(2)}` : '—';
-    const pnlColor = t.realized_pnl > 0 ? '#00cc6a' : t.realized_pnl < 0 ? '#ef4444' : 'var(--text-tertiary)';
+    const pnlColor = t.realized_pnl > 0 ? '#2b6a59' : t.realized_pnl < 0 ? '#c53030' : 'var(--text-tertiary)';
     return `<tr>
       <td style="color:var(--text-tertiary);font-size:11px;">${time}</td>
       <td style="font-weight:600;">${t.symbol}</td>
@@ -7617,9 +7751,9 @@ function renderStonkBotPage() {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
       <div style="display:flex;align-items:center;gap:12px;">
         <h2 style="margin:0;">Stonk Bot</h2>
-        <span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:${isRunning ? '#00cc6a22' : '#f59e0b22'};color:${isRunning ? '#00cc6a' : '#f59e0b'};">${isRunning ? 'Running' : 'Paused'}</span>
-        ${isDryRun ? '<span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:#3b82f622;color:#3b82f6;">DRY RUN</span>' : ''}
-        ${status.dailyLossTriggered ? '<span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:#ef444422;color:#ef4444;">DAILY LOSS LIMIT</span>' : ''}
+        <span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:${isRunning ? '#2b6a5922' : '#a86a1222'};color:${isRunning ? '#2b6a59' : '#a86a12'};">${isRunning ? 'Running' : 'Paused'}</span>
+        ${isDryRun ? '<span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:#2563eb22;color:#2563eb;">DRY RUN</span>' : ''}
+        ${status.dailyLossTriggered ? '<span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:#c5303022;color:#c53030;">DAILY LOSS LIMIT</span>' : ''}
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-sm ${isRunning ? 'btn-secondary' : 'btn-primary'}" onclick="stonkBotControl('${isRunning ? 'pause' : 'resume'}')">
@@ -7675,7 +7809,7 @@ function renderStonkBotPage() {
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:24px;">
       <div class="card" style="padding:16px;text-align:center;">
         <div style="font-size:11px;color:var(--text-tertiary);">Win Rate</div>
-        <div style="font-size:20px;font-weight:700;color:${winRate >= 50 ? '#00cc6a' : '#ef4444'};">${winRate}%</div>
+        <div style="font-size:20px;font-weight:700;color:${winRate >= 50 ? '#2b6a59' : '#c53030'};">${winRate}%</div>
       </div>
       <div class="card" style="padding:16px;text-align:center;">
         <div style="font-size:11px;color:var(--text-tertiary);">Total Trades</div>
@@ -7683,11 +7817,11 @@ function renderStonkBotPage() {
       </div>
       <div class="card" style="padding:16px;text-align:center;">
         <div style="font-size:11px;color:var(--text-tertiary);">Wins</div>
-        <div style="font-size:20px;font-weight:700;color:#00cc6a;">${wins}</div>
+        <div style="font-size:20px;font-weight:700;color:#2b6a59;">${wins}</div>
       </div>
       <div class="card" style="padding:16px;text-align:center;">
         <div style="font-size:11px;color:var(--text-tertiary);">Losses</div>
-        <div style="font-size:20px;font-weight:700;color:#ef4444;">${losses}</div>
+        <div style="font-size:20px;font-weight:700;color:#c53030;">${losses}</div>
       </div>
       <div class="card" style="padding:16px;text-align:center;">
         <div style="font-size:11px;color:var(--text-tertiary);">Trading Days</div>

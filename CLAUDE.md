@@ -430,8 +430,12 @@ migrations/    (34 files) — 001 through 034
 
 ### Frontend
 ```
-app.js         — Signed-in dashboard, auth screens, booking modal, router glue
-styles.css     — Dashboard styles (dark theme)
+app.js         — Signed-in portal, auth screens, booking modal, router glue
+                 Auth: renderAuthView() draws login / forgot / reset / join.
+                 URLs: /sign-in, /join (invite-only, unlinked), /?reset=<token>, /?invite=<token>
+styles.css     — Portal + auth styles. LIGHT theme; all colors come from the :root tokens
+                 at the top of the file (navy sidebar re-declares them in .sidebar).
+                 Do not hard-code hex colors in app.js templates; use the tokens.
 shell.html     — Page shell + <head> source; Vercel's fallback for app/unknown URLs
 marketing/     — Public site (light theme, scoped under .mk)
   content.js   — ALL public copy and data. Read its header rules before editing:

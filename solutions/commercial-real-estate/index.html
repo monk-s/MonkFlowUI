@@ -52,10 +52,11 @@
   <meta name="theme-color" content="#12233a" />
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/marketing/marketing.css" />
-  <!-- Signed-in users go straight to the app: hide the prerendered public
-       page before first paint. showLanding() in app.js clears this class
-       if the session turns out to be invalid. -->
-  <script>try { if (localStorage.getItem('accessToken')) document.documentElement.classList.add('has-session'); } catch (e) {}</script>
+  <!-- Signed-in users go straight to the app, and password-reset / invite
+       links go straight to the auth screens: hide the prerendered public
+       page before first paint. showLanding() and showAuth() in app.js
+       clear this class. -->
+  <script>try { if (localStorage.getItem('accessToken') || /[?&](reset|invite)=/.test(location.search)) document.documentElement.classList.add('has-session'); } catch (e) {}</script>
   <!-- Plausible analytics (privacy-first, no cookie banner). Tagged-events
        build supports manual window.plausible('Event') calls for funnel
        tracking. INERT until monkflow.io is added in the Plausible dashboard —

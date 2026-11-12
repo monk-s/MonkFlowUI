@@ -299,14 +299,6 @@ html.has-session #landing-container { display: none; }
 .mk-footer-bottom div { display: flex; gap: 24px; }
 .mk-footer-note { margin-top: 16px; font-size: 12.5px; color: #71839a; max-width: 80ch; line-height: 1.5; }
 
-/* Booking modal, when opened from the public site */
-body.mk-active .modal-overlay { background: rgba(15, 27, 45, 0.55); }
-body.mk-active .modal-box { background: #12233a; border-color: #2a4260; }
-body.mk-active .modal-box .btn-primary { background: #7cc4ae; color: #0f1b2d; box-shadow: none; }
-body.mk-active .modal-box .btn-primary:hover { background: #93d2bd; box-shadow: none; transform: none; }
-body.mk-active .modal-box input, body.mk-active .modal-box select, body.mk-active .modal-box textarea { background: #0f1b2d; border-color: #2a4260; }
-body.mk-active .toast { box-shadow: 0 8px 24px rgba(15, 27, 45, 0.2); }
-
 /* Responsive */
 @media (max-width: 1000px) {
   .mk-nav-links, .mk-nav-actions { display: none; }
