@@ -254,7 +254,6 @@ MK.onClick = function (e) {
     showSchedulingModal({ intent: el.getAttribute('data-intent') || '', vertical: el.getAttribute('data-vertical') || '' });
     return;
   }
-  if ((el = e.target.closest('[data-signin]'))) { e.preventDefault(); showAuth(); return; }
   if ((el = e.target.closest('[data-legal]'))) { e.preventDefault(); showLegalPage(el.getAttribute('data-legal')); return; }
 
   if ((el = e.target.closest('[data-nav-toggle]'))) {

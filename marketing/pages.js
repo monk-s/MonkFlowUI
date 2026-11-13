@@ -13,7 +13,7 @@
    Interactions are wired by delegated listeners in marketing/site.js:
      a[data-link]     client-side navigation
      [data-book]      open the booking modal (data-intent, data-vertical)
-     [data-signin]    client sign-in
+     (Client sign in is a plain link to /sign-in, which is the portal app.)
      [data-legal]     privacy / terms modal
      [data-tab]       tab switch inside a [data-tabs] group
      [data-filter]    integration table filter
@@ -75,7 +75,7 @@ MK.nav = function (path) {
         '<a href="/security" data-link' + cur('/security') + '>Security</a>' +
       '</nav>' +
       '<div class="mk-nav-actions">' +
-        '<button type="button" class="mk-nav-signin" data-signin>Client sign in</button>' +
+        '<a href="/sign-in" class="mk-nav-signin">Client sign in</a>' +
         MK.bookBtn('Book a working session', { cls: 'mk-btn mk-btn-primary mk-btn-sm' }) +
       '</div>' +
       '<button type="button" class="mk-nav-toggle" data-nav-toggle aria-label="Menu" aria-expanded="false">' + MK.svg.menu + '</button>' +
@@ -106,7 +106,7 @@ MK.footer = function () {
         '<div><h4>Get started</h4><ul>' +
           '<li><button type="button" data-book>Book a working session</button></li>' +
           '<li><button type="button" data-book data-intent="audit">Start with a workflow audit</button></li>' +
-          '<li><button type="button" data-signin>Client sign in</button></li>' +
+          '<li><a href="/sign-in">Client sign in</a></li>' +
         '</ul></div>' +
       '</div>' +
       '<div class="mk-footer-bottom">' +

@@ -112,7 +112,7 @@ html.has-session #landing-container { display: none; }
 .mk-menu strong { display: block; font-size: 15px; font-weight: 600; }
 .mk-menu span { display: block; font-size: 13px; color: var(--mk-ink-3); line-height: 1.4; margin-top: 2px; }
 .mk-nav-actions { display: flex; align-items: center; gap: 18px; }
-.mk-nav-signin { font: 500 15px/1 var(--mk-sans); color: var(--mk-ink-2); background: none; border: 0; cursor: pointer; padding: 8px 0; }
+.mk-nav-signin { font: 500 15px/1 var(--mk-sans); color: var(--mk-ink-2); padding: 8px 0; }
 .mk-nav-signin:hover { color: var(--mk-ink); }
 .mk-nav-toggle { display: none; background: none; border: 0; padding: 8px; margin-right: -8px; cursor: pointer; color: var(--mk-ink); }
 .mk-nav-toggle svg { width: 24px; height: 24px; display: block; }

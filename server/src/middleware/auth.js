@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const ApiError = require('../utils/ApiError');
 const { loadSession, COOKIE, parseCookies } = require('../services/session.service');
+const { crossSiteWrite, coded } = require('./session');
 
 /**
  * Authentication for the existing (pre-portal-v2) API routes.
@@ -37,7 +38,14 @@ const fromCookie = async (req) => {
 
 const authenticate = async (req, res, next) => {
   try {
-    const user = fromBearer(req) || await fromCookie(req);
+    let user = fromBearer(req);
+    if (!user) {
+      user = await fromCookie(req);
+      // A cookie rides along on any request the browser makes, so a write
+      // authenticated by one must come from our own site (CSRF). Bearer
+      // tokens are attached deliberately by the caller and need no such check.
+      if (user && crossSiteWrite(req)) throw coded(403, 'bad_origin', 'This request came from a site that is not allowed.');
+    }
     if (!user) throw ApiError.unauthorized('Missing or invalid authorization header');
     req.user = user;
     next();

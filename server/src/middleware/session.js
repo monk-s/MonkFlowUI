@@ -75,13 +75,15 @@ function allowedOrigins() {
  * Requests with no Origin (curl, server-to-server) carry no ambient cookie
  * from a victim's browser and are allowed through to normal auth.
  */
-const sameOrigin = (req, res, next) => {
-  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+const crossSiteWrite = (req) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return false;
   const origin = req.headers.origin;
-  if (origin && !allowedOrigins().has(origin)) {
-    return next(coded(403, 'bad_origin', 'This request came from a site that is not allowed.'));
-  }
+  return !!origin && !allowedOrigins().has(origin);
+};
+
+const sameOrigin = (req, res, next) => {
+  if (crossSiteWrite(req)) return next(coded(403, 'bad_origin', 'This request came from a site that is not allowed.'));
   next();
 };
 
-module.exports = { requireSession, requireOrg, requirePermission, requirePlatformAdmin, sameOrigin, coded };
+module.exports = { requireSession, requireOrg, requirePermission, requirePlatformAdmin, sameOrigin, crossSiteWrite, coded };

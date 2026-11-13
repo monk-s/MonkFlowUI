@@ -1072,3 +1072,99 @@ Stonk Bot page, and real email links end to end.
 - Files modified: 6 (app.js, styles.css, shell.html, marketing/marketing.css, CLAUDE.md, AUDIT_LOG.md) + 11 regenerated pages
 - Bugs fixed: 2 HIGH, 1 MEDIUM, 4 LOW (1 MEDIUM needs server work)
 - Tests added: 0 (browser-verified)
+
+## Session: 2026-11-13 — portal v2, Phase 1 (workspaces, cookie sessions, new portal app)
+
+Branch `feat/portal-phase-1`, on top of `feat/client-portal-refresh`. NOT merged,
+NOT deployed. Plan: `~/.claude/plans/luminous-finding-melody.md`.
+
+### Audit Findings
+- [CRITICAL] `POST /auth/signup` was open: anyone could create an `owner`
+  account by calling the API. FIXED: the route is gone; accounts are created
+  only by accepting an invitation.
+- [HIGH] Access and refresh tokens lived in `localStorage`, readable by any
+  script on the page. FIXED: sign-in state is an HttpOnly, SameSite=Lax cookie
+  backed by a hashed row in `sessions`, with an idle limit per workspace and a
+  12-hour absolute limit. `app.js` no longer reads, stores or sends a token.
+- [HIGH] One user was one tenant; `team_members` invitations could not be
+  accepted and roles were never checked. FIXED: `organizations`, `memberships`
+  (admin / reviewer / auditor), working invitations, permissions enforced on
+  the server, and Postgres row-level security under a restricted role
+  (`monkflow_portal`) for every client-facing portal query.
+- [HIGH] No audit log. FIXED: `audit_log` is append-only (trigger rejects
+  UPDATE / DELETE / TRUNCATE) and each row is chained to the previous hash.
+- [MEDIUM] Legacy routes authenticated by cookie had no cross-site write
+  check beyond SameSite. FIXED: `authenticate` refuses a cookie-authenticated
+  write whose Origin is not our own site.
+- [MEDIUM] In the legacy app, a "welcome" timer closed whatever dialog a staff
+  user had open 0.8 s after load. FIXED (timer removed; clients no longer
+  reach that app).
+- [LOW] `var(--red)` was not a defined token. Uses `--error`.
+- [MEDIUM] Production has no second factor and no Microsoft / Google sign-in
+  until a hosted identity vendor is configured. With `IDENTITY_PROVIDER=local`
+  the portal is password-only and the SSO buttons are hidden. DEFERRED: needs
+  a vendor account (see Next).
+- [MEDIUM] Migrations 013 and 026 fail on an empty database (pre-existing).
+  Tests tolerate it. DEFERRED.
+- [LOW] Sign-in rate limits key on client IP; behind the Vercel proxy that
+  may be a handful of shared addresses. To check on a preview deploy.
+
+### Improvements Made
+- New React + TypeScript app in `portal/`: sign-in (email first), invitation
+  acceptance, two-step setup, workspace picker, password reset, console shell
+  with command palette and idle-timeout dialog, working Team and Security
+  settings. Overview is a getting-started card; Review, Workflows,
+  Integrations, Vault and Requests say "Not open yet".
+- Sign-in trust panel states only verified facts and reads the live health
+  check; a test bans SOC 2, "end-to-end", "fixed-fee" and similar wording.
+- Identity seam (`services/identity/`): `local` (default) and `stub` (tests and
+  local development; refuses to load in production).
+- Deploy wiring: `scripts/build-site.mjs` builds `dist/` from an explicit list
+  of public files plus the portal build and fails on a missing asset, a
+  sitemap page with no file, or a private file in the output. `vercel.json`
+  now sets the build, serves `dist/`, rewrites the portal paths, redirects
+  `/login` and `/join`, and adds no-frame / no-referrer headers to sign-in,
+  portal and admin pages. `scripts/dev-server.mjs` applies the same file
+  locally and proxies `/api`.
+- Legacy `app.js`: staff console only, at `/admin`. Auth screens and their CSS
+  removed (about 500 lines). Old `?reset=` links go to `/auth/reset`; old
+  `?invite=` and `/join` go to `/sign-in`. Timer refreshes no longer count as
+  activity, so an unattended console still times out.
+- Staff screen Admin > Client Workspaces: create a workspace, invite its first
+  admin, invite others, edit type / domains / idle limit. Re-inviting an
+  address replaces its open invitation.
+- `server/scripts/portal-preflight.js`: read-only check of a database before
+  the migrations run (blockers, who has been signing in, what the backfill
+  creates).
+- Public site: "Client sign in" is a plain link to `/sign-in`.
+
+### Verification
+On the Mac mini only. API: 50 Jest tests against a throwaway Postgres (auth
+flows with the vendor stubbed, invitations, role matrix, isolation including
+"query forgets its WHERE", audit-log immutability). Portal: 19 Playwright
+tests in Chrome against the Vite dev server. Built site: 11 Playwright tests
+against `dist/` behind the vercel.json emulation (deep links and refresh,
+old links, headers, nothing private published, `/admin` hand-over for staff,
+clients and signed-out visitors, workspace create / invite / edit).
+`npm run check` passes. NOT verified: anything on Vercel or Railway, the four
+migrations against production data, cookies through the real Vercel proxy,
+real email delivery.
+
+### Next Session Priority
+1. Before any merge: run `server/scripts/portal-preflight.js` against
+   production and read its output. Hold the merge until Phase 2 if any client
+   signs in today (they would land on a mostly empty console).
+2. Push `feat/client-portal-refresh` and this branch from the MacBook; check a
+   Vercel preview: build succeeds, every portal path deep-links, `/api`
+   cookies survive the proxy, rate limits see real client IPs.
+3. Identity vendor account (working choice: WorkOS), then the adapter in
+   `services/identity/` for Microsoft / Google sign-in, emailed codes and MFA.
+4. Phase 2: Overview, engagement tracker, workflows.
+5. Privacy/Terms text still names getmonkflow.com; Settings > Notifications
+   toggles in the staff console still save nothing.
+
+### Metrics
+- Files modified: about 115 across two commits
+- Bugs fixed: 1 CRITICAL, 3 HIGH, 2 MEDIUM, 1 LOW (2 MEDIUM, 1 LOW deferred)
+- Tests added: 50 API, 30 browser
+- Commits: 2 (local, not pushed)

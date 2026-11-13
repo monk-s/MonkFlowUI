@@ -77,43 +77,36 @@ const icons = {
 };
 
 // ── API Client ───────────────────────────────────────────
-const API_BASE = window.location.hostname === 'localhost'
-  ? 'http://localhost:8080/api/v1'
-  : '/api/v1';
+// Always same-origin: Vercel (and scripts/dev-server.mjs locally) passes
+// /api/* to the API. Signing in happens in the portal app (/sign-in), which
+// leaves an HttpOnly session cookie the browser sends with every request
+// here. This file never sees, stores or sends a token.
+const API_BASE = '/api/v1';
+const SIGN_IN_URL = '/sign-in';
+
+// The admin console is the only signed-in screen left in this file. Anything
+// that finds the session gone sends the person to sign in and back.
+function goToSignIn(reason) {
+  const q = new URLSearchParams();
+  if (reason) q.set('reason', reason);
+  if (window.location.pathname.startsWith('/admin')) q.set('next', '/admin');
+  const qs = q.toString();
+  window.location.assign(SIGN_IN_URL + (qs ? `?${qs}` : ''));
+}
+
 const api = {
-  get token() { return localStorage.getItem('accessToken'); },
-  get refreshToken() { return localStorage.getItem('refreshToken'); },
-  setTokens(access, refresh) {
-    localStorage.setItem('accessToken', access);
-    localStorage.setItem('refreshToken', refresh);
-  },
-  clearTokens() {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-  },
-  async request(method, path, body) {
+  async request(method, path, body, opts) {
     const headers = { 'Content-Type': 'application/json' };
-    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
-    const opts = { method, headers };
-    if (body) opts.body = JSON.stringify(body);
-    let res = await fetch(`${API_BASE}${path}`, opts);
-    // Auto-refresh on 401
-    if (res.status === 401 && this.refreshToken && !path.includes('/auth/')) {
-      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: this.refreshToken }),
-      });
-      if (refreshRes.ok) {
-        const data = await refreshRes.json();
-        this.setTokens(data.accessToken, data.refreshToken);
-        headers['Authorization'] = `Bearer ${data.accessToken}`;
-        res = await fetch(`${API_BASE}${path}`, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
-      } else {
-        this.clearTokens();
-        isAuthenticated = false;
-        showLanding();
-        return null;
-      }
+    // Polling must not count as activity, or an unattended tab never times out.
+    if (opts && opts.background) headers['X-MF-Background'] = '1';
+    const init = { method, headers, credentials: 'same-origin' };
+    if (body) init.body = JSON.stringify(body);
+    const res = await fetch(`${API_BASE}${path}`, init);
+    if (res.status === 401 && isAuthenticated && !path.startsWith('/auth/')) {
+      // The session ended (idle limit, sign-out elsewhere, 12-hour limit).
+      isAuthenticated = false;
+      goToSignIn('expired');
+      return null;
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: { message: 'Request failed' } }));
@@ -121,11 +114,13 @@ const api = {
       if (res.status === 429 && /plan|limit/i.test(errMsg)) {
         showUpgradeModal(errMsg);
       }
-      throw new Error(errMsg);
+      const error = new Error(errMsg);
+      error.status = res.status;
+      throw error;
     }
     return res.json();
   },
-  get(path) { return this.request('GET', path); },
+  get(path, opts) { return this.request('GET', path, undefined, opts); },
   post(path, body) { return this.request('POST', path, body); },
   put(path, body) { return this.request('PUT', path, body); },
   patch(path, body) { return this.request('PATCH', path, body); },
@@ -135,7 +130,8 @@ const api = {
 
 // ── State ──────────────────────────────────────────────
 let currentPage = 'dashboard';
-let isAuthenticated = !!localStorage.getItem('accessToken');
+// True once the server has confirmed a staff session (see the boot code).
+let isAuthenticated = false;
 let currentUser = null;
 function isAdmin() { return currentUser?.role === 'superadmin'; }
 let notificationPanelOpen = false;
@@ -480,6 +476,7 @@ function navigateTo(page) {
   if (page === 'workflow-detail') loadWorkflowDetail();
   if (page === 'agent-detail') loadAgentDetail();
   if (page === 'admin') loadAdminData();
+  if (page === 'workspaces') loadWorkspacesData();
   if (page === 'billing') loadBillingData();
   if (page === 'outreach') loadOutreachData();
   if (page === 'stonkbot') loadStonkBotData();
@@ -514,9 +511,10 @@ async function loadWorkflowsData() {
   }
 }
 
-async function loadLogsData() {
+// `poll` is true when a timer asked, so it does not count as activity.
+async function loadLogsData(poll) {
   try {
-    const result = await api.get('/logs?limit=50');
+    const result = await api.get('/logs?limit=50', poll ? { background: true } : undefined);
     logsData = result.data || [];
     renderMainContent();
   } catch (err) {
@@ -529,7 +527,7 @@ function toggleLiveMode(el) {
   el.classList.toggle('active');
   if (el.classList.contains('active')) {
     showToast('Live mode on — refreshing every 5s', 'info');
-    liveModeInterval = setInterval(() => loadLogsData(), 5000);
+    liveModeInterval = setInterval(() => loadLogsData(true), 5000);
   } else {
     showToast('Live mode off', 'info');
     if (liveModeInterval) { clearInterval(liveModeInterval); liveModeInterval = null; }
@@ -605,38 +603,62 @@ async function loadAgentsData() {
 })();
 
 // ── Initialize ──────────────────────────────────────────
+// This file serves two things:
+//   - the public site, at every address except /admin
+//   - the MonkFlow admin console, at /admin, for staff only
+// Clients sign in at /sign-in and work in /dashboard, which are a separate
+// app (portal/). Nothing here decides whether someone is signed in from
+// browser storage; only the server's answer counts.
+const ADMIN_PATH = '/admin';
+function onAdminPath() {
+  const p = window.location.pathname.replace(/\/+$/, '');
+  return p === ADMIN_PATH || p.startsWith(ADMIN_PATH + '/');
+}
+
+// Links from emails sent before the portal moved. Returns true if the page
+// is being redirected.
+function redirectOldAuthLinks() {
+  const q = new URLSearchParams(window.location.search);
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (q.get('reset')) { window.location.replace(`/auth/reset?token=${encodeURIComponent(q.get('reset'))}`); return true; }
+  if (q.get('invite') || path === '/join' || path === '/login') { window.location.replace(SIGN_IN_URL); return true; }
+  return false;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
-  // A password-reset link always opens the reset screen, signed in or not.
-  const bootAuth = authViewForLocation();
-  if (bootAuth && bootAuth.view === 'reset') { showAuth(bootAuth); return; }
-  if (isAuthenticated) {
-    try {
-      const data = await api.get('/users/me');
-      if (data && data.user) {
-        currentUser = data.user;
-        // A signed-in visitor to /sign-in or /join belongs in the portal.
-        if (authViewForLocation()) window.history.replaceState({}, '', '/');
-        showApp();
-      } else {
-        api.clearTokens();
-        isAuthenticated = false;
-        showPublic();
-      }
-    } catch {
-      // Token invalid — show landing
-      api.clearTokens();
-      isAuthenticated = false;
-      showPublic();
-    }
-  } else {
-    showPublic();
+  if (redirectOldAuthLinks()) return;
+  if (!onAdminPath()) { showLanding(); return; }
+
+  // /admin: ask the server who this is.
+  let session = null;
+  try {
+    const data = await api.get('/auth/session', { background: true });
+    session = data && data.session;
+  } catch (err) {
+    if (err.status !== 401) { showAdminUnavailable(); return; }
   }
+  if (!session) { goToSignIn(); return; }
+  if (!session.user.isPlatformAdmin) { window.location.replace('/dashboard'); return; }
+  try {
+    const data = await api.get('/users/me');
+    currentUser = data.user;
+  } catch { showAdminUnavailable(); return; }
+  isAuthenticated = true;
+  showApp();
 });
 
-// Not signed in: the URL decides between the auth screens and the site.
-function showPublic() {
-  const auth = authViewForLocation();
-  if (auth) showAuth(auth); else showLanding();
+// The API did not answer. Say so rather than bouncing to sign-in, which
+// would look like being signed out.
+function showAdminUnavailable() {
+  document.documentElement.classList.remove('has-session');
+  document.title = 'Admin console unavailable | MonkFlow';
+  const box = document.createElement('div');
+  box.setAttribute('role', 'alert');
+  box.style.cssText = 'max-width:440px;margin:18vh auto;padding:0 24px;font:15px/1.6 Inter,system-ui,sans-serif;color:var(--text-primary)';
+  box.innerHTML = '<h1 style="font-size:20px;margin:0 0 8px">The admin console could not load</h1>'
+    + '<p style="margin:0 0 20px;color:var(--text-secondary)">The server did not answer. Your session has not been ended.</p>'
+    + '<button class="btn btn-primary" onclick="window.location.reload()">Try again</button>';
+  document.body.appendChild(box);
 }
 
 // ── Client-side router ────────────────────────────────────
@@ -685,9 +707,11 @@ function dispatchLandingRoute() {
 // Back/forward button handling. Without this, history.pushState would
 // change the URL but the page wouldn't re-render on browser back.
 window.addEventListener('popstate', () => {
-  // The signed-in portal has its own state and ignores the address bar.
+  // The admin console has its own state and ignores the address bar.
   if (!document.getElementById('app-container').classList.contains('hidden')) return;
-  showPublic();
+  // Back from the public site to /admin, or forward to it: load it properly.
+  if (onAdminPath()) { window.location.reload(); return; }
+  showLanding();
 });
 
 // ── Hash route handler (for in-page actions only) ─────────
@@ -719,16 +743,13 @@ window.addEventListener('hashchange', handleHashRoute);
 
 // ── Landing Page ──────────────────────────────────────────
 function showLanding() {
-  document.getElementById('auth-container').classList.add('hidden');
   document.getElementById('app-container').classList.add('hidden');
   document.getElementById('landing-container').classList.remove('hidden');
   // Public-site theme hooks (marketing/marketing.css). has-session is set
-  // by an inline script in the page head to avoid flashing the public page
-  // at signed-in users; clear it now that we know there is no session.
+  // by an inline script in the page head on /admin and on old reset links,
+  // so the public page does not flash before the redirect; clear it here.
   document.body.classList.add('mk-active');
   document.documentElement.classList.remove('has-session');
-  // /sign-in and /join are not public pages; e.g. after signing out.
-  if (authViewForLocation()) window.history.replaceState({}, '', '/');
   // Pathname dispatch: visiting /for-advisors directly renders that
   // page, visiting /case-studies/... renders the case study, anything
   // else renders the default landing.
@@ -737,25 +758,11 @@ function showLanding() {
   handleHashRoute();
 }
 
-// Show the auth screens. `opts` picks the view ({ view, resetToken });
-// with no opts it is the sign-in screen, and the address becomes /sign-in
-// so the screen can be bookmarked and the back button returns to the site.
-function showAuth(opts) {
+function showApp() {
+  document.title = 'Admin console | MonkFlow';
   document.body.classList.remove('mk-active');
   document.documentElement.classList.remove('has-session');
   document.getElementById('landing-container').classList.add('hidden');
-  document.getElementById('app-container').classList.add('hidden');
-  document.getElementById('auth-container').classList.remove('hidden');
-  if (!opts && !authViewForLocation()) window.history.pushState({}, '', '/sign-in');
-  window.scrollTo(0, 0);
-  renderAuthView((opts && opts.view) || 'login', opts && opts.resetToken ? { resetToken: opts.resetToken } : undefined);
-}
-
-function showApp() {
-  document.title = 'Client portal | MonkFlow';
-  document.body.classList.remove('mk-active');
-  document.getElementById('landing-container').classList.add('hidden');
-  document.getElementById('auth-container').classList.add('hidden');
   document.getElementById('app-container').classList.remove('hidden');
   renderSidebar();
   renderTopbar();
@@ -775,10 +782,9 @@ function showApp() {
     window.history.replaceState({}, '', window.location.pathname);
   }
 
-  // Show onboarding for new users
-  if (!localStorage.getItem('onboarding_completed')) {
-    setTimeout(() => showOnboarding(), 800);
-  }
+  // The client welcome dialog is not shown here any more: only staff reach
+  // this app, and for staff the timer used to close whatever dialog they had
+  // just opened.
 
   // Check for hash routes (e.g., #schedule) — works for both logged-in and logged-out users
   handleHashRoute();
@@ -824,108 +830,14 @@ function closeOnboarding() {
   closeModal();
 }
 
-// ── Auth Handlers ──────────────────────────────────────
-function authValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || ''); }
-
-async function handleLogin() {
-  const email = document.getElementById('auth-email')?.value?.trim();
-  const password = document.getElementById('auth-password')?.value;
-  if (!authValidEmail(email)) return authError('Enter the email address you sign in with.', 'auth-email');
-  if (!password) return authError('Enter your password.', 'auth-password');
-  authError('');
-  const done = authBusy('Signing in…');
-  try {
-    const data = await api.post('/auth/login', { email, password });
-    api.setTokens(data.accessToken, data.refreshToken);
-    currentUser = data.user;
-    isAuthenticated = true;
-    authState = { view: 'login', email: '', resetToken: '', notice: '' };
-    // The portal has no URLs of its own; leave /sign-in so a refresh or a
-    // later sign-out lands somewhere sensible.
-    window.history.replaceState({}, '', '/');
-    showApp();
-    showToast(`Welcome back, ${data.user.first_name}!`);
-  } catch (err) {
-    done();
-    const offline = err instanceof TypeError;
-    authError(offline ? 'We could not reach the server. Check your connection and try again.' : (err.message || 'That email and password do not match.'), offline ? null : 'auth-password');
-  }
-}
-
-async function handleSignup() {
-  const val = (id) => document.getElementById(id)?.value?.trim();
-  const firstName = val('auth-first-name');
-  const lastName = val('auth-last-name');
-  const email = val('auth-email');
-  const company = val('auth-company');
-  const password = document.getElementById('auth-password')?.value;
-  if (!firstName) return authError('Enter your first name.', 'auth-first-name');
-  if (!lastName) return authError('Enter your last name.', 'auth-last-name');
-  if (!authValidEmail(email)) return authError('Enter a valid work email address.', 'auth-email');
-  if (!password || password.length < 8) return authError('Choose a password of at least 8 characters.', 'auth-password');
-  authError('');
-  const done = authBusy('Creating your login…');
-  try {
-    const data = await api.post('/auth/signup', { email, password, firstName, lastName, company });
-    api.setTokens(data.accessToken, data.refreshToken);
-    currentUser = data.user;
-    isAuthenticated = true;
-    window.history.replaceState({}, '', '/');
-    showApp();
-    showToast('Your login is ready. Welcome to MonkFlow.');
-  } catch (err) {
-    done();
-    authError(err instanceof TypeError ? 'We could not reach the server. Check your connection and try again.' : (err.message || 'We could not create your login. Please try again.'));
-  }
-}
-
+// ── Sign out ───────────────────────────────────────────
 async function handleLogout() {
   try {
-    await api.post('/auth/logout', { refreshToken: api.refreshToken });
-  } catch { /* ignore logout errors */ }
-  api.clearTokens();
+    await api.post('/auth/sign-out');
+  } catch { /* the cookie is cleared by the server either way it can be */ }
   isAuthenticated = false;
   currentUser = null;
-  currentPage = 'dashboard';
-  showLanding();
-  showToast('Signed out successfully', 'info');
-}
-
-async function handleForgotPassword() {
-  const email = document.getElementById('auth-email')?.value?.trim();
-  if (!authValidEmail(email)) return authError('Enter the email address you sign in with.', 'auth-email');
-  authError('');
-  const done = authBusy('Sending…');
-  try {
-    await api.post('/auth/forgot-password', { email });
-  } catch (err) {
-    // A network failure is worth telling the person about. Anything else
-    // gets the same neutral confirmation, so this screen cannot be used to
-    // find out which emails have accounts.
-    if (err instanceof TypeError) { done(); return authError('We could not reach the server. Check your connection and try again.'); }
-  }
-  renderAuthView('forgot-sent', { email });
-}
-
-async function handleResetPassword() {
-  const password = document.getElementById('auth-password')?.value || '';
-  const confirm = document.getElementById('auth-password-confirm')?.value || '';
-  if (password.length < 8) return authError('Choose a password of at least 8 characters.', 'auth-password');
-  if (password !== confirm) return authError('The two passwords do not match.', 'auth-password-confirm');
-  authError('');
-  const done = authBusy('Saving…');
-  try {
-    await api.post('/auth/reset-password', { token: authState.resetToken, newPassword: password });
-    // Drop the one-time token from the address bar and history.
-    window.history.replaceState({}, '', '/sign-in');
-    renderAuthView('login', { resetToken: '', notice: 'Your password has been updated. Sign in with your new password.' });
-  } catch (err) {
-    done();
-    if (err instanceof TypeError) return authError('We could not reach the server. Check your connection and try again.');
-    const box = document.getElementById('auth-error');
-    box.innerHTML = 'This reset link has expired or has already been used. <button type="button" class="auth-link" onclick="window.history.replaceState({}, \'\', \'/sign-in\');renderAuthView(\'forgot\')">Send a new link</button>';
-    box.hidden = false;
-  }
+  window.location.assign(`${SIGN_IN_URL}?reason=signed_out`);
 }
 
 // ── Data Fetching Helpers ──────────────────────────────
@@ -976,233 +888,6 @@ function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
 }
 
-// ============================================================
-// AUTH SCREENS
-// ============================================================
-// One renderer, four views, all drawn into #auth-login:
-//   login   /sign-in            the client sign-in screen
-//   forgot  /sign-in (in place) request a password-reset email
-//   reset   /?reset=<token>     set a new password (link from that email)
-//   join    /join, /?invite=…   create an account
-//
-// Accounts are invite-only: nothing on the public site or the sign-in
-// screen links to the join view. Send a client monkflow.io/join to let
-// them create their login. (The signup API itself is still open; closing
-// it needs a server change.)
-//
-// Styles: the AUTH SCREENS block in styles.css.
-const AUTH_PATHS = { '/sign-in': 'login', '/join': 'join' };
-let authState = { view: 'login', email: '', resetToken: '', notice: '' };
-
-// Which auth view, if any, does this URL ask for?
-function authViewForLocation() {
-  const q = new URLSearchParams(window.location.search);
-  if (q.get('reset')) return { view: 'reset', resetToken: q.get('reset') };
-  if (q.get('invite')) return { view: 'join' };
-  const view = AUTH_PATHS[window.location.pathname.replace(/\/+$/, '') || '/'];
-  return view ? { view } : null;
-}
-
-function authShell(formHtml) {
-  return `
-    <div class="auth-screen">
-      <div class="auth-left">
-        <div class="auth-top">
-          <a href="/" class="auth-logo" onclick="event.preventDefault();leaveAuth()"><img src="/logo-mark.svg" alt="" width="28" height="31">MonkFlow</a>
-          <a href="/" class="auth-back" onclick="event.preventDefault();leaveAuth()">&larr; Back to monkflow.io</a>
-        </div>
-        <div class="auth-form-wrapper">${formHtml}</div>
-        <div class="auth-legal">
-          <a href="#" onclick="event.preventDefault();showLegalPage('privacy')">Privacy policy</a> &nbsp;·&nbsp;
-          <a href="#" onclick="event.preventDefault();showLegalPage('terms')">Terms of service</a>
-        </div>
-      </div>
-      <div class="auth-right">
-        <div class="auth-hero-content">
-          <div class="auth-eyebrow">Client portal</div>
-          <h2>Everything we have built for you, in one place.</h2>
-          <div class="auth-features">
-            <div class="auth-feature"><strong>Project status</strong><span>Where each build stands, with updates and files from us.</span></div>
-            <div class="auth-feature"><strong>Your tools</strong><span>What is live, how often it runs and whether anything needs attention.</span></div>
-            <div class="auth-feature"><strong>A direct line</strong><span>Reach the engineer who built your system. There is no ticket queue.</span></div>
-          </div>
-        </div>
-      </div>
-    </div>`;
-}
-
-function authPasswordField(id, label, autocomplete, extra) {
-  return `
-    <div class="form-group">
-      <label class="form-label" for="${id}"><span>${label}</span>${extra || ''}</label>
-      <div class="auth-password">
-        <input type="password" id="${id}" name="${id}" autocomplete="${autocomplete}" required />
-        <button type="button" class="auth-password-toggle" aria-controls="${id}" aria-pressed="false" onclick="toggleAuthPassword(this)">Show</button>
-      </div>
-    </div>`;
-}
-
-function authViewHtml() {
-  const email = escapeHtml(authState.email || '');
-  const notice = authState.notice ? `<div class="auth-message success" role="status">${escapeHtml(authState.notice)}</div>` : '';
-  const error = '<div class="auth-message error" id="auth-error" role="alert" hidden></div>';
-
-  if (authState.view === 'forgot') {
-    return `
-      <h1 class="auth-heading">Reset your password</h1>
-      <p class="auth-subheading">Enter the email you sign in with and we will send you a link to choose a new password.</p>
-      <form class="auth-form" onsubmit="event.preventDefault();handleForgotPassword()" novalidate>
-        ${error}
-        <div class="form-group">
-          <label class="form-label" for="auth-email">Email</label>
-          <input type="email" id="auth-email" name="email" autocomplete="username" inputmode="email" value="${email}" required />
-        </div>
-        <button type="submit" class="btn btn-primary" id="auth-submit">Send reset link</button>
-      </form>
-      <div class="auth-footer"><button type="button" class="auth-link" onclick="renderAuthView('login')">&larr; Back to sign in</button></div>`;
-  }
-
-  if (authState.view === 'forgot-sent') {
-    return `
-      <h1 class="auth-heading">Check your email</h1>
-      <p class="auth-subheading">If there is an account for <strong>${email}</strong>, a reset link is on its way. The link works for one hour.</p>
-      <p class="auth-subheading">Nothing after a few minutes? Check your spam folder, or try again with the address your account was set up with.</p>
-      <div class="auth-form">
-        <button type="button" class="btn btn-primary" onclick="renderAuthView('login')">Back to sign in</button>
-        <button type="button" class="auth-link" style="align-self:center" onclick="renderAuthView('forgot')">Use a different email</button>
-      </div>`;
-  }
-
-  if (authState.view === 'reset') {
-    return `
-      <h1 class="auth-heading">Choose a new password</h1>
-      <p class="auth-subheading">You will use it to sign in to your MonkFlow client portal.</p>
-      <form class="auth-form" onsubmit="event.preventDefault();handleResetPassword()" novalidate>
-        ${error}
-        ${authPasswordField('auth-password', 'New password', 'new-password')}
-        <div class="auth-hint" style="margin-top:-10px">At least 8 characters.</div>
-        ${authPasswordField('auth-password-confirm', 'Confirm new password', 'new-password')}
-        <button type="submit" class="btn btn-primary" id="auth-submit">Save new password</button>
-      </form>
-      <div class="auth-footer"><button type="button" class="auth-link" onclick="renderAuthView('login')">&larr; Back to sign in</button></div>`;
-  }
-
-  if (authState.view === 'join') {
-    return `
-      <h1 class="auth-heading">Create your login</h1>
-      <p class="auth-subheading">Set up your access to the MonkFlow client portal.</p>
-      <form class="auth-form" onsubmit="event.preventDefault();handleSignup()" novalidate>
-        ${error}
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="auth-first-name">First name</label>
-            <input type="text" id="auth-first-name" name="given-name" autocomplete="given-name" required />
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="auth-last-name">Last name</label>
-            <input type="text" id="auth-last-name" name="family-name" autocomplete="family-name" required />
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="auth-email">Work email</label>
-          <input type="email" id="auth-email" name="email" autocomplete="username" inputmode="email" value="${email}" required />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="auth-company">Firm</label>
-          <input type="text" id="auth-company" name="organization" autocomplete="organization" />
-        </div>
-        ${authPasswordField('auth-password', 'Password', 'new-password')}
-        <div class="auth-hint" style="margin-top:-10px">At least 8 characters.</div>
-        <button type="submit" class="btn btn-primary" id="auth-submit">Create login</button>
-      </form>
-      <div class="auth-footer">Already have a login? <button type="button" class="auth-link" onclick="renderAuthView('login')">Sign in</button></div>`;
-  }
-
-  // login
-  return `
-    <h1 class="auth-heading">Sign in</h1>
-    <p class="auth-subheading">Welcome back to your MonkFlow client portal.</p>
-    <form class="auth-form" onsubmit="event.preventDefault();handleLogin()" novalidate>
-      ${notice}
-      ${error}
-      <div class="form-group">
-        <label class="form-label" for="auth-email">Email</label>
-        <input type="email" id="auth-email" name="email" autocomplete="username" inputmode="email" value="${email}" required />
-      </div>
-      ${authPasswordField('auth-password', 'Password', 'current-password',
-        '<button type="button" class="auth-link" onclick="renderAuthView(\'forgot\')">Forgot password?</button>')}
-      <button type="submit" class="btn btn-primary" id="auth-submit">Sign in</button>
-    </form>
-    <div class="auth-footer">
-      Not a client yet? The portal is for firms we are already working with.
-      <button type="button" class="auth-link" onclick="leaveAuth(true)">Book a working session</button>
-    </div>`;
-}
-
-// Draw an auth view. `patch` updates authState first (email, notice, …).
-function renderAuthView(view, patch) {
-  // Carry the typed email between views so nobody types it twice.
-  const typed = document.getElementById('auth-email')?.value?.trim();
-  if (typed) authState.email = typed;
-  authState = { ...authState, notice: '', ...(patch || {}), view };
-
-  const title = { login: 'Sign in', forgot: 'Reset your password', 'forgot-sent': 'Check your email', reset: 'Choose a new password', join: 'Create your login' }[view] || 'Sign in';
-  document.title = `${title} | MonkFlow`;
-
-  const el = document.getElementById('auth-login');
-  el.innerHTML = authShell(authViewHtml());
-  el.classList.remove('hidden');
-  document.getElementById('auth-signup').classList.add('hidden');
-
-  // Focus the first thing the person needs to type.
-  const first = el.querySelector(authState.email && view === 'login' ? '#auth-password' : 'input');
-  if (first) first.focus();
-}
-
-// Kept for older call sites.
-function renderAuthLogin() { renderAuthView('login'); }
-function renderAuthSignup() { renderAuthView('join'); }
-
-function toggleAuthPassword(btn) {
-  const input = document.getElementById(btn.getAttribute('aria-controls'));
-  const show = input.type === 'password';
-  input.type = show ? 'text' : 'password';
-  btn.textContent = show ? 'Hide' : 'Show';
-  btn.setAttribute('aria-pressed', String(show));
-  input.focus();
-}
-
-// Inline error under the heading, announced to screen readers. Pass a
-// field id to mark that field invalid and move focus to it.
-function authError(message, fieldId) {
-  const box = document.getElementById('auth-error');
-  document.querySelectorAll('#auth-login [aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
-  if (!box) return;
-  box.textContent = message || '';
-  box.hidden = !message;
-  const field = fieldId && document.getElementById(fieldId);
-  if (field) { field.setAttribute('aria-invalid', 'true'); field.focus(); }
-}
-
-// Disable the submit button while a request is in flight; returns a
-// function that restores it.
-function authBusy(label) {
-  const btn = document.getElementById('auth-submit');
-  if (!btn) return () => {};
-  const original = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = label;
-  return () => { btn.disabled = false; btn.textContent = original; };
-}
-
-// Leave the auth screens for the public site; optionally open booking.
-function leaveAuth(book) {
-  window.history.pushState({}, '', '/');
-  showLanding();
-  window.scrollTo(0, 0);
-  if (book) setTimeout(() => showSchedulingModal(), 200);
-}
-
 // ── Sidebar (Client Dashboard — no marketing pages) ──────
 function renderSidebar() {
   const sidebar = document.getElementById('sidebar');
@@ -1246,6 +931,9 @@ function renderSidebar() {
       <div class="nav-section-label">Admin</div>
       <div class="nav-item" data-page="admin" onclick="navigateTo('admin')">
         ${icons.shield} Admin Dashboard
+      </div>
+      <div class="nav-item" data-page="workspaces" onclick="navigateTo('workspaces')">
+        ${icons.users} Client Workspaces
       </div>
       <div class="nav-item" data-page="outreach" onclick="navigateTo('outreach')">
         ${icons.send} Outreach
@@ -1303,6 +991,7 @@ function renderTopbar() {
     team: 'Team Management',
     'workflow-editor': 'Workflow Editor',
     admin: 'Admin Dashboard',
+    workspaces: 'Client Workspaces',
     'admin-account': 'Account Detail',
     billing: 'Billing',
     'workflow-detail': 'My Tools',
@@ -1554,6 +1243,7 @@ function renderMainContent() {
     'workflow-detail': renderWorkflowDetail,
     'agent-detail': renderAgentDetail,
     'admin': renderAdminDashboard,
+    'workspaces': renderWorkspacesPage,
     'admin-account': renderAdminAccountDetail,
     'outreach': renderOutreachPage,
     'stonkbot': renderStonkBotPage,
@@ -1682,9 +1372,7 @@ async function uploadProjectFile(projectId) {
 
 async function downloadProjectFile(projectId, fileId, filename) {
   try {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/files/${fileId}/download`, {
-      headers: { 'Authorization': `Bearer ${api.token}` },
-    });
+    const res = await fetch(`${API_BASE}/projects/${projectId}/files/${fileId}/download`, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('Download failed');
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -2702,7 +2390,7 @@ async function executeAgentFromDetail(agentId) {
     agentExecutionPollTimer = setInterval(async () => {
       pollCount++;
       try {
-        const execResult = await api.get(`/agents/${agentId}/executions?limit=1`);
+        const execResult = await api.get(`/agents/${agentId}/executions?limit=1`, { background: true });
         const latest = (execResult.data || [])[0];
         if (latest && (latest.status === 'completed' || latest.status === 'failed')) {
           clearInterval(agentExecutionPollTimer);
@@ -2796,7 +2484,7 @@ let integrationStatuses = {}; // provider -> { status, config }
 
 async function loadIntegrationStatuses() {
   try {
-    const res = await fetch('/api/v1/integrations', { headers: {'Authorization': `Bearer ${api.token}`} });
+    const res = await fetch('/api/v1/integrations', { credentials: 'same-origin' });
     if (!res.ok) return;
     const json = await res.json();
     integrationStatuses = {};
@@ -2979,7 +2667,8 @@ async function testIntegrationConnection(providerKey) {
   try {
     const res = await fetch(`/api/v1/integrations/${providerKey}/test`, {
       method: 'POST',
-      headers: { ...{'Authorization': `Bearer ${api.token}`}, 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config }),
     });
     const json = await res.json();
@@ -3018,7 +2707,8 @@ async function saveIntegrationConnection(providerKey) {
   try {
     const res = await fetch(`/api/v1/integrations/${providerKey}/connect`, {
       method: 'POST',
-      headers: { ...{'Authorization': `Bearer ${api.token}`}, 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config }),
     });
     const json = await res.json();
@@ -3044,7 +2734,8 @@ async function disconnectIntegration(providerKey) {
   try {
     await fetch(`/api/v1/integrations/${providerKey}/disconnect`, {
       method: 'POST',
-      headers: { ...{'Authorization': `Bearer ${api.token}`}, 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
     });
     delete integrationStatuses[providerKey];
     showToast(`${providerKey} disconnected`, 'info');
@@ -3936,7 +3627,7 @@ async function loadAgentPaletteNodes() {
   const paletteEl = document.getElementById('editor-palette');
   if (!paletteEl) return;
   try {
-    const res = await fetch('/api/v1/agents', { headers: {'Authorization': `Bearer ${api.token}`} });
+    const res = await fetch('/api/v1/agents', { credentials: 'same-origin' });
     if (!res.ok) return;
     const json = await res.json();
     const agents = (json.data || json.rows || []).filter(a => a.status === 'active');
@@ -4069,7 +3760,7 @@ function startExecutionPolling(workflowId, executionId) {
   executionPollTimer = setInterval(async () => {
     polls++;
     try {
-      const result = await api.get(`/workflows/${workflowId}/executions?limit=1`);
+      const result = await api.get(`/workflows/${workflowId}/executions?limit=1`, { background: true });
       const executions = result.data || result;
       if (executions && executions.length > 0) {
         const latest = executions[0];
@@ -4682,11 +4373,9 @@ async function handleDeleteAccount() {
   try {
     await api.del('/users/me', { password });
     closeModal();
-    api.clearTokens();
     isAuthenticated = false;
     currentUser = null;
-    showLanding();
-    showToast('Account deleted successfully', 'info');
+    window.location.assign('/');
   } catch (err) {
     showToast(err.message || 'Failed to delete account', 'error');
   }
@@ -5575,6 +5264,244 @@ async function handleSendInvite() {
     if (typeof renderTeam === 'function') navigateTo('team');
   } catch (err) {
     showToast(err.message || 'Failed to send invitation', 'error');
+  }
+}
+
+// ============================================================
+// CLIENT WORKSPACES (staff)
+// ============================================================
+// A workspace is one client firm in the portal (portal/, /dashboard). This
+// page is the only way a client gets access: create the workspace, invite
+// its first admin, and they set up their own login from the emailed link.
+// API: /admin/organizations (server/src/controllers/organization.controller.js).
+let workspacesData = null;      // null = not loaded yet
+let workspacesError = '';
+let workspaceSsoProviders = []; // sign-in providers switched on for this deployment
+
+const WORKSPACE_VERTICALS = { CRE: 'Commercial real estate', BANK: 'Bank', INVESTMENT_FIRM: 'Investment firm' };
+const WORKSPACE_ROLES = {
+  admin: 'Admin / Managing Partner',
+  reviewer: 'Operations / Analyst Reviewer',
+  auditor: 'Read-Only Auditor',
+};
+const WORKSPACE_SSO_LABELS = { microsoft: 'Microsoft', google: 'Google' };
+
+async function loadWorkspacesData() {
+  try {
+    const [orgs, config] = await Promise.all([
+      api.get('/admin/organizations'),
+      api.get('/auth/config').catch(() => null),
+    ]);
+    workspacesData = (orgs && orgs.organizations) || [];
+    workspaceSsoProviders = (config && config.methods && config.methods.sso) || [];
+    workspacesError = '';
+  } catch (err) {
+    workspacesData = workspacesData || [];
+    workspacesError = err.message || 'Could not load workspaces.';
+  }
+  if (currentPage === 'workspaces') renderMainContent();
+}
+
+function renderWorkspacesPage() {
+  const header = `
+    <div class="page-header">
+      <div>
+        <h1>Client Workspaces</h1>
+        <p class="page-desc">One workspace per client firm. People get in by invitation only.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-ghost btn-sm" onclick="loadWorkspacesData()">Refresh</button>
+        <button class="btn btn-primary btn-sm" onclick="showWorkspaceModal()">${icons.plus} New workspace</button>
+      </div>
+    </div>`;
+  if (workspacesData === null) {
+    return `${header}<div class="card" style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;">Loading workspaces…</div>`;
+  }
+  const error = workspacesError
+    ? `<div class="card" role="alert" style="padding:14px 16px;margin-bottom:16px;border-color:var(--error);color:var(--error);font-size:13px;">${escapeHtml(workspacesError)}</div>`
+    : '';
+  if (!workspacesData.length) {
+    return `${header}${error}
+      <div class="card" style="padding:40px 24px;text-align:center;">
+        <h3 style="margin:0 0 6px;font-size:15px;">No client workspaces yet</h3>
+        <p style="margin:0 0 18px;color:var(--text-secondary);font-size:13px;">Create one for a firm and invite its first admin. They choose their own password from the emailed link.</p>
+        <button class="btn btn-primary" onclick="showWorkspaceModal()">New workspace</button>
+      </div>`;
+  }
+  const rows = workspacesData.map((o) => {
+    const domains = (o.allowedEmailDomains || []).join(', ');
+    const signIn = o.ssoRequired && o.ssoProvider ? `${WORKSPACE_SSO_LABELS[o.ssoProvider] || o.ssoProvider} required` : 'Password';
+    return `
+      <tr>
+        <td><div style="font-weight:500;">${escapeHtml(o.name)}</div><div style="font-size:11px;color:var(--text-tertiary);">${escapeHtml(o.slug)}</div></td>
+        <td>${escapeHtml(WORKSPACE_VERTICALS[o.vertical] || o.vertical)}</td>
+        <td>${o.members ?? 0}</td>
+        <td>${o.openInvitations ?? 0}</td>
+        <td style="font-size:12px;">${escapeHtml(signIn)}</td>
+        <td style="font-size:12px;color:var(--text-secondary);">${domains ? escapeHtml(domains) : 'Any'}</td>
+        <td style="font-size:12px;">${o.sessionIdleMinutes} min</td>
+        <td style="font-size:12px;color:var(--text-secondary);">${o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</td>
+        <td style="white-space:nowrap;text-align:right;">
+          <button class="btn btn-ghost btn-sm" onclick="showWorkspaceInviteModal('${o.id}')">Invite</button>
+          <button class="btn btn-ghost btn-sm" onclick="showWorkspaceModal('${o.id}')">Edit</button>
+        </td>
+      </tr>`;
+  }).join('');
+  return `${header}${error}
+    <div class="card" style="padding:0;">
+      <div class="table-wrapper"><table>
+        <thead><tr>
+          <th>Firm</th><th>Type</th><th>Members</th><th>Open invitations</th><th>Sign-in</th><th>Email domains</th><th>Idle sign-out</th><th>Created</th><th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
+}
+
+// Create (no id) or edit (id) a workspace.
+function showWorkspaceModal(id) {
+  const o = id ? (workspacesData || []).find((w) => w.id === id) : null;
+  if (id && !o) return;
+  const opt = (value, label, current) => `<option value="${value}"${value === current ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+  const idle = o ? o.sessionIdleMinutes : 30;
+  const idleChoices = [15, 30, 60].includes(idle) ? [15, 30, 60] : [15, 30, 60, idle].sort((a, b) => a - b);
+  // Requiring Microsoft or Google is offered only when that provider is
+  // actually switched on; the server refuses it otherwise.
+  const sso = workspaceSsoProviders.length ? `
+    <div class="form-group">
+      <label class="form-label" for="ws-sso">Required sign-in</label>
+      <select id="ws-sso">
+        ${opt('', 'Password, or any enabled provider', o && o.ssoRequired ? o.ssoProvider : '')}
+        ${workspaceSsoProviders.map((p) => opt(p, `${WORKSPACE_SSO_LABELS[p] || p} only`, o && o.ssoRequired ? o.ssoProvider : '')).join('')}
+      </select>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">Requiring a provider needs the firm's email domains above.</div>
+    </div>` : '';
+  showModal(`
+    <div class="modal-header">
+      <h2 class="modal-title">${o ? 'Edit workspace' : 'New client workspace'}</h2>
+      <button class="modal-close" onclick="closeModal()" aria-label="Close">${icons.x}</button>
+    </div>
+    <div id="ws-error" role="alert" hidden style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--error);border-radius:6px;color:var(--error);font-size:13px;"></div>
+    <div class="form-group">
+      <label class="form-label" for="ws-name">Firm name</label>
+      <input type="text" id="ws-name" maxlength="200" value="${o ? escapeHtml(o.name) : ''}" placeholder="As the client would write it" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="ws-vertical">Type of firm</label>
+      <select id="ws-vertical">${Object.keys(WORKSPACE_VERTICALS).map((k) => opt(k, WORKSPACE_VERTICALS[k], o ? o.vertical : 'CRE')).join('')}</select>
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">Sets the wording the client sees (property, loan or fund).</div>
+    </div>
+    ${o ? '' : `
+    <div class="form-group">
+      <label class="form-label" for="ws-admin">First admin's work email (optional)</label>
+      <input type="email" id="ws-admin" placeholder="name@firm.com" autocomplete="off" />
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">They are emailed an invitation that works once and expires in 7 days.</div>
+    </div>`}
+    <div class="form-group">
+      <label class="form-label" for="ws-domains">Email domains allowed to join (optional)</label>
+      <input type="text" id="ws-domains" value="${o ? escapeHtml((o.allowedEmailDomains || []).join(', ')) : ''}" placeholder="firm.com, firm-capital.com" autocomplete="off" />
+      <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">Leave empty to allow any address you or the firm's admins invite.</div>
+    </div>
+    ${sso}
+    <div class="form-group">
+      <label class="form-label" for="ws-idle">Sign out after no activity for</label>
+      <select id="ws-idle">${idleChoices.map((m) => opt(String(m), `${m} minutes`, String(idle))).join('')}</select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="ws-submit" onclick="handleSaveWorkspace(${o ? `'${o.id}'` : ''})">${o ? 'Save changes' : 'Create workspace'}</button>
+    </div>
+  `);
+  document.getElementById('ws-name')?.focus();
+}
+
+function workspaceFormError(message) {
+  const box = document.getElementById('ws-error');
+  if (!box) return;
+  box.textContent = message || '';
+  box.hidden = !message;
+  // The message goes away as soon as the person starts correcting the form.
+  if (message) document.getElementById('modal-content').addEventListener('input', () => workspaceFormError(''), { once: true });
+}
+
+async function handleSaveWorkspace(id) {
+  const name = document.getElementById('ws-name').value.trim();
+  const adminEmail = document.getElementById('ws-admin')?.value.trim() || '';
+  const domains = document.getElementById('ws-domains').value.split(/[\s,]+/).map((d) => d.trim().toLowerCase().replace(/^@/, '')).filter(Boolean);
+  const ssoProvider = document.getElementById('ws-sso')?.value || '';
+  if (name.length < 2) return workspaceFormError('Enter the firm name.');
+  if (adminEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) return workspaceFormError('That admin email does not look right.');
+  const body = {
+    name,
+    vertical: document.getElementById('ws-vertical').value,
+    allowedEmailDomains: domains,
+    sessionIdleMinutes: Number(document.getElementById('ws-idle').value),
+  };
+  if (document.getElementById('ws-sso')) { body.ssoProvider = ssoProvider || null; body.ssoRequired = !!ssoProvider; }
+  if (!id && adminEmail) body.adminEmail = adminEmail;
+
+  workspaceFormError('');
+  const btn = document.getElementById('ws-submit');
+  btn.disabled = true;
+  try {
+    const out = id ? await api.patch(`/admin/organizations/${id}`, body) : await api.post('/admin/organizations', body);
+    if (!out) return;   // session ended; the page is on its way to sign-in
+    closeModal();
+    if (id) showToast('Workspace updated.');
+    else if (!out.invitation) showToast('Workspace created. Invite its first admin when you are ready.');
+    else if (out.invitation.emailSent) showToast(`Workspace created. Invitation sent to ${escapeHtml(out.invitation.email)}.`);
+    else showToast('Workspace created, but the invitation email could not be sent. Use Invite to send it again.', 'error');
+    loadWorkspacesData();
+  } catch (err) {
+    btn.disabled = false;
+    workspaceFormError(err instanceof TypeError ? 'Could not reach the server. Check your connection and try again.' : err.message);
+  }
+}
+
+function showWorkspaceInviteModal(id) {
+  const o = (workspacesData || []).find((w) => w.id === id);
+  if (!o) return;
+  const domains = o.allowedEmailDomains || [];
+  showModal(`
+    <div class="modal-header">
+      <h2 class="modal-title">Invite to ${escapeHtml(o.name)}</h2>
+      <button class="modal-close" onclick="closeModal()" aria-label="Close">${icons.x}</button>
+    </div>
+    <div id="ws-error" role="alert" hidden style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--error);border-radius:6px;color:var(--error);font-size:13px;"></div>
+    <div class="form-group">
+      <label class="form-label" for="ws-invite-email">Work email</label>
+      <input type="email" id="ws-invite-email" placeholder="name@${escapeHtml(domains[0] || 'firm.com')}" autocomplete="off" />
+      ${domains.length ? `<div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">This workspace accepts: ${escapeHtml(domains.join(', '))}</div>` : ''}
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="ws-invite-role">Role</label>
+      <select id="ws-invite-role">${Object.keys(WORKSPACE_ROLES).map((r) => `<option value="${r}">${escapeHtml(WORKSPACE_ROLES[r])}</option>`).join('')}</select>
+    </div>
+    <p style="font-size:12px;color:var(--text-secondary);margin:0 0 4px;">The link works once and expires in 7 days. Once the firm has an admin, they can invite their own people from Settings.</p>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="ws-submit" onclick="handleWorkspaceInvite('${o.id}')">Send invitation</button>
+    </div>
+  `);
+  document.getElementById('ws-invite-email')?.focus();
+}
+
+async function handleWorkspaceInvite(id) {
+  const email = document.getElementById('ws-invite-email').value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return workspaceFormError('Enter the work email to invite.');
+  workspaceFormError('');
+  const btn = document.getElementById('ws-submit');
+  btn.disabled = true;
+  try {
+    const out = await api.post(`/admin/organizations/${id}/invitations`, { email, role: document.getElementById('ws-invite-role').value });
+    if (!out) return;
+    closeModal();
+    if (out.invitation.emailSent) showToast(`Invitation sent to ${escapeHtml(out.invitation.email)}.`);
+    else showToast('The invitation was created, but the email could not be sent. Check the email service, then invite again.', 'error');
+    loadWorkspacesData();
+  } catch (err) {
+    btn.disabled = false;
+    workspaceFormError(err instanceof TypeError ? 'Could not reach the server. Check your connection and try again.' : err.message);
   }
 }
 
@@ -7600,15 +7527,16 @@ function renderOutreachAnalyticsPage() {
 let stonkBotData = null;
 let stonkBotPollInterval = null;
 
-async function loadStonkBotData() {
+async function loadStonkBotData(poll) {
+  const o = poll ? { background: true } : undefined;   // timer refreshes are not activity
   try {
     const [status, account, positions, trades, pnl, signals] = await Promise.all([
-      api.get('/stonkbot/status'),
-      api.get('/stonkbot/account'),
-      api.get('/stonkbot/positions'),
-      api.get('/stonkbot/trades?limit=50'),
-      api.get('/stonkbot/pnl'),
-      api.get('/stonkbot/signals?limit=60'),
+      api.get('/stonkbot/status', o),
+      api.get('/stonkbot/account', o),
+      api.get('/stonkbot/positions', o),
+      api.get('/stonkbot/trades?limit=50', o),
+      api.get('/stonkbot/pnl', o),
+      api.get('/stonkbot/signals?limit=60', o),
     ]);
     stonkBotData = {
       status: status.data || status,
@@ -7623,7 +7551,7 @@ async function loadStonkBotData() {
     // Auto-refresh every 30 seconds while on this page
     if (!stonkBotPollInterval) {
       stonkBotPollInterval = setInterval(() => {
-        if (currentPage === 'stonkbot') loadStonkBotData();
+        if (currentPage === 'stonkbot') loadStonkBotData(true);
         else { clearInterval(stonkBotPollInterval); stonkBotPollInterval = null; }
       }, 30000);
     }

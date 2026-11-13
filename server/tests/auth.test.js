@@ -256,4 +256,17 @@ describe('cross-site requests', () => {
     const ok = await h.api().post('/api/v1/portal/invitations').set('Cookie', cookie).set('Origin', 'http://localhost:4173').send({ email: 'x@example.test', role: 'auditor' });
     expect(ok.status).toBe(201);
   });
+
+  test('the older API routes refuse a cross-site write made with the session cookie', async () => {
+    const org = await h.createOrg();
+    const { user, cookie } = await h.member(org, 'admin');
+    const forged = await h.api().patch('/api/v1/users/me').set('Cookie', cookie).set('Origin', 'https://evil.example').send({ firstName: 'Mallory' });
+    expect(forged.status).toBe(403);
+    expect(h.code(forged)).toBe('bad_origin');
+    expect((await h.db.query('SELECT first_name FROM users WHERE id = $1', [user.id])).rows[0].first_name).toBe(user.first_name);
+    // Our own site may, and reads are unaffected.
+    const ours = await h.api().patch('/api/v1/users/me').set('Cookie', cookie).set('Origin', 'http://localhost:4173').send({ firstName: 'Renamed' });
+    expect(ours.status).toBe(200);
+    expect((await h.api().get('/api/v1/users/me').set('Cookie', cookie).set('Origin', 'https://evil.example')).status).toBe(200);
+  });
 });

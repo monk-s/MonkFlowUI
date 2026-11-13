@@ -179,6 +179,16 @@ describe('sending invitations', () => {
       { action: 'invitation.sent', actor_role: 'monkflow_staff' },
     ]);
 
+    // Inviting the same address again sends a fresh link and kills the old one.
+    const orgId = res.body.organization.id;
+    const again = await h.api().post(`/api/v1/admin/organizations/${orgId}/invitations`).set('Cookie', cookie).send({ email: 'COO@cedarpoint.test', role: 'admin' });
+    expect(again.status).toBe(201);
+    expect(again.body.invitation.id).not.toBe(res.body.invitation.id);
+    const open = await h.db.query('SELECT id FROM invitations WHERE org_id = $1 AND revoked_at IS NULL', [orgId]);
+    expect(open.rows.map((r) => r.id)).toEqual([again.body.invitation.id]);
+    const last = await h.db.query('SELECT action, metadata FROM audit_log WHERE org_id = $1 ORDER BY id DESC LIMIT 1', [orgId]);
+    expect(last.rows[0]).toMatchObject({ action: 'invitation.resent', metadata: { replaces: res.body.invitation.id } });
+
     // SSO cannot be required without the firm's domains.
     const bad = await h.api().post('/api/v1/admin/organizations').set('Cookie', cookie).send({ name: 'No Domains LLC', vertical: 'CRE', ssoProvider: 'google', ssoRequired: true });
     expect(bad.status).toBe(400);

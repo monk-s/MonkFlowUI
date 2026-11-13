@@ -5,6 +5,10 @@
  *   node scripts/dev-portal.js            (from server/)
  *   npm --prefix ../portal run dev        (in another terminal) -> http://localhost:5173
  *
+ * To use it behind the full-site preview instead (scripts/dev-server.mjs),
+ * set FRONTEND_URL to the preview's address, e.g. http://localhost:4173, or
+ * the API refuses writes from it as cross-site.
+ *
  * What it does, all on this machine and nothing else:
  *   - starts a private Postgres (testdb/start.mjs), wiped on every run
  *   - applies the migrations the way production does

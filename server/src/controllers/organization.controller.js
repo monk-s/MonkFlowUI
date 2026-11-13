@@ -9,7 +9,7 @@ const { query } = require('../config/database');
 const { coded } = require('../middleware/session');
 const { withOrg, UUID } = require('../portal/withOrg');
 const { audit } = require('../portal/audit');
-const { createInvitation } = require('../portal/invitations');
+const { createInvitation, normEmail } = require('../portal/invitations');
 const { ROLES, ROLE_LABELS } = require('../portal/permissions');
 const { publicConfig } = require('../services/identity');
 const { generateToken } = require('../utils/crypto');
@@ -76,8 +76,18 @@ async function sendInvite(req, org, invitation, rawToken) {
 async function inviteTo(req, org, email, role) {
   const actor = { actorUserId: req.user.userId, actorEmail: req.user.email, actorRole: 'monkflow_staff', orgId: org.id };
   const created = await withOrg(org.id, async (db) => {
+    // Staff inviting someone who already has an open invitation means "send a
+    // fresh link" (the email bounced, or the link expired). The old link is
+    // revoked so only one ever works.
+    const replaced = (await db.query(
+      'UPDATE invitations SET revoked_at = NOW() WHERE org_id = $1 AND lower(email) = $2 AND accepted_at IS NULL AND revoked_at IS NULL RETURNING id',
+      [org.id, normEmail(email)]
+    )).rows.map((r) => r.id);
     const out = await createInvitation(db, { org, email, role, invitedBy: req.user.userId });
-    await audit(db, req, { ...actor, action: 'invitation.sent', targetType: 'invitation', targetId: out.invitation.id, metadata: { email: out.invitation.email, role } });
+    await audit(db, req, {
+      ...actor, action: replaced.length ? 'invitation.resent' : 'invitation.sent', targetType: 'invitation', targetId: out.invitation.id,
+      metadata: { email: out.invitation.email, role, ...(replaced.length ? { replaces: replaced[0] } : {}) },
+    });
     return out;
   });
   const emailSent = await sendInvite(req, org, created.invitation, created.rawToken);
