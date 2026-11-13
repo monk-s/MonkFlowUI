@@ -27,3 +27,6 @@ Client Kickoff/*
 !Client Kickoff/*.html
 !Client Kickoff/MonkFlow_*_3_automations.pdf
 DIRECTORY_LISTINGS_RESEARCH.md
+
+# Build output (scripts/build-site.mjs, portal build)
+dist/

@@ -65,19 +65,79 @@ async function sendWelcome(email, firstName) {
   });
 }
 
+// ── Portal emails (navy and evergreen, matching the site) ─────
+const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const portalUrl = (path) => `${env.frontendUrl.replace(/\/+$/, '')}${path}`;
+
+// One layout for every account email: heading, a few short paragraphs, one
+// button, and the link spelled out underneath for clients that strip buttons.
+// `paragraphs` are trusted HTML; escape any user-supplied value with escHtml.
+function portalEmail({ heading, paragraphs, button, footnote }) {
+  const p = (html) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#3d4a5c;">${html}</p>`;
+  return `
+    <div style="background:#f6f5f1;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+      <div style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #dfdcd3;border-radius:8px;padding:32px;">
+        <div style="font-size:15px;font-weight:700;color:#12233a;margin-bottom:24px;">MonkFlow</div>
+        <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#0f1b2d;font-weight:600;">${heading}</h1>
+        ${paragraphs.map(p).join('')}
+        ${button ? `
+        <p style="margin:22px 0;"><a href="${button.url}" style="background:#12233a;color:#ffffff;padding:11px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-size:15px;font-weight:600;">${button.label}</a></p>
+        <p style="margin:0 0 14px;font-size:12px;line-height:1.5;color:#5f6b7a;word-break:break-all;">Or paste this address into your browser:<br>${button.url}</p>` : ''}
+        ${footnote ? `<p style="margin:18px 0 0;padding-top:16px;border-top:1px solid #dfdcd3;font-size:12px;line-height:1.5;color:#5f6b7a;">${footnote}</p>` : ''}
+      </div>
+    </div>`;
+}
+
 async function sendPasswordReset(email, firstName, resetToken) {
-  const resetUrl = `${env.frontendUrl}?reset=${resetToken}`;
+  const resetUrl = portalUrl(`/auth/reset?token=${resetToken}`);
   return sendEmail({
     to: email,
-    subject: 'Reset Your MonkFlow Password',
-    html: `
-      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-        <h1 style="color: #00cc6a;">Password Reset</h1>
-        <p>Hi ${firstName}, we received a request to reset your password.</p>
-        <p><a href="${resetUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Reset Password</a></p>
-        <p style="color: #666; font-size: 14px;">This link expires in 1 hour. If you didn't request this, ignore this email.</p>
-      </div>
-    `,
+    subject: 'Reset your MonkFlow password',
+    html: portalEmail({
+      heading: 'Choose a new password',
+      paragraphs: [`Hi ${escHtml(firstName)}, we received a request to reset the password for your MonkFlow client portal.`],
+      button: { label: 'Choose a new password', url: resetUrl },
+      footnote: 'This link works once and expires in 1 hour. If you did not ask for it, you can ignore this email and your password stays as it is.',
+    }),
+    text: `Choose a new MonkFlow password: ${resetUrl}\n\nThis link works once and expires in 1 hour. If you did not ask for it, ignore this email.`,
+  });
+}
+
+// Invitation to a workspace. The only way an account is created.
+async function sendPortalInvitation({ to, orgName, roleLabel, inviterName, token, expiresAt }) {
+  const url = portalUrl(`/invite/${token}`);
+  const expires = new Date(expiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  return sendEmail({
+    to,
+    subject: `You have been invited to ${orgName} on MonkFlow`,
+    html: portalEmail({
+      heading: `Join ${escHtml(orgName)} on MonkFlow`,
+      paragraphs: [
+        `${escHtml(inviterName)} invited you to the ${escHtml(orgName)} workspace in the MonkFlow client portal.`,
+        `Your access: <strong>${escHtml(roleLabel)}</strong>.`,
+      ],
+      button: { label: 'Accept invitation', url },
+      footnote: `This invitation is for ${escHtml(to)} only and expires on ${expires}. If you were not expecting it, you can ignore this email.`,
+    }),
+    text: `${inviterName} invited you to the ${orgName} workspace in the MonkFlow client portal (${roleLabel}).\n\nAccept: ${url}\n\nThis invitation is for ${to} only and expires on ${expires}.`,
+  });
+}
+
+// Someone opened an expired invitation and asked for a fresh one.
+async function sendInvitationRenewalRequest({ to, inviteeEmail, orgName }) {
+  const recipient = to || env.emailFrom;
+  return sendEmail({
+    to: recipient,
+    subject: `${inviteeEmail} asked for a new invitation to ${orgName}`,
+    html: portalEmail({
+      heading: 'A new invitation was requested',
+      paragraphs: [
+        `${escHtml(inviteeEmail)} opened an invitation to ${escHtml(orgName)} after it had expired and asked for a new one.`,
+        'If they should still have access, send a new invitation from Settings, Team.',
+      ],
+      button: { label: 'Open team settings', url: portalUrl('/dashboard/settings/team') },
+    }),
+    text: `${inviteeEmail} opened an expired invitation to ${orgName} and asked for a new one. Send it from Settings, Team: ${portalUrl('/dashboard/settings/team')}`,
   });
 }
 
@@ -185,6 +245,8 @@ module.exports = {
   sendEmail,
   sendWelcome,
   sendPasswordReset,
+  sendPortalInvitation,
+  sendInvitationRenewalRequest,
   sendAppointmentConfirmation,
   sendAppointmentNotification,
   sendTeamInvite,
