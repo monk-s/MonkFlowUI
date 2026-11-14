@@ -1181,8 +1181,13 @@ mini, not pushed, not deployed.
   as an intermittent failure of the Phase 1 chain test. FIXED in
   `051-audit-log-rls.sql` (id assigned inside the trigger, under the lock).
   051 has not reached any deployed database, so it was edited in place.
-- [LOW] `auth.test.js` "checking the session does not keep it alive" failed
-  once in about 20 full runs and could not be reproduced. Not explained.
+- [LOW] API tests failed intermittently with "socket hang up" (about 1 full
+  run in 15): supertest opened a new listener per request. FIXED: one
+  listening server per test file (`tests/helpers.js`).
+- [LOW, OPEN] After that fix, 2 of about 65 full runs still failed in
+  `auth.test.js` (Phase 1 sign-in tests) with odd responses: an empty body
+  from password sign-in, a 404 from the SSO start route. Cause not found.
+  The Phase 2 and isolation tests were not affected in any run.
 
 ### Improvements Made
 - Migration `052-engagements.sql`: `engagements`, `milestones`,
@@ -1217,7 +1222,7 @@ mini, not pushed, not deployed.
   documents and reviewed fields exist to count.
 
 ### Verification
-On the Mac mini only. API: 70 Jest tests (12 consecutive clean runs).
+On the Mac mini only. API: 70 Jest tests (see the open LOW finding above).
 Portal: 25 Playwright tests. Built site: 12 Playwright tests, including staff
 building an engagement and the client seeing it. `npm run check` and the
 portal typecheck pass. NOT verified: anything on Vercel or Railway, the

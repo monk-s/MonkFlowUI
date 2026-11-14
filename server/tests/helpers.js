@@ -90,8 +90,12 @@ async function createRun(workflow, fields = {}) {
 }
 
 const code = (res) => res.body && res.body.error && res.body.error.details && res.body.error.details.code;
-const api = () => request(app);
-const agent = () => request.agent(app);
-const close = () => db.pool.end();
+// One listening server per test file. Handing supertest the bare app makes it
+// open and close a new listener for every request, and under parallel test
+// files that intermittently ended a request with "socket hang up".
+const server = app.listen(0, '127.0.0.1');
+const api = () => request(server);
+const agent = () => request.agent(server);
+const close = async () => { await new Promise((resolve) => server.close(resolve)); await db.pool.end(); };
 
 module.exports = { app, db, api, agent, close, code, uniq, PASSWORD, createOrg, createUser, addMember, member, cookieFor, createInvitation, createWorkflow, createRun };
