@@ -140,6 +140,27 @@ MK.routes = [
     jsonLd: function () { return [MK.ld.org(), MK.ld.crumbs([['Home', '/'], ['Security', '/security']])]; },
   },
   {
+    path: '/tools',
+    title: 'Free Tools for Banks, CRE and Investment Firms | MonkFlow',
+    description: 'Free tools built from public data, starting with a bank efficiency benchmark from FDIC Call Reports. No sign-up.',
+    render: function () { return MK.pages.tools(); },
+    jsonLd: function () { return [MK.ld.org(), MK.ld.crumbs([['Home', '/'], ['Tools', '/tools']])]; },
+  },
+  {
+    path: '/tools/bank-benchmark',
+    title: 'Bank Efficiency Ratio Benchmark by State and Size | MonkFlow',
+    description: 'Compare a bank\'s efficiency ratio, assets per employee and loans per employee with peers of the same size in the same state. Free, from public FDIC Call Report data.',
+    render: function () { return MK.pages.bankBench(); },
+    onMount: function () { MK.bench.init(); },
+    jsonLd: function () {
+      return [MK.ld.org(), {
+        '@type': 'WebApplication', name: 'Bank Ops Benchmark', applicationCategory: 'BusinessApplication',
+        isAccessibleForFree: true, url: MK.site.url + '/tools/bank-benchmark',
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      }, MK.ld.crumbs([['Home', '/'], ['Tools', '/tools'], ['Bank Ops Benchmark', '/tools/bank-benchmark']])];
+    },
+  },
+  {
     // Shareable booking link for outreach emails: the homepage with the
     // booking modal open. Accepts ?intent=audit and ?v=<firm type>.
     path: '/book',
@@ -240,6 +261,42 @@ MK.mount = function (pathname) {
   if (route.onMount) route.onMount();
 };
 
+// Bank Ops Benchmark: load the public bundle once, then everything happens in the browser.
+MK.bench = MK.bench || {};
+MK.bench.init = function () {
+  var form = document.querySelector('[data-bench]');
+  if (!form) return;
+  var status = form.querySelector('[data-bench-status]'), input = form.querySelector('[data-bench-q]');
+  var ready = function (data) {
+    MK.bench.data = data;
+    MK.bench.byLabel = {};
+    var opts = MK.bench.rows(data).map(function (b) {
+      var l = MK.bench.label(b);
+      MK.bench.byLabel[l.toLowerCase()] = b;
+      return '<option value="' + MK.esc(l) + '"></option>';
+    });
+    form.querySelector('#mk-bench-list').innerHTML = opts.join('');
+    input.disabled = false;
+    status.textContent = data.rows.length + ' banks, quarter ending ' + data.quarter + '. Pick one from the list.';
+    var pre = new URLSearchParams(window.location.search).get('cert');
+    if (pre) {
+      var hit = MK.bench.rows(data).filter(function (b) { return String(b.cert) === pre.replace(/\D/g, ''); })[0];
+      if (hit) { input.value = MK.bench.label(hit); MK.bench.show(hit); }
+    }
+  };
+  if (MK.bench.data) return ready(MK.bench.data);
+  fetch('/data/bank-bench.json', { credentials: 'omit' }).then(function (r) {
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(ready).catch(function () { status.textContent = 'The data did not load. Please refresh the page.'; });
+};
+MK.bench.show = function (b) {
+  var out = document.querySelector('[data-bench-out]');
+  if (!out) return;
+  out.innerHTML = MK.bench.render(MK.bench.data, b);
+  if (!MK.bench.tracked) { MK.bench.tracked = true; MK.track('Bench Lookup', { band: MK.bench.data.bands[b.band] }); }
+};
+
 MK.track = function (name, props) {
   try { window.plausible && window.plausible(name, props ? { props: props } : undefined); } catch (_) {}
 };
@@ -291,6 +348,11 @@ MK.onClick = function (e) {
 };
 
 MK.onInput = function (e) {
+  if (e.target.matches && e.target.matches('[data-bench-q]') && MK.bench.byLabel) {
+    var hit = MK.bench.byLabel[e.target.value.trim().toLowerCase()];
+    if (hit) MK.bench.show(hit);
+    return;
+  }
   var form = e.target.closest && e.target.closest('[data-roi]');
   if (!form) return;
   var n = function (name) { var x = parseFloat(form.elements[name].value); return isFinite(x) && x > 0 ? x : 0; };

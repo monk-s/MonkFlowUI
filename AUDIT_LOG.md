@@ -998,3 +998,9 @@ deployment itself.
 - Files created: 4 marketing sources, 4 scripts, 5 images, logo-mark.svg, .vercelignore, 13 generated
 - Bugs fixed: 1 HIGH, 3 MEDIUM, 2 LOW
 - Tests added: 0 (browser-verified; duplicate-function and prerender `--check` guards added)
+
+## Session: 2026-11-13 (tools) — Bank Ops Benchmark
+- New routes /tools and /tools/bank-benchmark (marketing/site.js), builders MK.pages.tools / MK.pages.bankBench and pure MK.bench.render (marketing/pages.js), copy MK.tools (marketing/content.js), styles (marketing/marketing.css), footer link "Free tools".
+- Data: /data/bank-bench.json (public FDIC Call Report figures, 982 banks in TX OK NM LA AR KS CO, quarter 2026-06-30, ~99 KB), produced quarterly by Jarvis (bank_bench.py) and copied in by hermes-setup/jarvis5/publish-bench.sh.
+- Everything runs in the browser; no API, no login, no gate. Plausible event "Bench Lookup" (band only). ?cert=<FDIC cert> preselects a bank (for letters and links).
+- Checked: render clean for all 982 banks (no NaN/undefined), screenshots at 1280 and 375 px, prerender --check passes.

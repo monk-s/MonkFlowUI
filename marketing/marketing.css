@@ -378,3 +378,34 @@ body.mk-active .toast { box-shadow: 0 8px 24px rgba(15, 27, 45, 0.2); }
 
 .mk [id] { scroll-margin-top: 92px; }
 .mk-demo:only-child { grid-column: 1 / -1; }
+
+/* ---------- Bank Ops Benchmark ---------- */
+.mk-bench { display: grid; gap: 8px; max-width: 640px; }
+.mk-bench label { font-size: 14px; font-weight: 500; color: var(--mk-ink-2); }
+.mk-bench input { font: 400 17px/1.4 var(--mk-sans); padding: 14px 16px; border: 1px solid var(--mk-line-strong); border-radius: 6px; background: var(--mk-surface); color: var(--mk-ink); width: 100%; box-sizing: border-box; }
+.mk-bench input:focus { outline: 2px solid var(--mk-accent); outline-offset: 1px; border-color: var(--mk-accent); }
+.mk-bench-out:empty { display: none; }
+.mk-bench-card { margin-top: 32px; background: var(--mk-surface); border: 1px solid var(--mk-line); border-radius: 10px; padding: 32px; display: grid; gap: 28px; }
+.mk-bench-title h2 { font-size: 28px; margin-bottom: 6px; }
+.mk-bench-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--mk-line); border: 1px solid var(--mk-line); border-radius: 8px; overflow: hidden; }
+.mk-bench-metric { background: var(--mk-surface); padding: 18px; display: grid; gap: 4px; align-content: start; }
+.mk-bench-metric strong { font: 600 28px/1.15 var(--mk-serif); color: var(--mk-ink); font-variant-numeric: tabular-nums; }
+.mk-bench-rank { font-size: 13px; font-weight: 600; color: var(--mk-accent-ink); background: var(--mk-accent-tint); border-radius: 4px; padding: 3px 8px; justify-self: start; margin-top: 6px; }
+.mk-bench-lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; }
+.mk-bench-lower h3 { font-size: 16px; margin-bottom: 12px; }
+.mk-bench-spark { width: 100%; max-width: 420px; height: auto; display: block; }
+.mk-bench-spark polyline { stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.mk-bench-spark .mine { stroke: var(--mk-navy); }
+.mk-bench-spark .peer { stroke: var(--mk-line-strong); stroke-dasharray: 5 4; }
+.mk-bench-spark text { font: 11px var(--mk-sans); fill: var(--mk-ink-3); }
+.mk-bench-key { display: inline-block; width: 18px; height: 0; border-top: 2.5px solid var(--mk-navy); vertical-align: middle; margin: 0 6px 0 0; }
+.mk-bench-key.peer { border-top: 2.5px dashed var(--mk-line-strong); margin-left: 14px; }
+.mk-bench-notes { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.mk-bench-notes li { color: var(--mk-ink-2); padding-left: 16px; border-left: 2px solid var(--mk-brass); }
+.mk-bench-src { border-top: 1px solid var(--mk-line); padding-top: 16px; }
+@media (max-width: 1000px) { .mk-bench-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 680px) {
+  .mk-bench-card { padding: 20px; }
+  .mk-bench-lower { grid-template-columns: 1fr; }
+  .mk-bench-title h2 { font-size: 22px; }
+}

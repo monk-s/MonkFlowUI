@@ -371,3 +371,20 @@ MK.advisors = {
     { title: 'Full onboarding system', body: 'The full Team Financial Strategies scope: intake, CRM sync, contract auto-population, signed-PDF generation, reminder sequences and financial-profile sync.' },
   ],
 };
+
+// Free tools (monkflow.io/tools). Public data only; nothing a visitor types
+// leaves the browser. Copy rules: no prices, no claims about clients.
+MK.tools = {
+  bench: {
+    path: '/tools/bank-benchmark',
+    name: 'Bank Ops Benchmark',
+    blurb: 'Your bank\'s efficiency ratio, assets and loans per employee, against peers of the same size in the same state. Public FDIC Call Report data, refreshed every quarter.',
+    states: 'Texas, Oklahoma, New Mexico, Louisiana, Arkansas, Kansas and Colorado',
+    method: [
+      { q: 'Where do the numbers come from?', a: 'The FDIC\'s public BankFind Suite, which publishes each bank\'s quarterly Call Report financials. We refresh the page when the FDIC publishes a new quarter, usually about eight weeks after quarter end.' },
+      { q: 'Who counts as a peer?', a: 'Banks in the same state and the same total-asset band: under $300 million, $300 million to $1 billion, $1 to $3 billion, $3 to $10 billion, and over $10 billion.' },
+      { q: 'What is the efficiency ratio?', a: 'Noninterest expense divided by revenue (net interest income plus noninterest income), as reported by the FDIC. Lower means less expense for each dollar of revenue. Strategy, mix of business and investment cycles all move it, so treat it as a starting point for a question, not a verdict.' },
+      { q: 'Do you see what I search for?', a: 'No. The whole dataset loads into your browser and the lookup happens there. Nothing you type is sent anywhere.' },
+    ],
+  },
+};
