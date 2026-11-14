@@ -25,4 +25,17 @@ router.post('/organizations', organizations.create);
 router.patch('/organizations/:id', organizations.update);
 router.post('/organizations/:id/invitations', organizations.invite);
 
+// Portal v2 phase 2: the client's engagement tracker, requests and baselines.
+const engagement = require('../controllers/engagement.controller');
+router.get('/organizations/:id/engagement', engagement.get);
+router.post('/organizations/:id/engagements', engagement.createEngagement);
+router.patch('/organizations/:id/engagements/:eid', engagement.updateEngagement);
+router.post('/organizations/:id/engagements/:eid/milestones', engagement.createMilestone);
+router.patch('/organizations/:id/milestones/:mid', engagement.updateMilestone);
+router.delete('/organizations/:id/milestones/:mid', engagement.removeMilestone);
+router.post('/organizations/:id/actions', engagement.createAction);
+router.delete('/organizations/:id/actions/:aid', engagement.withdrawAction);
+router.post('/organizations/:id/workflows', engagement.attachWorkflow);
+router.patch('/organizations/:id/workflows/:wid', engagement.setBaseline);
+
 module.exports = router;

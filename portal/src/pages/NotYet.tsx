@@ -4,7 +4,7 @@ import { useSession } from '../auth/session';
 import { Page } from '../components/Page';
 import { verticalPack } from '../verticals';
 
-type Section = 'review' | 'workflows' | 'integrations' | 'vault' | 'requests';
+type Section = 'review' | 'integrations' | 'vault' | 'requests';
 
 export function NotYet({ section }: { section: Section }) {
   const { session } = useSession();
@@ -16,11 +16,6 @@ export function NotYet({ section }: { section: Section }) {
       title: 'Review',
       lead: 'Documents waiting for a person to check them.',
       body: `Each item will open with the source document on one side and the extracted fields on the other (${docs}), with confidence, reconciliation checks and a full audit trail before anything is approved.`,
-    },
-    workflows: {
-      title: 'Workflows',
-      lead: 'The automations MonkFlow runs for your firm.',
-      body: 'Each workflow will show its status, recent runs, what is awaiting review and how it is performing.',
     },
     integrations: {
       title: 'Integrations',

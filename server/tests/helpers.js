@@ -66,9 +66,32 @@ async function createInvitation(org, email, role = 'reviewer', fields = {}) {
   return { token, row: rows[0] };
 }
 
+// A workflow in a workspace, owned (as legacy rows must be) by some user.
+async function createWorkflow(org, owner, fields = {}) {
+  const { rows } = await db.query(
+    `INSERT INTO workflows (user_id, org_id, name, description, status, trigger_type)
+     VALUES ($1, $2, $3, $4, $5, 'manual') RETURNING *`,
+    [owner.id, org ? org.id : null, fields.name || uniq('Workflow '), fields.description || null, fields.status || 'active']
+  );
+  return rows[0];
+}
+
+// A run that started `daysAgo` days ago.
+async function createRun(workflow, fields = {}) {
+  const status = fields.status || 'completed';
+  const { rows } = await db.query(
+    `INSERT INTO workflow_executions (workflow_id, status, trigger_type, trigger_payload, result, error_message, started_at, completed_at, duration_ms)
+     VALUES ($1, $2, 'manual', $3, $4, $5, NOW() - ($6 || ' days')::interval, NOW() - ($6 || ' days')::interval + INTERVAL '1 minute', $7)
+     RETURNING *`,
+    [workflow.id, status, JSON.stringify({ secret: 'payload' }), JSON.stringify({ secret: 'result' }),
+      status === 'failed' ? (fields.error || 'Source file was empty') : null, String(fields.daysAgo || 0), fields.durationMs ?? 60000]
+  );
+  return rows[0];
+}
+
 const code = (res) => res.body && res.body.error && res.body.error.details && res.body.error.details.code;
 const api = () => request(app);
 const agent = () => request.agent(app);
 const close = () => db.pool.end();
 
-module.exports = { app, db, api, agent, close, code, uniq, PASSWORD, createOrg, createUser, addMember, member, cookieFor, createInvitation };
+module.exports = { app, db, api, agent, close, code, uniq, PASSWORD, createOrg, createUser, addMember, member, cookieFor, createInvitation, createWorkflow, createRun };

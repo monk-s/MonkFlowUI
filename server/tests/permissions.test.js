@@ -9,6 +9,7 @@ describe('role matrix', () => {
     expect(allowed('review.view')).toEqual(['admin', 'reviewer', 'auditor']);
     expect(allowed('review.decide')).toEqual(['admin', 'reviewer']);
     expect(allowed('engagement.signoff')).toEqual(['admin']);
+    expect(allowed('actions.complete')).toEqual(['admin', 'reviewer']);
     expect(allowed('proposals.approve')).toEqual(['admin']);
     expect(allowed('connectors.view')).toEqual(['admin', 'reviewer', 'auditor']);
     expect(allowed('connectors.manage')).toEqual(['admin']);
@@ -21,7 +22,7 @@ describe('role matrix', () => {
   });
 
   test('an auditor holds no permission that changes anything', () => {
-    const writes = ['review.decide', 'engagement.signoff', 'proposals.approve', 'connectors.manage', 'requests.create', 'messages.send', 'team.manage', 'security.manage'];
+    const writes = ['review.decide', 'engagement.signoff', 'actions.complete', 'proposals.approve', 'connectors.manage', 'requests.create', 'messages.send', 'team.manage', 'security.manage'];
     expect(permissionsFor('auditor').filter((p) => writes.includes(p))).toEqual([]);
   });
 

@@ -476,7 +476,7 @@ function navigateTo(page) {
   if (page === 'workflow-detail') loadWorkflowDetail();
   if (page === 'agent-detail') loadAgentDetail();
   if (page === 'admin') loadAdminData();
-  if (page === 'workspaces') loadWorkspacesData();
+  if (page === 'workspaces') { workspaceDetailId = null; loadWorkspacesData(); }
   if (page === 'billing') loadBillingData();
   if (page === 'outreach') loadOutreachData();
   if (page === 'stonkbot') loadStonkBotData();
@@ -5303,6 +5303,7 @@ async function loadWorkspacesData() {
 }
 
 function renderWorkspacesPage() {
+  if (workspaceDetailId) return renderWorkspaceEngagementPage();
   const header = `
     <div class="page-header">
       <div>
@@ -5342,6 +5343,7 @@ function renderWorkspacesPage() {
         <td style="font-size:12px;">${o.sessionIdleMinutes} min</td>
         <td style="font-size:12px;color:var(--text-secondary);">${o.createdAt ? new Date(o.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</td>
         <td style="white-space:nowrap;text-align:right;">
+          <button class="btn btn-ghost btn-sm" onclick="openWorkspaceEngagement('${o.id}')">Engagement</button>
           <button class="btn btn-ghost btn-sm" onclick="showWorkspaceInviteModal('${o.id}')">Invite</button>
           <button class="btn btn-ghost btn-sm" onclick="showWorkspaceModal('${o.id}')">Edit</button>
         </td>
@@ -5503,6 +5505,408 @@ async function handleWorkspaceInvite(id) {
     btn.disabled = false;
     workspaceFormError(err instanceof TypeError ? 'Could not reach the server. Check your connection and try again.' : err.message);
   }
+}
+
+// ── Workspace engagement (staff) ───────────────────────────────
+// What the client sees on their Overview: the stage tracker, milestones,
+// requests waiting on them, and the workflows whose runs feed their numbers.
+// API: /admin/organizations/:id/... (server/src/controllers/engagement.controller.js).
+// Every change here is written to that client's audit log as MonkFlow.
+let workspaceDetailId = null;   // set while one workspace's engagement is open
+let workspaceDetail = null;     // null = loading
+let workspaceDetailError = '';
+
+const ENGAGEMENT_STAGES = { discovery: 'Discovery and audit', architecture: 'Architecture and sandbox', integration: 'Integration and QA', production: 'Production and scale' };
+const ENGAGEMENT_STATUSES = { active: 'Active', on_hold: 'On hold', complete: 'Complete' };
+const MILESTONE_STATUSES = { planned: 'Planned', in_progress: 'In progress', awaiting_signoff: 'Ready for client sign-off', complete: 'Complete' };
+const ACTION_KINDS = { uat: 'UAT', credentials: 'Credentials', documents: 'Documents', other: 'Other' };
+
+const wsOptions = (map, current) => Object.keys(map).map((k) => `<option value="${k}"${k === current ? ' selected' : ''}>${escapeHtml(map[k])}</option>`).join('');
+const wsDate = (ymd) => (ymd ? new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : '');
+const wsHint = (text) => `<div style="font-size:11px;color:var(--text-tertiary);margin-top:4px;">${text}</div>`;
+
+function openWorkspaceEngagement(id) {
+  workspaceDetailId = id;
+  workspaceDetail = null;
+  workspaceDetailError = '';
+  renderMainContent();
+  loadWorkspaceEngagement();
+}
+
+function closeWorkspaceEngagement() {
+  workspaceDetailId = null;
+  workspaceDetail = null;
+  renderMainContent();
+}
+
+async function loadWorkspaceEngagement() {
+  const id = workspaceDetailId;
+  if (!id) return;
+  try {
+    const out = await api.get(`/admin/organizations/${id}/engagement`);
+    if (!out || workspaceDetailId !== id) return;
+    workspaceDetail = out;
+    workspaceDetailError = '';
+  } catch (err) {
+    if (workspaceDetailId !== id) return;
+    workspaceDetailError = err.message || 'Could not load this workspace.';
+  }
+  if (currentPage === 'workspaces') renderMainContent();
+}
+
+// Run one change, say what happened, and reload the view.
+async function workspaceChange(fn, done) {
+  try {
+    const out = await fn();
+    if (!out) return false;   // session ended; the page is on its way to sign-in
+    if (done) showToast(done);
+    await loadWorkspaceEngagement();
+    return true;
+  } catch (err) {
+    showToast(escapeHtml(err instanceof TypeError ? 'Could not reach the server. Check your connection and try again.' : err.message), 'error');
+    await loadWorkspaceEngagement();
+    return false;
+  }
+}
+
+function renderWorkspaceEngagementPage() {
+  const d = workspaceDetail;
+  const name = d ? d.organization.name : ((workspacesData || []).find((w) => w.id === workspaceDetailId) || {}).name || 'Workspace';
+  const header = `
+    <div class="page-header">
+      <div>
+        <button class="btn btn-ghost btn-sm" style="margin:0 0 6px -8px;" onclick="closeWorkspaceEngagement()">&larr; Client Workspaces</button>
+        <h1>${escapeHtml(name)}</h1>
+        <p class="page-desc">What this client sees on their Overview. Each change is recorded in their audit log as MonkFlow.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-ghost btn-sm" onclick="loadWorkspaceEngagement()">Refresh</button>
+        ${d ? `<button class="btn btn-ghost btn-sm" onclick="showWorkspaceActionModal()">${icons.plus} New request</button>
+        <button class="btn btn-primary btn-sm" onclick="showEngagementModal()">${icons.plus} New engagement</button>` : ''}
+      </div>
+    </div>`;
+  if (workspaceDetailError) {
+    return `${header}<div class="card" role="alert" style="padding:14px 16px;border-color:var(--error);color:var(--error);font-size:13px;">${escapeHtml(workspaceDetailError)}</div>`;
+  }
+  if (!d) return `${header}<div class="card" style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;">Loading…</div>`;
+
+  const engagements = d.engagements.length ? d.engagements.map((e) => {
+    const rows = e.milestones.map((m) => {
+      const signed = !!m.signedOffAt;
+      return `
+        <tr>
+          <td style="font-size:12px;color:var(--text-secondary);">${escapeHtml(ENGAGEMENT_STAGES[m.stage] || m.stage)}</td>
+          <td><div style="font-weight:500;">${escapeHtml(m.title)}</div>${m.detail ? `<div style="font-size:12px;color:var(--text-secondary);">${escapeHtml(m.detail)}</div>` : ''}</td>
+          <td style="font-size:12px;">${escapeHtml(wsDate(m.dueOn))}</td>
+          <td>${signed
+    ? `<span style="font-size:12px;">Signed off by ${escapeHtml(m.signedOffByName || 'the client')}, ${new Date(m.signedOffAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>`
+    : `<select aria-label="Status of ${escapeHtml(m.title)}" style="width:auto;" onchange="handleMilestoneStatus('${m.id}', this.value)">${wsOptions(MILESTONE_STATUSES, m.status)}</select>`}</td>
+          <td style="white-space:nowrap;text-align:right;">${signed ? '' : `
+            <button class="btn btn-ghost btn-sm" onclick="showMilestoneModal('${e.id}', '${m.id}')">Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="handleRemoveMilestone('${m.id}')">Remove</button>`}</td>
+        </tr>`;
+    }).join('');
+    return `
+      <div class="card" style="padding:0;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--border);">
+          <div>
+            <h3 style="margin:0;font-size:15px;">${escapeHtml(e.name)}</h3>
+            ${e.nextDeliverable ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">Next deliverable: ${escapeHtml(e.nextDeliverable)}${e.nextDeliverableDue ? `, due ${escapeHtml(wsDate(e.nextDeliverableDue))}` : ''}</div>` : ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <select aria-label="Stage of ${escapeHtml(e.name)}" style="width:auto;" onchange="handleEngagementField('${e.id}', 'stage', this.value)">${wsOptions(ENGAGEMENT_STAGES, e.stage)}</select>
+            <select aria-label="Status of ${escapeHtml(e.name)}" style="width:auto;" onchange="handleEngagementField('${e.id}', 'status', this.value)">${wsOptions(ENGAGEMENT_STATUSES, e.status)}</select>
+            <button class="btn btn-ghost btn-sm" onclick="showEngagementModal('${e.id}')">Edit</button>
+            <button class="btn btn-ghost btn-sm" onclick="showMilestoneModal('${e.id}')">${icons.plus} Milestone</button>
+          </div>
+        </div>
+        ${rows ? `<div class="table-wrapper"><table>
+          <thead><tr><th>Stage</th><th>Milestone</th><th>Due</th><th>Status</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>` : '<div style="padding:20px 16px;color:var(--text-secondary);font-size:13px;">No milestones yet. The client sees an empty stage until you add some.</div>'}
+      </div>`;
+  }).join('') : `
+    <div class="card" style="padding:32px 24px;text-align:center;margin-bottom:16px;">
+      <h3 style="margin:0 0 6px;font-size:15px;">No engagement yet</h3>
+      <p style="margin:0 0 16px;color:var(--text-secondary);font-size:13px;">Until there is one, the client's Overview shows a getting-started list instead of a tracker.</p>
+      <button class="btn btn-primary" onclick="showEngagementModal()">New engagement</button>
+    </div>`;
+
+  const actionRows = d.actions.map((a) => `
+    <tr>
+      <td style="font-size:12px;">${escapeHtml(ACTION_KINDS[a.kind] || a.kind)}</td>
+      <td><div style="font-weight:500;">${escapeHtml(a.title)}</div>${a.detail ? `<div style="font-size:12px;color:var(--text-secondary);">${escapeHtml(a.detail)}</div>` : ''}</td>
+      <td style="font-size:12px;">${escapeHtml(wsDate(a.dueOn))}</td>
+      <td style="font-size:12px;">${a.status === 'open' ? 'Waiting on the client' : a.status === 'done' ? `Done by ${escapeHtml(a.completedByName || 'the client')}` : 'Withdrawn'}</td>
+      <td style="text-align:right;">${a.status === 'open' ? `<button class="btn btn-ghost btn-sm" onclick="handleWithdrawAction('${a.id}')">Withdraw</button>` : ''}</td>
+    </tr>`).join('');
+  const actions = `
+    <div class="card" style="padding:0;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);">
+        <h3 style="margin:0;font-size:15px;">Requests to the client</h3>
+        <button class="btn btn-ghost btn-sm" onclick="showWorkspaceActionModal()">${icons.plus} New request</button>
+      </div>
+      ${actionRows ? `<div class="table-wrapper"><table>
+        <thead><tr><th>Kind</th><th>Request</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>${actionRows}</tbody>
+      </table></div>` : '<div style="padding:20px 16px;color:var(--text-secondary);font-size:13px;">Nothing asked of the client. Milestones marked ready for sign-off appear in their queue by themselves.</div>'}
+    </div>`;
+
+  const workflowRows = d.workflows.map((w) => `
+    <tr>
+      <td><div style="font-weight:500;">${escapeHtml(w.name)}</div></td>
+      <td style="font-size:12px;">${escapeHtml(w.status)}${w.status === 'draft' ? ' (hidden from the client)' : ''}</td>
+      <td style="font-size:12px;">${w.baselineMinutesPerRun != null
+    ? `${w.baselineMinutesPerRun} min per run, from ${escapeHtml(wsDate(w.baselineFrom))}<div style="color:var(--text-secondary);">${escapeHtml(w.baselineBasis || '')}</div>`
+    : '<span style="color:var(--text-secondary);">None. The client sees no hours-saved figure for this workflow.</span>'}</td>
+      <td style="text-align:right;"><button class="btn btn-ghost btn-sm" onclick="showBaselineModal('${w.id}')">${w.baselineMinutesPerRun != null ? 'Change baseline' : 'Set baseline'}</button></td>
+    </tr>`).join('');
+  const attach = d.unassignedWorkflows.length ? `
+    <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--border);flex-wrap:wrap;">
+      <label for="ws-attach" style="font-size:12px;color:var(--text-secondary);">Attach a workflow that has no workspace yet</label>
+      <select id="ws-attach" style="width:auto;max-width:320px;">${d.unassignedWorkflows.map((w) => `<option value="${w.id}">${escapeHtml(w.name)} (${escapeHtml(w.status)})</option>`).join('')}</select>
+      <button class="btn btn-ghost btn-sm" onclick="handleAttachWorkflow()">Attach</button>
+    </div>` : '';
+  const workflows = `
+    <div class="card" style="padding:0;">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+        <h3 style="margin:0;font-size:15px;">Workflows and time-saved baselines</h3>
+        <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">The client's numbers are counted from these workflows' runs. Hours saved = completed runs × the baseline you agreed with them.</div>
+      </div>
+      ${workflowRows ? `<div class="table-wrapper"><table>
+        <thead><tr><th>Workflow</th><th>Status</th><th>Baseline</th><th></th></tr></thead><tbody>${workflowRows}</tbody>
+      </table></div>` : '<div style="padding:20px 16px;color:var(--text-secondary);font-size:13px;">No workflows belong to this workspace yet.</div>'}
+      ${attach}
+    </div>`;
+
+  return `${header}${engagements}${actions}${workflows}`;
+}
+
+function workspaceEngagement(id) { return ((workspaceDetail && workspaceDetail.engagements) || []).find((e) => e.id === id); }
+
+const wsModalError = '<div id="ws-error" role="alert" hidden style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--error);border-radius:6px;color:var(--error);font-size:13px;"></div>';
+const wsModalHead = (title) => `
+    <div class="modal-header">
+      <h2 class="modal-title">${escapeHtml(title)}</h2>
+      <button class="modal-close" onclick="closeModal()" aria-label="Close">${icons.x}</button>
+    </div>${wsModalError}`;
+
+// Save a modal form: disable the button, close on success, show the server's
+// message in the form on failure.
+async function workspaceModalSave(fn, done) {
+  workspaceFormError('');
+  const btn = document.getElementById('ws-submit');
+  btn.disabled = true;
+  try {
+    const out = await fn();
+    if (!out) return;
+    closeModal();
+    showToast(done);
+    loadWorkspaceEngagement();
+  } catch (err) {
+    btn.disabled = false;
+    workspaceFormError(err instanceof TypeError ? 'Could not reach the server. Check your connection and try again.' : err.message);
+  }
+}
+
+function showEngagementModal(id) {
+  const e = id ? workspaceEngagement(id) : null;
+  if (id && !e) return;
+  showModal(`${wsModalHead(e ? 'Edit engagement' : 'New engagement')}
+    <div class="form-group">
+      <label class="form-label" for="eng-name">Name</label>
+      <input type="text" id="eng-name" maxlength="200" value="${e ? escapeHtml(e.name) : ''}" placeholder="What the client would call this work" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="eng-summary">One-line summary (optional)</label>
+      <input type="text" id="eng-summary" maxlength="300" value="${e && e.summary ? escapeHtml(e.summary) : ''}" />
+    </div>
+    ${e ? '' : `<div class="form-group">
+      <label class="form-label" for="eng-stage">Stage</label>
+      <select id="eng-stage">${wsOptions(ENGAGEMENT_STAGES, 'discovery')}</select>
+    </div>`}
+    <div class="form-group">
+      <label class="form-label" for="eng-next">Next deliverable (optional)</label>
+      <input type="text" id="eng-next" maxlength="300" value="${e && e.nextDeliverable ? escapeHtml(e.nextDeliverable) : ''}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="eng-due">Next deliverable due (optional)</label>
+      <input type="date" id="eng-due" value="${e && e.nextDeliverableDue ? e.nextDeliverableDue : ''}" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="ws-submit" onclick="handleSaveEngagement(${e ? `'${e.id}'` : ''})">${e ? 'Save changes' : 'Create engagement'}</button>
+    </div>`);
+  document.getElementById('eng-name')?.focus();
+}
+
+function handleSaveEngagement(id) {
+  const name = document.getElementById('eng-name').value.trim();
+  if (name.length < 2) return workspaceFormError('Enter a name for the engagement.');
+  const body = {
+    name,
+    summary: document.getElementById('eng-summary').value.trim() || null,
+    nextDeliverable: document.getElementById('eng-next').value.trim() || null,
+    nextDeliverableDue: document.getElementById('eng-due').value || null,
+  };
+  if (!id) body.stage = document.getElementById('eng-stage').value;
+  const base = `/admin/organizations/${workspaceDetailId}/engagements`;
+  return workspaceModalSave(() => (id ? api.patch(`${base}/${id}`, body) : api.post(base, body)), id ? 'Engagement updated.' : 'Engagement created. The client can see it now.');
+}
+
+function handleEngagementField(id, field, value) {
+  const label = field === 'stage' ? `Stage set to ${ENGAGEMENT_STAGES[value]}.` : `Status set to ${ENGAGEMENT_STATUSES[value]}.`;
+  return workspaceChange(() => api.patch(`/admin/organizations/${workspaceDetailId}/engagements/${id}`, { [field]: value }), label);
+}
+
+function showMilestoneModal(engagementId, milestoneId) {
+  const e = workspaceEngagement(engagementId);
+  if (!e) return;
+  const m = milestoneId ? e.milestones.find((x) => x.id === milestoneId) : null;
+  if (milestoneId && !m) return;
+  showModal(`${wsModalHead(m ? 'Edit milestone' : `New milestone in ${e.name}`)}
+    <div class="form-group">
+      <label class="form-label" for="ms-title">Milestone</label>
+      <input type="text" id="ms-title" maxlength="200" value="${m ? escapeHtml(m.title) : ''}" placeholder="Something the client can recognise as delivered" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="ms-detail">Detail (optional)</label>
+      <input type="text" id="ms-detail" maxlength="500" value="${m && m.detail ? escapeHtml(m.detail) : ''}" />
+      ${wsHint('Shown under the title, and on the sign-off card when it is ready.')}
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="ms-stage">Stage</label>
+      <select id="ms-stage">${wsOptions(ENGAGEMENT_STAGES, m ? m.stage : e.stage)}</select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="ms-due">Due (optional)</label>
+      <input type="date" id="ms-due" value="${m && m.dueOn ? m.dueOn : ''}" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="ws-submit" onclick="handleSaveMilestone('${e.id}'${m ? `, '${m.id}'` : ''})">${m ? 'Save changes' : 'Add milestone'}</button>
+    </div>`);
+  document.getElementById('ms-title')?.focus();
+}
+
+function handleSaveMilestone(engagementId, milestoneId) {
+  const title = document.getElementById('ms-title').value.trim();
+  if (title.length < 2) return workspaceFormError('Enter the milestone.');
+  const body = {
+    title,
+    detail: document.getElementById('ms-detail').value.trim() || null,
+    stage: document.getElementById('ms-stage').value,
+    dueOn: document.getElementById('ms-due').value || null,
+  };
+  const base = `/admin/organizations/${workspaceDetailId}`;
+  return workspaceModalSave(
+    () => (milestoneId ? api.patch(`${base}/milestones/${milestoneId}`, body) : api.post(`${base}/engagements/${engagementId}/milestones`, body)),
+    milestoneId ? 'Milestone updated.' : 'Milestone added.'
+  );
+}
+
+function handleMilestoneStatus(id, status) {
+  const done = status === 'awaiting_signoff' ? 'Marked ready. It is now in the client\'s queue for an admin to sign off.' : `Milestone set to ${MILESTONE_STATUSES[status].toLowerCase()}.`;
+  return workspaceChange(() => api.patch(`/admin/organizations/${workspaceDetailId}/milestones/${id}`, { status }), done);
+}
+
+function handleRemoveMilestone(id) {
+  return workspaceChange(() => api.del(`/admin/organizations/${workspaceDetailId}/milestones/${id}`), 'Milestone removed.');
+}
+
+function showWorkspaceActionModal() {
+  const engagements = (workspaceDetail && workspaceDetail.engagements) || [];
+  showModal(`${wsModalHead('Ask the client for something')}
+    <div class="form-group">
+      <label class="form-label" for="act-kind">Kind</label>
+      <select id="act-kind">${wsOptions(ACTION_KINDS, 'other')}</select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="act-title">What you need</label>
+      <input type="text" id="act-title" maxlength="200" placeholder="One line the client can act on" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="act-detail">Detail (optional)</label>
+      <input type="text" id="act-detail" maxlength="500" />
+      ${wsHint('Never ask for a password or key here. Ask them to send credentials through the agreed channel.')}
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="act-due">Due (optional)</label>
+      <input type="date" id="act-due" />
+    </div>
+    ${engagements.length ? `<div class="form-group">
+      <label class="form-label" for="act-eng">Engagement</label>
+      <select id="act-eng"><option value="">None</option>${engagements.map((e, i) => `<option value="${e.id}"${i === 0 ? ' selected' : ''}>${escapeHtml(e.name)}</option>`).join('')}</select>
+    </div>` : ''}
+    <p style="font-size:12px;color:var(--text-secondary);margin:0 0 4px;">It appears at the top of their Overview. An admin or reviewer marks it done; you can withdraw it.</p>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="ws-submit" onclick="handleSaveWorkspaceAction()">Send request</button>
+    </div>`);
+  document.getElementById('act-title')?.focus();
+}
+
+function handleSaveWorkspaceAction() {
+  const title = document.getElementById('act-title').value.trim();
+  if (title.length < 2) return workspaceFormError('Say what you need from the client.');
+  const body = {
+    kind: document.getElementById('act-kind').value,
+    title,
+    detail: document.getElementById('act-detail').value.trim() || null,
+    dueOn: document.getElementById('act-due').value || null,
+    engagementId: document.getElementById('act-eng')?.value || null,
+  };
+  return workspaceModalSave(() => api.post(`/admin/organizations/${workspaceDetailId}/actions`, body), 'Request sent. It is on the client\'s Overview now.');
+}
+
+function handleWithdrawAction(id) {
+  return workspaceChange(() => api.del(`/admin/organizations/${workspaceDetailId}/actions/${id}`), 'Request withdrawn.');
+}
+
+function handleAttachWorkflow() {
+  const workflowId = document.getElementById('ws-attach')?.value;
+  if (!workflowId) return;
+  return workspaceChange(() => api.post(`/admin/organizations/${workspaceDetailId}/workflows`, { workflowId }), 'Workflow attached. Unless it is a draft, the client can see it and its runs now.');
+}
+
+function showBaselineModal(workflowId) {
+  const w = ((workspaceDetail && workspaceDetail.workflows) || []).find((x) => x.id === workflowId);
+  if (!w) return;
+  const has = w.baselineMinutesPerRun != null;
+  showModal(`${wsModalHead(`Time-saved baseline: ${w.name}`)}
+    <p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">The client sees "hours saved" as completed runs × this number, with your basis sentence beside it. Only enter a figure they have agreed to.</p>
+    <div class="form-group">
+      <label class="form-label" for="bl-minutes">Minutes one run used to take a person</label>
+      <input type="number" id="bl-minutes" min="0.5" max="6000" step="0.5" value="${has ? w.baselineMinutesPerRun : ''}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="bl-basis">Where the number comes from</label>
+      <input type="text" id="bl-basis" maxlength="300" value="${w.baselineBasis ? escapeHtml(w.baselineBasis) : ''}" placeholder="Agreed with (name) on (date): (what was measured)" />
+      ${wsHint('Shown to the client word for word.')}
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="bl-from">Count runs from</label>
+      <input type="date" id="bl-from" value="${w.baselineFrom || new Date().toISOString().slice(0, 10)}" />
+      ${wsHint('Runs before this day are not counted towards hours saved.')}
+    </div>
+    <div class="modal-footer">
+      ${has ? `<button class="btn btn-ghost" style="margin-right:auto;" onclick="handleSaveBaseline('${w.id}', true)">Remove baseline</button>` : ''}
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="ws-submit" onclick="handleSaveBaseline('${w.id}')">Save baseline</button>
+    </div>`);
+  document.getElementById('bl-minutes')?.focus();
+}
+
+function handleSaveBaseline(workflowId, remove) {
+  const path = `/admin/organizations/${workspaceDetailId}/workflows/${workflowId}`;
+  if (remove) return workspaceModalSave(() => api.patch(path, { baselineMinutesPerRun: null }), 'Baseline removed. The client no longer sees an hours figure for this workflow.');
+  const minutes = Number(document.getElementById('bl-minutes').value);
+  const basis = document.getElementById('bl-basis').value.trim();
+  if (!(minutes > 0)) return workspaceFormError('Enter the minutes one run used to take by hand.');
+  if (!basis) return workspaceFormError('Say where the number comes from. The client sees this sentence.');
+  return workspaceModalSave(
+    () => api.patch(path, { baselineMinutesPerRun: minutes, baselineBasis: basis, baselineFrom: document.getElementById('bl-from').value || null }),
+    'Baseline saved.'
+  );
 }
 
 // ============================================================

@@ -69,6 +69,10 @@ DECLARE
 BEGIN
   -- One writer per workspace chain at a time, so prev_hash is never stale.
   PERFORM pg_advisory_xact_lock(hashtext('audit_log:' || chain_key));
+  -- Take the id only now, under the lock. The column default draws it before
+  -- this trigger runs, so two concurrent writers could otherwise get ids in
+  -- the opposite order to their place in the chain.
+  NEW.id := nextval('audit_log_id_seq');
   SELECT row_hash INTO NEW.prev_hash
     FROM audit_log
    WHERE org_id IS NOT DISTINCT FROM NEW.org_id

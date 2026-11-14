@@ -108,7 +108,7 @@ async function seedExampleData(pool) {
   const fund2 = await org('Harbor Ridge Fund II', 'INVESTMENT_FIRM', { parent: harbor.id });
   const cedar = await org('Cedar Point Bank', 'BANK', { domains: ['cedarpoint.test'], sso: 'microsoft', idle: 15 });
 
-  await user('staff@monkflow.test', 'Nathan', 'Linder', { staff: true, mfa: true });
+  const staff = await user('staff@monkflow.test', 'Nathan', 'Linder', { staff: true, mfa: true });
   const dana = await user('dana@harborridge.test', 'Dana', 'Okafor', { mfa: true });
   const marcus = await user('marcus@harborridge.test', 'Marcus', 'Bell', { mfa: true });
   const ines = await user('ines@harborridge.test', 'Ines', 'Varga', { mfa: true });
@@ -128,6 +128,87 @@ async function seedExampleData(pool) {
   await invite(harbor, 'late@harborridge.test', 'auditor', EXAMPLE_TOKENS.expired, dana, -2);
   await invite(fund2, 'marcus@harborridge.test', 'reviewer', EXAMPLE_TOKENS.existingLogin, dana, 7);
   await invite(cedar, 'analyst@cedarpoint.test', 'reviewer', EXAMPLE_TOKENS.ssoFirm, coo, 7);
+
+  await seedExampleEngagement(pool, q, { harbor, staff, dana });
+}
+
+// EXAMPLE_DATA for the Overview and Workflows screens: one engagement in its
+// third stage with a milestone waiting for sign-off, one open request, two
+// workflows with six weeks of runs, and one draft that must never show.
+// Cedar Point Bank and Fund II get nothing, so the empty states can be seen.
+// portal/tests/overview.spec.ts counts on these exact rows.
+async function seedExampleEngagement(pool, q, { harbor, staff, dana }) {
+  const { audit } = require('../src/portal/audit');
+  const asStaff = (action, targetType, targetId, metadata) => audit(null, null, {
+    orgId: harbor.id, actorUserId: staff.id, actorEmail: staff.email, actorRole: 'monkflow_staff', action, targetType, targetId, metadata,
+  });
+  // Due dates are calendar dates as the person reading them sees today.
+  const inDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  // Run days are counted in UTC (routes/portal/workflow.routes.js).
+  const utcDaysAgo = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+
+  const eng = await q(
+    `INSERT INTO engagements (org_id, name, summary, stage, next_deliverable, next_deliverable_due)
+     VALUES ($1, 'Rent roll and T-12 intake', 'Rent rolls and T-12 statements read, checked and prepared for your accounting system.', 'integration', 'UAT results on 20 sample rent rolls', $2) RETURNING *`,
+    [harbor.id, inDays(3)]
+  );
+  await asStaff('engagement.created', 'engagement', eng.id, { name: eng.name, stage: 'discovery' });
+
+  const milestone = (stage, title, status, extra = {}) => q(
+    `INSERT INTO milestones (org_id, engagement_id, stage, title, detail, due_on, status, position, signed_off_by, signed_off_by_name, signed_off_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+    [harbor.id, eng.id, stage, title, extra.detail || null, extra.due || null, status, extra.position,
+      extra.signed ? dana.id : null, extra.signed ? 'Dana Okafor' : null, extra.signed ? new Date(Date.now() - extra.signed * 864e5) : null]
+  );
+  await milestone('discovery', 'Process audit report', 'complete', { position: 1, signed: 30, detail: 'How rent rolls and T-12s are handled today, and where the time goes.' });
+  await milestone('architecture', 'Sandbox walkthrough', 'complete', { position: 2, signed: 16 });
+  await milestone('integration', 'Accounting export connection', 'in_progress', { position: 3, due: inDays(8) });
+  const uat = await milestone('integration', 'UAT on 20 sample rent rolls', 'awaiting_signoff', { position: 4, due: inDays(3), detail: 'Results are in the shared folder. Sign off when your team agrees the extracted figures match.' });
+  await milestone('production', 'Go-live', 'planned', { position: 5 });
+  await asStaff('engagement.stage_changed', 'engagement', eng.id, { name: eng.name, from: 'architecture', to: 'integration' });
+  await asStaff('engagement.milestone_ready', 'milestone', uat.id, { title: uat.title, engagementId: eng.id });
+
+  const request = await q(
+    `INSERT INTO action_items (org_id, engagement_id, kind, title, detail, due_on)
+     VALUES ($1, $2, 'credentials', 'Send a read-only login for the accounting export', 'A user that can run the monthly export and nothing else.', $3) RETURNING *`,
+    [harbor.id, eng.id, inDays(5)]
+  );
+  await asStaff('action.requested', 'action_item', request.id, { title: request.title, kind: 'credentials' });
+
+  const workflow = (name, description, status, baseline) => q(
+    `INSERT INTO workflows (user_id, org_id, name, description, status, trigger_type, baseline_minutes_per_run, baseline_basis, baseline_from)
+     VALUES ($1, $2, $3, $4, $5, 'webhook', $6, $7, $8) RETURNING *`,
+    [staff.id, harbor.id, name, description, status, baseline ? baseline.minutes : null, baseline ? baseline.basis : null, baseline ? baseline.from : null]
+  );
+  const run = (wf, daysAgo, status, durationMs, error) => q(
+    `INSERT INTO workflow_executions (workflow_id, status, trigger_type, error_message, started_at, completed_at, duration_ms)
+     VALUES ($1, $2, 'webhook', $3, NOW() - ($4 || ' days')::interval, NOW() - ($4 || ' days')::interval + ($5 || ' milliseconds')::interval, $6) RETURNING *`,
+    [wf.id, status, error || null, String(daysAgo), String(durationMs), durationMs]
+  );
+
+  const rentRoll = await workflow('Rent roll intake', 'Reads each rent roll as it arrives, extracts units, tenants and rents, and checks that unit rents add up to the stated total.', 'active',
+    { minutes: 25, basis: 'Agreed with Dana Okafor at kickoff: 25 minutes to key one rent roll by hand', from: utcDaysAgo(20) });
+  // 2, 1, 3, 0 completed runs a day, repeating, for 40 days; two failures.
+  for (let d = 0; d < 40; d++) {
+    for (let i = 0; i < [2, 1, 3, 0][d % 4]; i++) await run(rentRoll, d, 'completed', 42000 + ((d * 7 + i * 13) % 50) * 1000);
+  }
+  await run(rentRoll, 2, 'failed', 8000, 'The file was password-protected and could not be opened.');
+  await run(rentRoll, 9, 'failed', 5000, 'The file had no pages.');
+
+  const t12 = await workflow('T-12 normalization', 'Maps each T-12 statement to your chart of accounts and checks that the twelve months add up to the annual figure.', 'active');
+  await run(t12, 1, 'completed', 95000);
+  const failed = await run(t12, 4, 'failed', 31000, 'Two months were missing from the statement.');
+  await run(t12, 6, 'completed', 88000);
+  for (const [level, message] of [
+    ['info', 'Received Maple Court T-12 (4 pages)'], ['info', 'Mapped 38 of 38 line items to the chart of accounts'],
+    ['debug', 'EXAMPLE_DATA debug line that clients must not see'], ['warn', 'Only 10 monthly columns found; expected 12'],
+    ['error', 'Two months were missing from the statement.'],
+  ]) {
+    await pool.query("INSERT INTO execution_logs (user_id, workflow_execution_id, level, message, created_at) VALUES ($1, $2, $3, $4, clock_timestamp())", [staff.id, failed.id, level, message]);
+  }
+
+  const draft = await workflow('Offering memorandum summary (draft)', null, 'draft');
+  await run(draft, 0, 'completed', 1000);
 }
 
 (async () => {

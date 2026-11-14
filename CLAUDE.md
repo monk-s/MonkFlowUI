@@ -449,8 +449,12 @@ CLIENT PORTAL    /sign-in  /invite/*  /auth/*  /select-workspace  /dashboard/*
     src/auth/             — sign-in, invitation, MFA setup, workspace picker, reset;
                             session.tsx holds the session mirror and the idle timer
     src/components/       — AppShell (sidebar, top bar), command palette, dialogs
-    src/pages/            — Overview, Settings (Team, Security, Profile); the other
-                            sections are NotYet placeholders until Phases 2-4
+    src/pages/            — Overview (action queue, engagement tracker, telemetry),
+                            workflows/ (list, detail, run), Settings (Team, Security,
+                            Profile). Review, Integrations, Vault and Requests are
+                            NotYet placeholders until Phases 3-4
+    src/components/StatTile.tsx, RunTiles.tsx — telemetry tiles. Rule: a number is
+                            counted from the workspace's own runs or it is not shown
     src/data/             — PortalDataSource interface + ApiDataSource. Screens read
                             through this so Demo Mode can swap in synthetic data.
     src/verticals/        — wording per client type (CRE / BANK / INVESTMENT_FIRM)
@@ -462,7 +466,9 @@ CLIENT PORTAL    /sign-in  /invite/*  /auth/*  /select-workspace  /dashboard/*
 
 STAFF CONSOLE    /admin   (MonkFlow staff only)
   app.js         — Legacy vanilla-JS app: admin dashboard, Client Workspaces
-                   (create a workspace, invite people), outreach, workflow editor,
+                   (create a workspace, invite people; "Engagement" opens that
+                   client's tracker: stages, milestones, requests, workflow
+                   baselines), outreach, workflow editor,
                    Stonk Bot, plus the booking modal and public-site router glue.
                    It has NO sign-in screens: /admin asks the API who is signed in
                    and sends everyone else to /sign-in or /dashboard.
@@ -497,6 +503,12 @@ services/identity/               — the identity seam: local (bcrypt, default),
                                    and local dev only; refuses production). A hosted vendor
                                    adapter goes here.
 routes/portal/index.js           — /api/v1/portal: everything a client workspace can do
+routes/portal/engagement.routes.js — tracker, action queue, sign-off, activity
+routes/portal/workflow.routes.js — workflows, runs, telemetry (read-only; counted live from
+                                   run rows through the org_workflow* views, migration 052)
+portal/engagements.js            — stage / milestone / request vocabulary and API shapes
+controllers/engagement.controller.js — staff: engagements, milestones, requests, attach a
+                                   workflow, time-saved baseline (under /admin/organizations/:id)
 portal/withOrg.js                — EVERY client-facing query runs inside withOrg(): it
                                    switches to the monkflow_portal role and sets app.org_id
                                    so row-level security isolates firms in the database
@@ -516,6 +528,7 @@ tests/                           — Jest + supertest against a throwaway Postgr
 ```
 users, team_members, refresh_tokens, api_keys
 organizations, memberships, invitations, sessions, audit_log   (portal v2, migrations 048-051)
+engagements, milestones, action_items                          (portal v2, migration 052)
 workflows, workflow_executions, execution_logs
 agents, agent_executions
 leads, outreach_leads, outreach_emails, sender_health
