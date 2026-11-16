@@ -1168,3 +1168,76 @@ real email delivery.
 - Bugs fixed: 1 CRITICAL, 3 HIGH, 2 MEDIUM, 1 LOW (2 MEDIUM, 1 LOW deferred)
 - Tests added: 50 API, 30 browser
 - Commits: 2 (local, not pushed)
+
+## Session: 2026-11-13 (portal v2, phase 2)
+
+Branch `feat/portal-phase-2`, from `feat/portal-phase-1`. Local to the Mac
+mini, not pushed, not deployed.
+
+### Audit Findings
+- [MEDIUM] Audit-log hash chain could disagree with id order under concurrent
+  writes: the id was drawn before the chain lock was taken, so two writers
+  could get ids in the opposite order to their place in the chain. Showed up
+  as an intermittent failure of the Phase 1 chain test. FIXED in
+  `051-audit-log-rls.sql` (id assigned inside the trigger, under the lock).
+  051 has not reached any deployed database, so it was edited in place.
+- [LOW] API tests failed intermittently with "socket hang up" (about 1 full
+  run in 15): supertest opened a new listener per request. FIXED: one
+  listening server per test file (`tests/helpers.js`).
+- [LOW, OPEN] After that fix, 2 of about 65 full runs still failed in
+  `auth.test.js` (Phase 1 sign-in tests) with odd responses: an empty body
+  from password sign-in, a 404 from the SSO start route. Cause not found.
+  The Phase 2 and isolation tests were not affected in any run.
+
+### Improvements Made
+- Migration `052-engagements.sql`: `engagements`, `milestones`,
+  `action_items` (row-level security; the portal role may update only the
+  sign-off and completion columns), baseline columns on `workflows`, and
+  three read-only views (`org_workflows`, `org_workflow_runs`,
+  `org_run_logs`) that hide definitions, secrets, payloads, results, debug
+  logs and drafts.
+- Client API: `/portal/engagements`, `/portal/actions`,
+  `/portal/milestones/:id/sign-off`, `/portal/actions/:id/complete`,
+  `/portal/activity`, `/portal/telemetry`, `/portal/workflows[/:id[/runs/:runId]]`.
+  New permission `actions.complete` (admin, reviewer).
+- Staff API under `/admin/organizations/:id`: engagements, milestones,
+  requests, attach a workflow, set a time-saved baseline (a baseline is
+  refused without the sentence stating its basis). All audited as
+  `monkflow_staff`. A signed-off milestone can no longer be edited or removed.
+- Portal: Overview rebuilt (Waiting on you, stage tracker, four telemetry
+  tiles with 7/30/90-day switch, activity, workflow health); Workflows list,
+  detail and run pages. Staff console: Client Workspaces > Engagement.
+- `portal-preflight.js` now also covers migration 052.
+
+### Departures from the plan
+- Telemetry is counted live from run rows on each request. The planned
+  nightly roll-up table and `metrics.scheduler.js` were not built: at current
+  volumes the live query is simple and never stale, and it avoids a new
+  scheduler in production. Add the roll-up when run counts make it slow.
+- Engagements are a new table, not columns on `projects`. `projects.user_id`
+  is NOT NULL and a new workspace has no user to own one. Existing `projects`
+  rows are not shown in the tracker.
+- Tiles are Completed runs, Success rate, Median run time, Hours saved.
+  "Documents processed" and "field accuracy" wait for Phase 3, when
+  documents and reviewed fields exist to count.
+
+### Verification
+On the Mac mini only. API: 70 Jest tests (see the open LOW finding above).
+Portal: 25 Playwright tests. Built site: 12 Playwright tests, including staff
+building an engagement and the client seeing it. `npm run check` and the
+portal typecheck pass. NOT verified: anything on Vercel or Railway, the
+migrations against production data.
+
+### Next Session Priority
+1. Unchanged from Phase 1: run the preflight against production, push the
+   branch stack from the MacBook, check a Vercel preview, identity vendor.
+2. Phase 3: Review Studio, vertical packs, Demo Mode. Decide first where
+   client documents are stored (the "no client PII persisted" wording).
+3. No email or Pushover is sent when a client signs off or when staff mark a
+   milestone ready; both sides only see it in the portal.
+
+### Metrics
+- Files modified: 30
+- Bugs fixed: 1 MEDIUM
+- Tests added: 20 API, 7 browser
+- Commits: 1 (local, not pushed)

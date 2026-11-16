@@ -26,6 +26,7 @@ const PERMISSIONS = {
   'review.view': ALL,
   'review.decide': ['admin', 'reviewer'],          // edit fields, approve, reject, sync
   'engagement.signoff': ['admin'],                 // milestone sign-off
+  'actions.complete': ['admin', 'reviewer'],       // mark a request from MonkFlow as done
   'proposals.approve': ['admin'],
   'connectors.view': ALL,
   'connectors.manage': ['admin'],                  // credentials, webhooks, API keys

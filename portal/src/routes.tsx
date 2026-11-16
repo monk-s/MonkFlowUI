@@ -19,6 +19,9 @@ import { SettingsLayout } from './pages/settings/SettingsLayout';
 import { Team } from './pages/settings/Team';
 import { Security } from './pages/settings/Security';
 import { Profile } from './pages/settings/Profile';
+import { Workflows } from './pages/workflows/Workflows';
+import { WorkflowDetail } from './pages/workflows/WorkflowDetail';
+import { RunDetail } from './pages/workflows/RunDetail';
 
 // Loaded on demand: it is the only screen that needs the QR-code library.
 const MfaSetup = lazy(() => import('./auth/MfaSetup').then((m) => ({ default: m.MfaSetup })));
@@ -49,7 +52,9 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Overview />, handle: { title: 'Overview' } },
           { path: 'review/*', element: <NotYet section="review" />, handle: { title: 'Review' } },
-          { path: 'workflows/*', element: <NotYet section="workflows" />, handle: { title: 'Workflows' } },
+          { path: 'workflows', element: <Workflows />, handle: { title: 'Workflows' } },
+          { path: 'workflows/:id', element: <WorkflowDetail />, handle: { title: 'Workflows' } },
+          { path: 'workflows/:id/runs/:runId', element: <RunDetail />, handle: { title: 'Workflows' } },
           { path: 'integrations/*', element: <NotYet section="integrations" />, handle: { title: 'Integrations' } },
           { path: 'vault/*', element: <NotYet section="vault" />, handle: { title: 'Vault' } },
           { path: 'requests/*', element: <NotYet section="requests" />, handle: { title: 'Requests' } },

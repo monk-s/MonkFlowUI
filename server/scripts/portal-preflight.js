@@ -10,7 +10,7 @@
  * (DATABASE_PUBLIC_URL is used if DATABASE_URL is not set.)
  *
  * It answers three questions:
- *   1. Will migrations 048-051 apply cleanly to this database?
+ *   1. Will migrations 048-052 apply cleanly to this database?
  *   2. Who has an account today, and who has actually been signing in?
  *      (Their passwords keep working, but they land on the new console.)
  *   3. What will the backfill create (one workspace per client account)?
@@ -28,7 +28,7 @@ if (!url) {
   process.exit(2);
 }
 
-const NEW_MIGRATIONS = ['048-organizations.sql', '049-sessions-invitations.sql', '050-org-scope-backfill.sql', '051-audit-log-rls.sql'];
+const NEW_MIGRATIONS = ['048-organizations.sql', '049-sessions-invitations.sql', '050-org-scope-backfill.sql', '051-audit-log-rls.sql', '052-engagements.sql'];
 const NEW_TABLES = ['organizations', 'memberships', 'invitations', 'sessions', 'audit_log'];
 const SCOPED_TABLES = ['workflows', 'agents', 'projects', 'user_integrations', 'api_keys'];
 
@@ -81,6 +81,15 @@ const mask = (email) => String(email || '').replace(/^(.{2})[^@]*(@.*)$/, '$1***
     if (!(await hasTable('users'))) blockers.push('There is no users table.');
     for (const table of SCOPED_TABLES) {
       if (!(await hasTable(table))) blockers.push(`Table "${table}" is missing; migration 050 adds a column to it and would fail.`);
+    }
+    // Migration 052 adds columns and views over these, and creates three tables.
+    for (const table of ['workflow_executions', 'execution_logs']) {
+      if (!(await hasTable(table))) blockers.push(`Table "${table}" is missing; migration 052 builds the portal's read-only views on it and would fail.`);
+    }
+    for (const table of ['engagements', 'milestones', 'action_items']) {
+      if ((await hasTable(table)) && !(await q("SELECT 1 FROM _migrations WHERE name = '052-engagements.sql'")).length) {
+        blockers.push(`A table named "${table}" already exists but migration 052 has not run. The migration would skip creating it (IF NOT EXISTS) and then fail on missing columns.`);
+      }
     }
     const userCols = new Set((await q("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users'")).map((r) => r.column_name));
     for (const col of ['id', 'email', 'role', 'first_name', 'last_name', 'company', 'password_hash']) {

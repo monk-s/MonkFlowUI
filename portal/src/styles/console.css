@@ -1,0 +1,126 @@
+/* Overview and Workflows: action cards, stage tracker, stat tiles, run logs. */
+
+/* ── Section heading above a row of cards ────────────────── */
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; }
+.section-head h2 { font-size: var(--text-md); }
+.grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s5); align-items: start; }
+
+/* ── Action cards ────────────────────────────────────────── */
+.actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--s3); }
+.action-card { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s4); background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--navy); border-radius: var(--radius-lg); }
+.action-card .meta { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); font-size: var(--text-sm); color: var(--ink-3); }
+.action-card .meta .overdue { color: var(--bad); font-weight: 600; }
+.action-card h3 { font-size: var(--text-md); }
+.action-card p { color: var(--ink-2); }
+.action-card .foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-top: auto; padding-top: var(--s2); }
+.action-card .foot .muted { font-size: var(--text-sm); }
+
+/* ── Stage tracker ───────────────────────────────────────── */
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+.seg button { height: 28px; padding: 0 var(--s3); border: 0; border-right: 1px solid var(--border-strong); background: none; font-size: var(--text-sm); font-weight: 500; color: var(--ink-2); cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button:hover { background: var(--hover); }
+.seg button[aria-pressed="true"] { background: var(--navy); color: var(--on-dark); }
+.seg button:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 0; }
+
+.stages { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); }
+.stage { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: var(--s4); border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; text-align: left; cursor: pointer; }
+.stage:hover { background: var(--surface-2); }
+.stage[aria-pressed="true"] { border-bottom-color: var(--navy); background: var(--surface-2); }
+.stage .dot { display: grid; place-items: center; width: 22px; height: 22px; margin-bottom: var(--s2); border-radius: 50%; border: 1.5px solid var(--border-strong); background: var(--surface); color: var(--ink-3); font-size: var(--text-xs); font-weight: 700; position: relative; z-index: 1; }
+.stage .dot svg { width: 12px; height: 12px; }
+.stage[data-state="done"] .dot { background: var(--accent); border-color: var(--accent); color: var(--on-dark); }
+.stage[data-state="current"] .dot { border-color: var(--navy); background: var(--navy); color: var(--on-dark); }
+/* The rail between dots; filled up to the current stage. */
+.stages li { position: relative; }
+.stages li + li::before { content: ""; position: absolute; top: calc(var(--s4) + 10px); right: calc(100% - var(--s4)); width: calc(100% - 22px); height: 2px; background: var(--border); z-index: 0; pointer-events: none; }
+.stages li[data-reached="true"]::before { background: var(--accent); }
+.stage .label { font-weight: 600; color: var(--ink); }
+.stage .state { font-size: var(--text-sm); color: var(--ink-3); }
+.stage[data-state="upcoming"] .label { color: var(--ink-3); }
+
+.milestones { list-style: none; }
+.milestone { display: flex; align-items: flex-start; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); }
+.milestone:last-child { border-bottom: 0; }
+.milestone .mark { display: grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; border: 1.5px solid var(--border-strong); color: var(--on-dark); flex: none; }
+.milestone .mark svg { width: 11px; height: 11px; }
+.milestone[data-status="complete"] .mark { background: var(--accent); border-color: var(--accent); }
+.milestone[data-status="in_progress"] .mark { border-color: var(--info); box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 9px var(--info); }
+.milestone[data-status="awaiting_signoff"] .mark { border-color: var(--warn); box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 9px var(--warn); }
+.milestone .body { flex: 1; min-width: 0; }
+.milestone .body strong { display: block; font-weight: 600; }
+.milestone .body span { display: block; color: var(--ink-3); font-size: var(--text-sm); }
+.milestone .side { display: flex; align-items: center; gap: var(--s3); flex: none; }
+.tracker-foot { display: flex; gap: var(--s2); padding: var(--s3) var(--s4); border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius-lg) var(--radius-lg); font-size: var(--text-base); color: var(--ink-2); }
+.tracker-foot strong { font-weight: 600; color: var(--ink); }
+
+/* ── Stat tiles ──────────────────────────────────────────── */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); }
+.tile { position: relative; display: flex; flex-direction: column; gap: var(--s1); padding: var(--s4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); min-height: 132px; }
+.tile-label { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); font-size: var(--text-sm); font-weight: 600; color: var(--ink-3); }
+.tile-info { display: grid; place-items: center; width: 22px; height: 22px; margin: -4px -4px -4px 0; border: 0; border-radius: 50%; background: none; color: var(--ink-4); cursor: pointer; }
+.tile-info:hover, .tile-info[aria-expanded="true"] { background: var(--hover); color: var(--ink-2); }
+.tile-info svg { width: 14px; height: 14px; }
+.tile-value { font-size: var(--text-2xl); font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tile-value small { font-size: var(--text-md); font-weight: 500; color: var(--ink-3); letter-spacing: 0; margin-left: 3px; }
+.tile-value.none { font-size: var(--text-md); font-weight: 500; color: var(--ink-3); letter-spacing: 0; padding: 6px 0; }
+.tile-sub { font-size: var(--text-sm); color: var(--ink-3); }
+/* Opens over the page below the tile, so the row of tiles keeps its height. */
+.tile-how { position: absolute; top: calc(100% + 4px); left: -1px; right: -1px; z-index: 10; padding: var(--s3) var(--s4); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-pop); font-size: var(--text-sm); color: var(--ink-2); }
+.tile-how ul { list-style: none; margin-top: var(--s1); display: flex; flex-direction: column; gap: var(--s1); }
+.tile-how li { padding-left: var(--s2); border-left: 2px solid var(--border); }
+
+/* Daily bars under a tile's value. One series, so no legend; each day has a
+   hover target taller than its bar. */
+.spark { display: block; width: 100%; height: 34px; margin-top: auto; padding-top: var(--s2); overflow: visible; box-sizing: content-box; }
+.spark .bar { fill: var(--accent); }
+.spark .bar.fail { fill: var(--bad); }
+.spark .zero { fill: var(--border); }
+.spark .hit { fill: transparent; }
+.spark g:hover .hit { fill: var(--hover); }
+.spark-wrap { position: relative; margin-top: auto; }
+.spark-tip { position: absolute; bottom: calc(100% + 4px); transform: translateX(-50%); padding: 3px 7px; border-radius: var(--radius-sm); background: var(--navy); color: var(--on-dark); font-size: var(--text-xs); white-space: nowrap; pointer-events: none; z-index: 5; }
+
+/* ── Activity ────────────────────────────────────────────── */
+.activity { list-style: none; }
+.activity li { display: flex; justify-content: space-between; gap: var(--s4); padding: 10px var(--s4); border-bottom: 1px solid var(--border); }
+.activity li:last-child { border-bottom: 0; }
+.activity .what { min-width: 0; }
+.activity .what span { display: block; color: var(--ink-3); font-size: var(--text-sm); }
+.activity time { color: var(--ink-3); font-size: var(--text-sm); white-space: nowrap; }
+
+/* ── Tables that link ────────────────────────────────────── */
+.table a.row-link { color: var(--ink); font-weight: 600; }
+.table td.r, .table th.r { text-align: right; }
+.back { display: inline-flex; align-items: center; gap: var(--s1); color: var(--ink-3); font-size: var(--text-base); }
+.back svg { width: 14px; height: 14px; }
+
+/* ── Run log ─────────────────────────────────────────────── */
+.log { list-style: none; font-family: var(--font-mono); font-size: var(--text-sm); }
+.log li { display: grid; grid-template-columns: 92px 48px minmax(0, 1fr); gap: var(--s3); padding: 6px var(--s4); border-bottom: 1px solid var(--border); }
+.log li:last-child { border-bottom: 0; }
+.log time { color: var(--ink-3); }
+.log .lvl { text-transform: uppercase; font-weight: 600; color: var(--ink-3); }
+.log li[data-level="warn"] .lvl { color: var(--warn); }
+.log li[data-level="error"] .lvl { color: var(--bad); }
+.log .msg { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+
+@media (max-width: 1100px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .stages { grid-template-columns: 1fr; border-bottom: 0; }
+  .stages li + li::before { display: none; }
+  .stage { flex-direction: row; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); margin-bottom: 0; }
+  .stage[aria-pressed="true"] { border-bottom-color: var(--border); box-shadow: inset 3px 0 0 var(--navy); }
+  .stage .dot { margin-bottom: 0; }
+  .stage .state { margin-left: auto; }
+  .milestone { flex-wrap: wrap; }
+  .milestone .side { width: 100%; padding-left: 30px; justify-content: space-between; }
+  .log li { grid-template-columns: 1fr; gap: 0; }
+}
+@media (max-width: 520px) {
+  .tiles { grid-template-columns: minmax(0, 1fr); }
+  .actions { grid-template-columns: minmax(0, 1fr); }
+}
