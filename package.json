@@ -1,0 +1,14 @@
+{
+  "name": "monkflow-site",
+  "private": true,
+  "version": "0.0.0",
+  "description": "monkflow.io: the public site, the legacy admin app and the client portal. This file only holds the build and check commands; the portal's dependencies are in portal/, the API's in server/.",
+  "scripts": {
+    "build": "node scripts/build-site.mjs",
+    "build:site": "node scripts/build-site.mjs --no-portal",
+    "preview": "node scripts/dev-server.mjs --dist",
+    "dev": "node scripts/dev-server.mjs",
+    "prerender": "node scripts/prerender.mjs",
+    "check": "node scripts/prerender.mjs --check && node scripts/check-duplicate-functions.mjs && node --check app.js"
+  }
+}

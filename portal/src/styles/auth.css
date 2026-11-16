@@ -1,0 +1,78 @@
+/* Sign-in, invitation, MFA and workspace-picker screens. */
+.auth { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); background: var(--surface); }
+.auth-main { display: flex; flex-direction: column; padding: var(--s6) var(--s8); min-height: 100vh; }
+.auth-top { display: flex; align-items: center; justify-content: space-between; }
+.auth-logo { display: inline-flex; align-items: center; gap: var(--s2); font-size: var(--text-lg); font-weight: 700; color: var(--navy); letter-spacing: -0.01em; }
+.auth-logo:hover { text-decoration: none; }
+.auth-logo img { width: 24px; height: 27px; }
+.auth-back { font-size: var(--text-base); color: var(--ink-3); }
+.auth-center { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--s10) 0; }
+.auth-card { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: var(--s5); }
+.auth-card h1 { font-family: var(--font-serif); font-size: 28px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.auth-sub { color: var(--ink-2); font-size: var(--text-md); margin-top: calc(var(--s3) * -1); }
+.auth-form { display: flex; flex-direction: column; gap: var(--s4); }
+/* 16px inputs so iOS does not zoom the page on focus. */
+.auth-form .input { height: 42px; font-size: 16px; }
+.auth-divider { display: flex; align-items: center; gap: var(--s3); color: var(--ink-4); font-size: var(--text-sm); }
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.auth-sso { display: flex; flex-direction: column; gap: var(--s2); }
+.auth-sso .btn { justify-content: center; }
+.auth-sso .mark { width: 16px; height: 16px; }
+.auth-identity { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2) var(--s3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); font-size: var(--text-md); }
+.auth-identity span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auth-foot { font-size: var(--text-base); color: var(--ink-3); }
+.auth-legal { font-size: var(--text-sm); color: var(--ink-4); display: flex; gap: var(--s3); }
+.auth-legal a { color: var(--ink-3); }
+.pw-wrap { position: relative; }
+.pw-wrap .input { padding-right: 60px; }
+.pw-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); height: 30px; padding: 0 var(--s2); border: 0; background: none; color: var(--ink-3); font-size: var(--text-sm); font-weight: 600; cursor: pointer; border-radius: var(--radius-sm); }
+.pw-toggle:hover { color: var(--ink); }
+
+/* Right panel: how the workspace is protected, and live status. */
+.auth-side { background: var(--navy); color: var(--on-dark); padding: var(--s12) var(--s10); display: flex; flex-direction: column; justify-content: space-between; gap: var(--s8); }
+.auth-side .eyebrow { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--on-dark-3); margin-bottom: var(--s4); }
+.auth-side h2 { font-family: var(--font-serif); font-size: 22px; font-weight: 500; line-height: 1.3; margin-bottom: var(--s6); }
+.auth-facts { list-style: none; display: flex; flex-direction: column; gap: var(--s4); }
+.auth-facts li { display: flex; gap: var(--s3); font-size: var(--text-md); line-height: 1.45; color: var(--on-dark-2); }
+.auth-facts svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: #7fc4ae; }
+.auth-facts strong { color: var(--on-dark); font-weight: 600; display: block; }
+.auth-status { display: flex; align-items: center; gap: var(--s2); padding-top: var(--s4); border-top: 1px solid rgba(255, 255, 255, 0.12); font-size: var(--text-base); color: var(--on-dark-2); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--on-dark-3); flex: none; }
+.status-dot.ok { background: #4fc79d; }
+.status-dot.degraded { background: #e7b24a; }
+.status-dot.down { background: #e2776e; }
+.auth-status-inline { display: none; }
+
+/* Invitation summary */
+.invite-facts { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-2); }
+.invite-facts div { display: flex; justify-content: space-between; gap: var(--s4); padding: 10px var(--s4); border-bottom: 1px solid var(--border); font-size: var(--text-md); }
+.invite-facts div:last-child { border-bottom: 0; }
+.invite-facts dt { color: var(--ink-3); }
+.invite-facts dd { font-weight: 500; text-align: right; }
+
+/* MFA setup */
+.mfa-qr { display: flex; gap: var(--s4); align-items: center; padding: var(--s4); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.mfa-qr svg { width: 132px; height: 132px; flex: none; }
+.mfa-secret { font-family: var(--font-mono); font-size: var(--text-base); word-break: break-all; color: var(--ink-2); }
+
+/* Workspace picker */
+.ws-list { display: flex; flex-direction: column; gap: var(--s2); }
+.ws-option { display: flex; align-items: center; gap: var(--s3); width: 100%; padding: var(--s3) var(--s4); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); text-align: left; cursor: pointer; transition: border-color var(--fast), background var(--fast); }
+.ws-option:hover { border-color: var(--navy); background: var(--surface-2); }
+.ws-option .ws-name { font-size: var(--text-md); font-weight: 600; }
+.ws-option .ws-meta { font-size: var(--text-sm); color: var(--ink-3); }
+.ws-option .grow { flex: 1; min-width: 0; }
+.ws-option svg { width: 16px; height: 16px; color: var(--ink-4); }
+.ws-avatar { width: 32px; height: 32px; border-radius: var(--radius); background: var(--navy); color: var(--on-dark); display: grid; place-items: center; font-size: var(--text-sm); font-weight: 700; flex: none; }
+
+@media (max-width: 900px) {
+  .auth { grid-template-columns: 1fr; }
+  .auth-side { display: none; }
+  .auth-main { padding: var(--s5) var(--s4); }
+  .auth-status-inline { display: flex; align-items: center; gap: var(--s2); font-size: var(--text-sm); color: var(--ink-3); }
+  .auth-status-inline .status-dot { background: var(--ink-4); }
+  .auth-status-inline .status-dot.ok { background: var(--ok); }
+  .auth-status-inline .status-dot.degraded { background: var(--warn); }
+  .auth-status-inline .status-dot.down { background: var(--bad); }
+  .field-row { grid-template-columns: 1fr; }
+}

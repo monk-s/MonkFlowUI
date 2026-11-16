@@ -999,8 +999,172 @@ deployment itself.
 - Bugs fixed: 1 HIGH, 3 MEDIUM, 2 LOW
 - Tests added: 0 (browser-verified; duplicate-function and prerender `--check` guards added)
 
-## Session: 2026-11-13 (tools) — Bank Ops Benchmark
-- New routes /tools and /tools/bank-benchmark (marketing/site.js), builders MK.pages.tools / MK.pages.bankBench and pure MK.bench.render (marketing/pages.js), copy MK.tools (marketing/content.js), styles (marketing/marketing.css), footer link "Free tools".
-- Data: /data/bank-bench.json (public FDIC Call Report figures, 982 banks in TX OK NM LA AR KS CO, quarter 2026-06-30, ~99 KB), produced quarterly by Jarvis (bank_bench.py) and copied in by hermes-setup/jarvis5/publish-bench.sh.
-- Everything runs in the browser; no API, no login, no gate. Plausible event "Bench Lookup" (band only). ?cert=<FDIC cert> preselects a bank (for letters and links).
-- Checked: render clean for all 982 banks (no NaN/undefined), screenshots at 1280 and 375 px, prerender --check passes.
+## Session: 2026-11-12 (2) — client sign-in and portal refresh
+
+Scope: owner-directed. Sign-in screens rebuilt, signed-in portal re-themed to
+match the public site, account creation made invite-only at the UI level.
+The 12-category audit was not run.
+
+### Audit Findings
+- [HIGH] **Password-reset emails led nowhere.** The server sends
+  `<FRONTEND_URL>?reset=<token>` but the front end never read `?reset=`, so
+  the link opened the homepage and the password could not be changed. FIXED:
+  new "Choose a new password" screen wired to `POST /auth/reset-password`.
+- [HIGH] **Help Center made false claims to every signed-in client:** "SOC 2
+  compliance", "end-to-end encryption", "data never leaves your designated
+  region", "SSO and 2FA for all accounts", "50+ integrations", CSV/JSON/PDF
+  exports, automatic retries, a 24-hour response promise, and a pricing FAQ.
+  It also told clients to build their own workflows in an editor they cannot
+  open. FIXED: rewritten for clients with only statements that are true today.
+- [MEDIUM] Team-invite emails link to `?invite=<token>`, also unhandled. It now
+  opens the create-login screen. NOT FIXED: there is no server endpoint that
+  accepts an invite token, so the new account is not linked to the inviting
+  team. Needs a server change.
+- [MEDIUM] Client dashboard "Quick Actions" offered admin actions (Create New
+  Workflow, Open Workflow Editor, Browse Integrations). FIXED: clients now get
+  project status, tools, analytics, message us, schedule a check-in.
+- [LOW] "Remember me" checkbox did nothing. Removed.
+- [LOW] Sign-in had no URL of its own. FIXED: `/sign-in` (bookmarkable; back
+  button returns to the site).
+- [LOW] Top bar showed "Dashboard" on tool/agent detail pages. FIXED.
+- [LOW] On phones the open sidebar was hidden behind the top bar. FIXED.
+
+### Improvements Made
+- Auth screens: one renderer (`renderAuthView`) with login, forgot, forgot-sent,
+  reset and join views; real `<form>`s with labels, autocomplete hints for
+  password managers, show/hide password, inline errors announced to screen
+  readers, busy state on submit, email carried between views, 16px inputs so
+  iOS does not zoom.
+- Invite-only: no link to account creation anywhere. `/join` still works when
+  shared directly. The `/auth/signup` API is unchanged (still open).
+- Portal theme: `styles.css` tokens re-pointed to the public site's palette
+  (off-white, white cards, navy ink, evergreen accent, navy sidebar via scoped
+  tokens). ~310 hard-coded neon/dark colors in `app.js` converted. Primary
+  buttons are navy. Glows removed. Serif page titles.
+- Client-facing emoji replaced with icons (onboarding modal, dashboard status
+  tiles, agents, booking). Admin-only screens still use some emoji.
+- Booking modal follows the light theme everywhere; titled "Schedule a
+  check-in" when opened inside the portal.
+
+### Verification
+Headless Chrome against `scripts/dev-server.mjs` plus a throwaway mock API with
+sample data (not committed). Sign-in: empty/invalid input, wrong password,
+success, sign-out, forgot → sent, reset (short, mismatch, success, expired
+link → send new), join, `?invite=`, signed-in visit to `/sign-in`, back and
+forward buttons, 390px. Portal: every client page and modal screenshotted and
+reviewed; admin dashboard, outreach, integrations, workflow editor and agent
+detail smoke-tested. Public-site regression suite re-run: all pass, zero
+console errors. NOT verified: anything against the real API or real data, the
+Stonk Bot page, and real email links end to end.
+
+### Next Session Priority
+1. After deploy: sign in on monkflow.io/sign-in with a real account; request a
+   reset email and follow the link.
+2. Decide whether clients should see Run Now / Pause / Delete / Edit in Builder
+   and the "Est. Cost (incl. 10% fee)" tile on a tool's detail page.
+3. Settings → Notifications toggles do not save anything. Wire up or remove.
+4. Privacy/Terms text names getmonkflow.com and nathan@getmonkflow.com.
+5. Server: close public `/auth/signup` (invite token), add invite acceptance,
+   and restyle the transactional emails (still neon green).
+6. Remove unused `.landing-*` rules from `styles.css`.
+
+### Metrics
+- Files modified: 6 (app.js, styles.css, shell.html, marketing/marketing.css, CLAUDE.md, AUDIT_LOG.md) + 11 regenerated pages
+- Bugs fixed: 2 HIGH, 1 MEDIUM, 4 LOW (1 MEDIUM needs server work)
+- Tests added: 0 (browser-verified)
+
+## Session: 2026-11-13 — portal v2, Phase 1 (workspaces, cookie sessions, new portal app)
+
+Branch `feat/portal-phase-1`, on top of `feat/client-portal-refresh`. NOT merged,
+NOT deployed. Plan: `~/.claude/plans/luminous-finding-melody.md`.
+
+### Audit Findings
+- [CRITICAL] `POST /auth/signup` was open: anyone could create an `owner`
+  account by calling the API. FIXED: the route is gone; accounts are created
+  only by accepting an invitation.
+- [HIGH] Access and refresh tokens lived in `localStorage`, readable by any
+  script on the page. FIXED: sign-in state is an HttpOnly, SameSite=Lax cookie
+  backed by a hashed row in `sessions`, with an idle limit per workspace and a
+  12-hour absolute limit. `app.js` no longer reads, stores or sends a token.
+- [HIGH] One user was one tenant; `team_members` invitations could not be
+  accepted and roles were never checked. FIXED: `organizations`, `memberships`
+  (admin / reviewer / auditor), working invitations, permissions enforced on
+  the server, and Postgres row-level security under a restricted role
+  (`monkflow_portal`) for every client-facing portal query.
+- [HIGH] No audit log. FIXED: `audit_log` is append-only (trigger rejects
+  UPDATE / DELETE / TRUNCATE) and each row is chained to the previous hash.
+- [MEDIUM] Legacy routes authenticated by cookie had no cross-site write
+  check beyond SameSite. FIXED: `authenticate` refuses a cookie-authenticated
+  write whose Origin is not our own site.
+- [MEDIUM] In the legacy app, a "welcome" timer closed whatever dialog a staff
+  user had open 0.8 s after load. FIXED (timer removed; clients no longer
+  reach that app).
+- [LOW] `var(--red)` was not a defined token. Uses `--error`.
+- [MEDIUM] Production has no second factor and no Microsoft / Google sign-in
+  until a hosted identity vendor is configured. With `IDENTITY_PROVIDER=local`
+  the portal is password-only and the SSO buttons are hidden. DEFERRED: needs
+  a vendor account (see Next).
+- [MEDIUM] Migrations 013 and 026 fail on an empty database (pre-existing).
+  Tests tolerate it. DEFERRED.
+- [LOW] Sign-in rate limits key on client IP; behind the Vercel proxy that
+  may be a handful of shared addresses. To check on a preview deploy.
+
+### Improvements Made
+- New React + TypeScript app in `portal/`: sign-in (email first), invitation
+  acceptance, two-step setup, workspace picker, password reset, console shell
+  with command palette and idle-timeout dialog, working Team and Security
+  settings. Overview is a getting-started card; Review, Workflows,
+  Integrations, Vault and Requests say "Not open yet".
+- Sign-in trust panel states only verified facts and reads the live health
+  check; a test bans SOC 2, "end-to-end", "fixed-fee" and similar wording.
+- Identity seam (`services/identity/`): `local` (default) and `stub` (tests and
+  local development; refuses to load in production).
+- Deploy wiring: `scripts/build-site.mjs` builds `dist/` from an explicit list
+  of public files plus the portal build and fails on a missing asset, a
+  sitemap page with no file, or a private file in the output. `vercel.json`
+  now sets the build, serves `dist/`, rewrites the portal paths, redirects
+  `/login` and `/join`, and adds no-frame / no-referrer headers to sign-in,
+  portal and admin pages. `scripts/dev-server.mjs` applies the same file
+  locally and proxies `/api`.
+- Legacy `app.js`: staff console only, at `/admin`. Auth screens and their CSS
+  removed (about 500 lines). Old `?reset=` links go to `/auth/reset`; old
+  `?invite=` and `/join` go to `/sign-in`. Timer refreshes no longer count as
+  activity, so an unattended console still times out.
+- Staff screen Admin > Client Workspaces: create a workspace, invite its first
+  admin, invite others, edit type / domains / idle limit. Re-inviting an
+  address replaces its open invitation.
+- `server/scripts/portal-preflight.js`: read-only check of a database before
+  the migrations run (blockers, who has been signing in, what the backfill
+  creates).
+- Public site: "Client sign in" is a plain link to `/sign-in`.
+
+### Verification
+On the Mac mini only. API: 50 Jest tests against a throwaway Postgres (auth
+flows with the vendor stubbed, invitations, role matrix, isolation including
+"query forgets its WHERE", audit-log immutability). Portal: 19 Playwright
+tests in Chrome against the Vite dev server. Built site: 11 Playwright tests
+against `dist/` behind the vercel.json emulation (deep links and refresh,
+old links, headers, nothing private published, `/admin` hand-over for staff,
+clients and signed-out visitors, workspace create / invite / edit).
+`npm run check` passes. NOT verified: anything on Vercel or Railway, the four
+migrations against production data, cookies through the real Vercel proxy,
+real email delivery.
+
+### Next Session Priority
+1. Before any merge: run `server/scripts/portal-preflight.js` against
+   production and read its output. Hold the merge until Phase 2 if any client
+   signs in today (they would land on a mostly empty console).
+2. Push `feat/client-portal-refresh` and this branch from the MacBook; check a
+   Vercel preview: build succeeds, every portal path deep-links, `/api`
+   cookies survive the proxy, rate limits see real client IPs.
+3. Identity vendor account (working choice: WorkOS), then the adapter in
+   `services/identity/` for Microsoft / Google sign-in, emailed codes and MFA.
+4. Phase 2: Overview, engagement tracker, workflows.
+5. Privacy/Terms text still names getmonkflow.com; Settings > Notifications
+   toggles in the staff console still save nothing.
+
+### Metrics
+- Files modified: about 115 across two commits
+- Bugs fixed: 1 CRITICAL, 3 HIGH, 2 MEDIUM, 1 LOW (2 MEDIUM, 1 LOW deferred)
+- Tests added: 50 API, 30 browser
+- Commits: 2 (local, not pushed)

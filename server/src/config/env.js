@@ -64,6 +64,22 @@ const env = {
   linkedinDailyConnectLimit: parseInt(process.env.LINKEDIN_DAILY_CONNECT_LIMIT, 10) || 20,
   linkedinDailyDmLimit: parseInt(process.env.LINKEDIN_DAILY_DM_LIMIT, 10) || 15,
   linkedinDiscoveryMode: process.env.LINKEDIN_DISCOVERY_MODE || 'linkedin_boolean',
+  // ── Portal v2: identity and sessions ──────────────────────────
+  // Who verifies credentials. "local" checks the bcrypt hashes in the users
+  // table (password sign-in only). A hosted vendor adapter adds SSO, emailed
+  // codes, MFA and passkeys. "stub" is a fake vendor for tests and local
+  // development and is refused in production (services/identity/index.js).
+  identityProvider: process.env.IDENTITY_PROVIDER || 'local',
+  sessionCookieName: 'mf_session',
+  // Hard limit on a session's life regardless of activity.
+  sessionAbsoluteHours: parseInt(process.env.SESSION_ABSOLUTE_HOURS, 10) || 12,
+  // Idle limit for sessions that are not in a workspace (staff, picker).
+  sessionIdleMinutesDefault: 30,
+  inviteExpiresDays: parseInt(process.env.INVITE_EXPIRES_DAYS, 10) || 7,
+  // The old JWT endpoints (/auth/login, /auth/refresh). Kept for one release
+  // so a browser still running the previous app.js can sign in while the new
+  // front end deploys. Set LEGACY_JWT_LOGIN=false to turn them off.
+  legacyJwtLogin: process.env.LEGACY_JWT_LOGIN !== 'false',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production',
 };

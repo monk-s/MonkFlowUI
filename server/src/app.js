@@ -32,6 +32,7 @@ const stonkbotRoutes = require('./routes/stonkbot.routes');
 const integrationRoutes = require('./routes/integration.routes');
 const clientErrorRoutes = require('./routes/clientError.routes');
 const linkedinRoutes = require('./routes/linkedin.routes');
+const portalRoutes = require('./routes/portal');
 
 const app = express();
 
@@ -50,12 +51,22 @@ app.use(express.json({
     }
   },
 }));
-app.use(morgan(env.isDev ? 'dev' : 'combined'));
+if (env.nodeEnv !== 'test') app.use(morgan(env.isDev ? 'dev' : 'combined'));
 app.use(rateLimiter.global);
 
 // Health check
-app.get('/api/v1/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check. Always answers 200 so the host does not restart the service
+// over a database blip; `status` says whether everything is actually up.
+// The portal's sign-in screen shows this to clients, so it must be honest.
+app.get('/api/v1/health', async (req, res) => {
+  let database = 'ok';
+  try {
+    await Promise.race([
+      require('./config/database').query('SELECT 1'),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+    ]);
+  } catch { database = 'down'; }
+  res.json({ status: database === 'ok' ? 'ok' : 'degraded', checks: { database }, timestamp: new Date().toISOString() });
 });
 
 // Routes
@@ -83,6 +94,7 @@ app.use('/api/v1/stonkbot', stonkbotRoutes);
 app.use('/api/v1/integrations', integrationRoutes);
 app.use('/api/v1/client-errors', clientErrorRoutes);
 app.use('/api/v1/linkedin', linkedinRoutes);
+app.use('/api/v1/portal', portalRoutes);
 
 // 404 handler
 app.use((req, res) => {

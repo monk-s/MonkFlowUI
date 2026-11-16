@@ -3,49 +3,32 @@ const ApiError = require('../utils/ApiError');
 const authService = require('../services/auth.service');
 const userModel = require('../models/user.model');
 const { hashToken } = require('../utils/crypto');
+const { query } = require('../config/database');
+const sessions = require('../services/session.service');
+const refreshTokenModel = require('../models/refreshToken.model');
+const { audit } = require('../portal/audit');
 
-const signup = catchAsync(async (req, res) => {
-  const { email, password, firstName, lastName, company } = req.validated;
-
-  const existing = await userModel.findByEmail(email);
-  if (existing) throw ApiError.conflict('Email already registered');
-
-  const passwordHash = await authService.hashPassword(password);
-  const user = await userModel.create({
-    email,
-    passwordHash,
-    firstName,
-    lastName,
-    company,
-  });
-
-  const accessToken = authService.generateAccessToken(user);
-  const refreshToken = await authService.generateRefreshToken(user.id);
-
-  // Create default availability rules (Mon-Fri 9-5)
-  const { query } = require('../config/database');
-  for (let day = 1; day <= 5; day++) {
-    await query(
-      `INSERT INTO availability_rules (user_id, day_of_week, start_time, end_time) VALUES ($1, $2, $3, $4)`,
-      [user.id, day, '09:00', '17:00']
-    );
-  }
-
-  res.status(201).json({
-    user: userModel.sanitize(user),
-    accessToken,
-    refreshToken,
-  });
-});
+// Account creation lives in session.controller.js (acceptInvitation). There
+// is deliberately no open signup: an account exists only because someone
+// was invited to a workspace.
 
 const login = catchAsync(async (req, res) => {
   const { email, password } = req.validated;
 
-  const user = await userModel.findByEmail(email);
-  if (!user) throw ApiError.unauthorized('Invalid email or password');
+  const user = await userModel.findByEmailCI(email);
+  // SSO-only accounts have no password hash.
+  if (!user || !user.password_hash) throw ApiError.unauthorized('Invalid email or password');
 
   const valid = await authService.comparePassword(password, user.password_hash);
   if (!valid) throw ApiError.unauthorized('Invalid email or password');
+
+  // This older endpoint must not be a way around a firm's SSO requirement.
+  const domain = String(user.email).split('@')[1] || '';
+  const sso = await query(
+    'SELECT 1 FROM organizations WHERE sso_required = TRUE AND $1 = ANY(allowed_email_domains) LIMIT 1',
+    [domain.toLowerCase()]
+  );
+  if (sso.rows.length) throw ApiError.forbidden('Your firm requires single sign-on. Use the Sign in page.');
 
   const accessToken = authService.generateAccessToken(user);
   const refreshToken = await authService.generateRefreshToken(user.id);
@@ -74,7 +57,7 @@ const logout = catchAsync(async (req, res) => {
 
 const forgotPassword = catchAsync(async (req, res) => {
   const { email } = req.validated;
-  const user = await userModel.findByEmail(email);
+  const user = await userModel.findByEmailCI(email);
 
   // Always return success to prevent email enumeration
   if (user) {
@@ -105,7 +88,15 @@ const resetPassword = catchAsync(async (req, res) => {
     password_reset_expires: null,
   });
 
+  // A changed password ends every open session for that person.
+  await sessions.revokeAllForUser(user.id);
+  await refreshTokenModel.revokeAllForUser(user.id).catch(() => {});
+  await audit(null, req, {
+    orgId: user.home_org_id || null, actorUserId: user.id, actorEmail: user.email, actorRole: null,
+    action: 'auth.password_reset', targetType: 'user', targetId: user.id,
+  });
+
   res.json({ message: 'Password reset successfully' });
 });
 
-module.exports = { signup, login, refresh, logout, forgotPassword, resetPassword };
+module.exports = { login, refresh, logout, forgotPassword, resetPassword };

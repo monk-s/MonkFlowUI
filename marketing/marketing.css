@@ -112,7 +112,7 @@ html.has-session #landing-container { display: none; }
 .mk-menu strong { display: block; font-size: 15px; font-weight: 600; }
 .mk-menu span { display: block; font-size: 13px; color: var(--mk-ink-3); line-height: 1.4; margin-top: 2px; }
 .mk-nav-actions { display: flex; align-items: center; gap: 18px; }
-.mk-nav-signin { font: 500 15px/1 var(--mk-sans); color: var(--mk-ink-2); background: none; border: 0; cursor: pointer; padding: 8px 0; }
+.mk-nav-signin { font: 500 15px/1 var(--mk-sans); color: var(--mk-ink-2); padding: 8px 0; }
 .mk-nav-signin:hover { color: var(--mk-ink); }
 .mk-nav-toggle { display: none; background: none; border: 0; padding: 8px; margin-right: -8px; cursor: pointer; color: var(--mk-ink); }
 .mk-nav-toggle svg { width: 24px; height: 24px; display: block; }
@@ -298,14 +298,6 @@ html.has-session #landing-container { display: none; }
 .mk-footer-bottom { margin-top: 56px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.14); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; font-size: 13.5px; color: #8fa0b4; }
 .mk-footer-bottom div { display: flex; gap: 24px; }
 .mk-footer-note { margin-top: 16px; font-size: 12.5px; color: #71839a; max-width: 80ch; line-height: 1.5; }
-
-/* Booking modal, when opened from the public site */
-body.mk-active .modal-overlay { background: rgba(15, 27, 45, 0.55); }
-body.mk-active .modal-box { background: #12233a; border-color: #2a4260; }
-body.mk-active .modal-box .btn-primary { background: #7cc4ae; color: #0f1b2d; box-shadow: none; }
-body.mk-active .modal-box .btn-primary:hover { background: #93d2bd; box-shadow: none; transform: none; }
-body.mk-active .modal-box input, body.mk-active .modal-box select, body.mk-active .modal-box textarea { background: #0f1b2d; border-color: #2a4260; }
-body.mk-active .toast { box-shadow: 0 8px 24px rgba(15, 27, 45, 0.2); }
 
 /* Responsive */
 @media (max-width: 1000px) {

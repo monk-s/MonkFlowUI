@@ -1,13 +1,5 @@
 const { z } = require('zod');
 
-const signup = z.object({
-  email: z.string().email('Invalid email'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  firstName: z.string().min(1, 'First name is required').max(100),
-  lastName: z.string().min(1, 'Last name is required').max(100),
-  company: z.string().max(200).optional(),
-});
-
 const login = z.object({
   email: z.string().email('Invalid email'),
   password: z.string().min(1, 'Password is required'),
@@ -23,7 +15,7 @@ const forgotPassword = z.object({
 
 const resetPassword = z.object({
   token: z.string().min(1, 'Token is required'),
-  newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+  newPassword: z.string().min(12, 'Password must be at least 12 characters').max(500),
 });
 
-module.exports = { signup, login, refresh, forgotPassword, resetPassword };
+module.exports = { login, refresh, forgotPassword, resetPassword };

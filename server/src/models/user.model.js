@@ -5,6 +5,12 @@ const findByEmail = async (email) => {
   return rows[0] || null;
 };
 
+// Sign-in and invitations treat addresses case-insensitively.
+const findByEmailCI = async (email) => {
+  const { rows } = await query('SELECT * FROM users WHERE lower(email) = lower($1) ORDER BY created_at LIMIT 1', [email]);
+  return rows[0] || null;
+};
+
 const findById = async (id) => {
   const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
   return rows[0] || null;
@@ -58,4 +64,4 @@ const sanitize = (user) => {
   return safe;
 };
 
-module.exports = { findByEmail, findById, create, update, deleteById, findByResetToken, sanitize };
+module.exports = { findByEmailCI, findByEmail, findById, create, update, deleteById, findByResetToken, sanitize };
