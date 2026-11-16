@@ -102,6 +102,7 @@ MK.footer = function () {
           '<li>' + MK.link('/case-studies', 'Case studies') + '</li>' +
           '<li>' + MK.link('/how-we-work', 'How we work') + '</li>' +
           '<li>' + MK.link('/security', 'Security') + '</li>' +
+          '<li>' + MK.link('/tools', 'Free tools') + '</li>' +
         '</ul></div>' +
         '<div><h4>Get started</h4><ul>' +
           '<li><button type="button" data-book>Book a working session</button></li>' +
@@ -647,6 +648,141 @@ MK.pages.howWeWork = function () {
   '</div></section>' +
 
   MK.cta();
+};
+
+/* ---------- free tools ---------- */
+MK.pages.tools = function () {
+  var t = MK.tools.bench;
+  return '' +
+  '<section class="mk-hero-simple"><div class="mk-wrap"><div class="mk-hero-copy">' +
+    MK.crumbs([{ href: '/', label: 'Home' }, { label: 'Tools' }]) +
+    '<h1>Free tools.</h1>' +
+    '<p class="mk-lede">Small, useful things built from public data. No sign-up, and nothing you enter leaves your browser.</p>' +
+  '</div></div></section>' +
+  '<section class="mk-section" style="border-top:0;padding-top:0"><div class="mk-wrap">' +
+    '<ul class="mk-work"><li><div><h3>' + MK.link(t.path, t.name) + '</h3><p class="mk-small">For community and regional banks</p></div>' +
+    '<div style="grid-column:2 / -1"><p class="mk-muted">' + t.blurb + '</p><p style="margin-top:12px">' + MK.link(t.path, 'Open the benchmark', 'mk-arrow') + '</p></div></li></ul>' +
+  '</div></section>' + MK.cta();
+};
+
+MK.pages.bankBench = function () {
+  var t = MK.tools.bench;
+  return '' +
+  '<section class="mk-hero-simple"><div class="mk-wrap"><div class="mk-hero-copy">' +
+    MK.crumbs([{ href: '/', label: 'Home' }, { href: '/tools', label: 'Tools' }, { label: t.name }]) +
+    '<h1>How does your bank\'s efficiency compare?</h1>' +
+    '<p class="mk-lede">' + t.blurb + '</p>' +
+  '</div></div></section>' +
+  '<section class="mk-section" style="border-top:0;padding-top:0"><div class="mk-wrap">' +
+    '<form class="mk-bench" data-bench onsubmit="return false">' +
+      '<label for="mk-bench-q">Find a bank in ' + t.states + '</label>' +
+      '<input id="mk-bench-q" type="search" list="mk-bench-list" autocomplete="off" placeholder="Start typing a bank name" data-bench-q disabled>' +
+      '<datalist id="mk-bench-list"></datalist>' +
+      '<p class="mk-small" data-bench-status>Loading public FDIC data&hellip;</p>' +
+    '</form>' +
+    '<div class="mk-bench-out" data-bench-out aria-live="polite"></div>' +
+  '</div></section>' +
+  '<section class="mk-section"><div class="mk-wrap">' + MK.head('Method', 'How the comparison works') + MK.faq(t.method) + '</div></section>' +
+  MK.cta({ title: 'Want this in your board pack, or wired into your own reporting?', body: 'A working session is 20 minutes with the engineer who would build it. Bring the report your team assembles by hand each quarter.', vertical: 'banks' });
+};
+
+MK.bench = MK.bench || {};
+
+MK.bench.titleCase = function (s) {
+  var keep = { 'N.A.': 1, NA: 1, SSB: 1, FSB: 1, USA: 1, 'U.S.': 1, BOK: 1, FNB: 1, ANB: 1, TBK: 1, 'S.S.B.': 1, 'F.S.B.': 1, ATG: 1, TXRB: 1 };
+  var small = { of: 1, and: 1, the: 1, in: 1, at: 1, '&': 1 };
+  return String(s || '').toLowerCase().split(/\s+/).map(function (w, i) {
+    var up = w.toUpperCase();
+    if (keep[up]) return up;
+    if (i > 0 && small[w]) return w;
+    return w.replace(/(^|[-/.(])([a-z])/g, function (m, p, c) { return p + c.toUpperCase(); });
+  }).join(' ');
+};
+
+MK.bench.median = function (xs) {
+  var v = xs.filter(function (x) { return typeof x === 'number' && isFinite(x); }).sort(function (a, b) { return a - b; });
+  if (!v.length) return null;
+  var m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+
+// Share of peers this bank does better than (0-100), or null.
+MK.bench.rank = function (xs, x, lowerIsBetter) {
+  var v = xs.filter(function (y) { return typeof y === 'number' && isFinite(y); });
+  if (typeof x !== 'number' || v.length < 5) return null;
+  var better = 0, same = -1;
+  v.forEach(function (y) { if (y === x) same++; else if (lowerIsBetter ? y > x : y < x) better++; });
+  return Math.round(100 * (better + Math.max(same, 0) / 2) / (v.length - 1));
+};
+
+MK.bench.rows = function (data) {
+  var c = data.cols;
+  return data.rows.map(function (r) { var o = {}; c.forEach(function (k, i) { o[k] = r[i]; }); return o; });
+};
+
+MK.bench.label = function (b) { return MK.bench.titleCase(b.name) + ' (' + MK.bench.titleCase(b.city) + ', ' + b.state + ')'; };
+
+MK.bench.spark = function (mine, peer, quarters) {
+  var all = mine.concat(peer).filter(function (x) { return typeof x === 'number'; });
+  if (all.length < 2) return '';
+  var lo = Math.min.apply(null, all) - 2, hi = Math.max.apply(null, all) + 2, W = 320, H = 96, n = quarters.length;
+  var pt = function (v, i) { return (12 + (W - 24) * (n - 1 - i) / (n - 1)).toFixed(1) + ',' + (8 + (H - 28) * (hi - v) / (hi - lo)).toFixed(1); };
+  var line = function (vals, cls) {
+    var pts = []; vals.forEach(function (v, i) { if (typeof v === 'number') pts.push(pt(v, i)); });
+    return '<polyline class="' + cls + '" fill="none" points="' + pts.join(' ') + '"/>';
+  };
+  var labels = quarters.map(function (q, i) { return i === 0 || i === n - 1 ? '<text x="' + pt(lo, i).split(',')[0] + '" y="' + (H - 4) + '" text-anchor="' + (i === 0 ? 'end' : 'start') + '">' + q.slice(0, 7) + '</text>' : ''; }).join('');
+  return '<svg class="mk-bench-spark" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Efficiency ratio over five quarters, this bank against the peer median">' +
+    line(peer, 'peer') + line(mine, 'mine') + labels + '</svg>' +
+    '<p class="mk-small"><span class="mk-bench-key mine"></span>This bank <span class="mk-bench-key peer"></span>Peer median</p>';
+};
+
+// Pure: data bundle + chosen bank -> HTML. Used by the page and by tests.
+MK.bench.render = function (data, b) {
+  var B = MK.bench, all = B.rows(data);
+  var peers = all.filter(function (p) { return p.state === b.state && p.band === b.band; });
+  var col = function (k, i) { return peers.map(function (p) { return i == null ? p[k] : (p[k] || [])[i]; }); };
+  var fmt = function (x, d, suf) { return typeof x === 'number' ? x.toFixed(d) + (suf || '') : 'n/a'; };
+  var ord = function (r) { return r == null ? 'too few peers to rank' : 'better than ' + r + '% of peers'; };
+  var effMed = B.median(col('eff', 0)), effMedOld = B.median(col('eff', 4));
+  var apeMed = B.median(col('assets_per_emp_m')), lpeMed = B.median(col('loans_per_emp_m')), roaMed = B.median(col('roa'));
+  var metrics = [
+    ['Efficiency ratio', fmt(b.eff[0], 1, '%'), fmt(effMed, 1, '%'), B.rank(col('eff', 0), b.eff[0], true), 'Lower is better'],
+    ['Assets per employee', '$' + fmt(b.assets_per_emp_m, 1, 'M'), '$' + fmt(apeMed, 1, 'M'), B.rank(col('assets_per_emp_m'), b.assets_per_emp_m), ''],
+    ['Loans per employee', '$' + fmt(b.loans_per_emp_m, 1, 'M'), '$' + fmt(lpeMed, 1, 'M'), B.rank(col('loans_per_emp_m'), b.loans_per_emp_m), ''],
+    ['Return on assets', fmt(b.roa, 2, '%'), fmt(roaMed, 2, '%'), B.rank(col('roa'), b.roa), 'Annualized'],
+  ];
+  var notes = [];
+  if (typeof b.eff[0] === 'number' && typeof effMed === 'number') {
+    var gap = b.eff[0] - effMed;
+    notes.push(Math.abs(gap) < 1 ? 'The efficiency ratio is in line with the peer median.' :
+      'The efficiency ratio is ' + Math.abs(gap).toFixed(1) + ' points ' + (gap > 0 ? 'above' : 'below') + ' the peer median, which means ' +
+      (gap > 0 ? 'more' : 'less') + ' expense for each dollar of revenue than a typical peer.');
+  }
+  if (typeof b.eff[0] === 'number' && typeof b.eff[4] === 'number' && typeof effMedOld === 'number' && typeof effMed === 'number') {
+    var mine = b.eff[0] - b.eff[4], typ = effMed - effMedOld;
+    notes.push('Over four quarters it moved ' + (mine >= 0 ? 'up ' : 'down ') + Math.abs(mine).toFixed(1) + ' points; the peer median moved ' +
+      (typ >= 0 ? 'up ' : 'down ') + Math.abs(typ).toFixed(1) + '.');
+  }
+  if (typeof b.assets_per_emp_m === 'number' && typeof apeMed === 'number') {
+    notes.push('Each employee supports $' + b.assets_per_emp_m.toFixed(1) + 'M of assets, against a peer median of $' + apeMed.toFixed(1) + 'M.' +
+      (b.assets_per_emp_m < apeMed ? ' Time spent moving documents and figures between systems by hand is often part of a gap like that.' : ''));
+  }
+  var peerTrend = [0, 1, 2, 3, 4].map(function (i) { return B.median(col('eff', i)); });
+  return '' +
+    '<div class="mk-bench-card">' +
+      '<div class="mk-bench-title"><h2>' + MK.esc(B.label(b)) + '</h2>' +
+      '<p class="mk-small">Quarter ending ' + MK.esc(data.quarter) + ' &middot; $' + MK.esc((b.assets_m / 1000).toFixed(2)) + 'B total assets &middot; ' +
+        MK.fmt(b.employees) + ' employees &middot; compared with ' + peers.length + ' banks in ' + MK.esc(b.state) + ', ' + MK.esc(data.bands[b.band]) + '</p></div>' +
+      '<div class="mk-bench-grid">' + metrics.map(function (m) {
+        return '<div class="mk-bench-metric"><span class="mk-small">' + m[0] + '</span><strong>' + MK.esc(m[1]) + '</strong>' +
+          '<span class="mk-small">Peer median ' + MK.esc(m[2]) + (m[4] ? ' &middot; ' + m[4] : '') + '</span>' +
+          '<span class="mk-bench-rank">' + ord(m[3]) + '</span></div>';
+      }).join('') + '</div>' +
+      '<div class="mk-bench-lower"><div><h3>Efficiency ratio, last five quarters</h3>' + B.spark(b.eff, peerTrend, data.quarters) + '</div>' +
+      '<div><h3>What stands out</h3><ul class="mk-bench-notes">' + notes.map(function (n) { return '<li>' + MK.esc(n) + '</li>'; }).join('') + '</ul></div></div>' +
+      '<p class="mk-small mk-bench-src">Source: ' + MK.esc(data.source) + '. FDIC certificate ' + MK.esc(b.cert) + '. Figures as reported; peer medians computed by MonkFlow.</p>' +
+    '</div>';
 };
 
 MK.pages.security = function () {
