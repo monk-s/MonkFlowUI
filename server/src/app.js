@@ -95,6 +95,7 @@ app.use('/api/v1/integrations', integrationRoutes);
 app.use('/api/v1/client-errors', clientErrorRoutes);
 app.use('/api/v1/linkedin', linkedinRoutes);
 app.use('/api/v1/portal', portalRoutes);
+app.use('/api/v1/ingest', require('./routes/ingest.routes'));
 
 // 404 handler
 app.use((req, res) => {

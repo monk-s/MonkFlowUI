@@ -37,5 +37,8 @@ router.post('/organizations/:id/actions', engagement.createAction);
 router.delete('/organizations/:id/actions/:aid', engagement.withdrawAction);
 router.post('/organizations/:id/workflows', engagement.attachWorkflow);
 router.patch('/organizations/:id/workflows/:wid', engagement.setBaseline);
+// Phase 3: keys a client's pipeline uses to post documents for review.
+router.post('/organizations/:id/ingest-keys', engagement.createIngestKey);
+router.delete('/organizations/:id/ingest-keys/:kid', engagement.revokeIngestKey);
 
 module.exports = router;

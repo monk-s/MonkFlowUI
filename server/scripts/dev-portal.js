@@ -41,6 +41,7 @@ Object.assign(process.env, {
   DATABASE_URL: `postgresql://postgres:postgres@127.0.0.1:${DB_PORT}/monkflow`,
   JWT_SECRET: 'local-development-only',
   IDENTITY_PROVIDER: process.env.IDENTITY_PROVIDER || 'stub',
+  DOCUMENT_KEY: 'd'.repeat(64),   // local only; production gets its own from `openssl rand -hex 32`
   FRONTEND_URL: FRONTEND,
   CORS_ORIGIN: FRONTEND,
   RESEND_API_KEY: '',          // emails are printed to this terminal, never sent
@@ -209,6 +210,66 @@ async function seedExampleEngagement(pool, q, { harbor, staff, dana }) {
 
   const draft = await workflow('Offering memorandum summary (draft)', null, 'draft');
   await run(draft, 0, 'completed', 1000);
+
+  await seedExampleReview(q, { harbor, rentRoll });
+}
+
+// A PDF with one line of text per page, built by hand so the seed needs no
+// PDF library. EXAMPLE_DATA.
+function examplePdf(lines) {
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', `<< /Type /Pages /Kids [${lines.map((_, i) => `${4 + i * 2} 0 R`).join(' ')}] /Count ${lines.length} >>`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+  lines.forEach((text, i) => {
+    const stream = `BT /F1 16 Tf 72 720 Td (${text}) Tj ET`;
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + i * 2} 0 R >>`,
+      `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+  });
+  let out = '%PDF-1.4\n';
+  const offsets = objects.map((body, i) => { const at = out.length; out += `${i + 1} 0 obj\n${body}\nendobj\n`; return at; });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+
+// EXAMPLE_DATA for the Review screens: two rent rolls waiting in Harbor
+// Ridge's queue (one with a misread rent that fails a check, one clean and
+// without a source file). portal/tests/review.spec.ts counts on these rows.
+async function seedExampleReview(q, { harbor, rentRoll }) {
+  const secretBox = require('../src/utils/secretBox');
+  const { audit } = require('../src/portal/audit');
+  const dollars = (n) => `$${n.toLocaleString('en-US')}.00`;
+  const item = async (title, subject, minutesAgo, rents, misread, pdf) => {
+    const units = rents.map((rent, row) => [
+      { group: 'units', row, key: 'unit', label: 'Unit', value: String(101 + row), confidence: 0.99, page: 2 },
+      { group: 'units', row, key: 'tenant', label: 'Tenant', value: ['J. Alvarez', 'P. Banerjee', 'L. Chen', 'M. Dvorak'][row], confidence: row === 3 ? 0.88 : 0.98, page: 2 },
+      { group: 'units', row, key: 'rent', label: 'Rent', value: row === misread ? '$1,5O0.00' : dollars(rent), confidence: row === misread ? 0.62 : 0.98, page: 2 },
+    ]).flat();
+    const fields = [
+      { group: 'property', row: null, key: 'name', label: 'Property', value: subject, confidence: 0.99, page: 1 },
+      { group: 'property', row: null, key: 'total_units', label: 'Units', value: String(rents.length), confidence: 0.99, page: 1 },
+      { group: 'property', row: null, key: 'occupied_units', label: 'Occupied units', value: String(rents.length), confidence: 0.99, page: 1 },
+      { group: 'property', row: null, key: 'occupancy', label: 'Occupancy', value: '100.0%', confidence: 0.97, page: 1 },
+      ...units,
+      { group: 'totals', row: null, key: 'monthly_rent', label: 'Monthly rent', value: dollars(rents.reduce((a, b) => a + b, 0)), confidence: 0.99, page: 2 },
+    ].map((f, i) => ({ id: `f${i}`, type: 'text', original: null, ...f }));
+    let documentId = null;
+    if (pdf) {
+      documentId = (await q(
+        "INSERT INTO documents (org_id, filename, byte_size, sha256, content, purge_after) VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '30 days') RETURNING id",
+        [harbor.id, 'maple-court-rent-roll.pdf', pdf.length, require('crypto').createHash('sha256').update(pdf).digest('hex'), secretBox.seal(pdf, harbor.id)]
+      )).id;
+    }
+    const row = await q(
+      `INSERT INTO review_items (org_id, workflow_id, document_id, template, title, subject, period, fields, received_at)
+       VALUES ($1, $2, $3, 'rent_roll', $4, $5, 'Oct 2026', $6, NOW() - ($7 || ' minutes')::interval) RETURNING id`,
+      [harbor.id, rentRoll.id, documentId, title, subject, JSON.stringify(fields), String(minutesAgo)]
+    );
+    await audit(null, null, { orgId: harbor.id, actorRole: 'monkflow_pipeline', action: 'review.received', targetType: 'review_item', targetId: row.id, metadata: { title, template: 'rent_roll', fields: fields.length, document: !!pdf } });
+  };
+  await item('Rent roll, Maple Court, Oct 2026', 'Maple Court Apartments', 30, [1450, 1500, 1525, 1400], 1,
+    examplePdf(['EXAMPLE_DATA  Maple Court Apartments  Rent roll  Oct 2026  page 1', 'EXAMPLE_DATA  Unit 102  P. Banerjee  $1,500.00  page 2']));
+  await item('Rent roll, Cedar Landing, Oct 2026', 'Cedar Landing', 90, [1300, 1350, 1375], -1, null);
 }
 
 (async () => {

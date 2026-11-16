@@ -4,19 +4,13 @@ import { useSession } from '../auth/session';
 import { Page } from '../components/Page';
 import { verticalPack } from '../verticals';
 
-type Section = 'review' | 'integrations' | 'vault' | 'requests';
+type Section = 'integrations' | 'vault' | 'requests';
 
 export function NotYet({ section }: { section: Section }) {
   const { session } = useSession();
   const pack = verticalPack(session?.org?.vertical);
-  const docs = pack.documentsPhrase;
 
   const copy: Record<Section, { title: string; lead: string; body: string }> = {
-    review: {
-      title: 'Review',
-      lead: 'Documents waiting for a person to check them.',
-      body: `Each item will open with the source document on one side and the extracted fields on the other (${docs}), with confidence, reconciliation checks and a full audit trail before anything is approved.`,
-    },
     integrations: {
       title: 'Integrations',
       lead: 'The systems your workflows read from and write to.',

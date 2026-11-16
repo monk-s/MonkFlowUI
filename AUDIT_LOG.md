@@ -1241,3 +1241,77 @@ migrations against production data.
 - Bugs fixed: 1 MEDIUM
 - Tests added: 20 API, 7 browser
 - Commits: 1 (local, not pushed)
+
+## Session: 2026-11-16 (portal v2, phase 3: Review Studio and Demo Mode)
+
+Branch `feat/portal-phase-3`, on top of `feat/portal-phase-2`. The three
+earlier portal branches were pushed to GitHub this session; nothing is merged
+to `main` and nothing is deployed.
+
+### Audit Findings
+- [LOW] Every browser test run leaked one shared-memory segment: Playwright
+  killed the local API outright, so its private Postgres never shut down.
+  macOS allows 32, after which the test database could not start ("could not
+  create shared memory segment"). FIXED: `gracefulShutdown` in both
+  Playwright configs. 32 orphaned segments were freed by hand.
+- [LOW, OPEN] The intermittent `auth.test.js` failure from the last session
+  was not seen in this session's runs and is still unexplained.
+
+### Improvements Made
+- Migration `053-review.sql`: `ingest_keys`, `documents`, `review_items`
+  with row-level security. The portal role may read them and update only an
+  item's fields and decision; it has no access to `ingest_keys`.
+- Ingest: `POST /api/v1/ingest/review-items` with a per-workspace key that
+  staff create in the console (shown once, stored hashed). Validates the
+  template, de-duplicates on `externalRef`, accepts PDFs up to 20 MB.
+- Document storage: source files are encrypted in the application
+  (AES-256-GCM, workspace id bound in) and kept in Postgres with a deletion
+  date (default 30 days, `retentionDays` per post). An hourly sweep deletes
+  the bytes; the reviewed fields remain.
+- Client API `/portal/review`: queue with counts, item with fields, checks
+  and audit trail, source document, field edits, approve (a failing blocking
+  check needs a written reason), reject (reason required), CSV / JSON export.
+  Field values are never written to the audit log.
+- Templates `rent_roll` and `t12` with reconciliation checks computed on
+  every read.
+- Portal: Review queue and Review Studio; a count on the Review nav item.
+- Demo Mode at `/demo/cre`, `/demo/bank`, `/demo/investment`: the same
+  screens over synthetic data generated in the browser. No API call, no
+  cookie; a banner on every screen; Reset. Firms are named "Demo ...".
+- Staff console: pipeline keys under Client Workspaces > Engagement.
+- `portal-preflight.js` covers migration 053.
+
+### Departures from the plan
+- Files are stored in Postgres, not object storage (no R2 bucket exists
+  yet). Marked `shortcut:` in the code; move when volume grows.
+- No pdf.js: PDFs open in the browser's own viewer in a frame, which jumps
+  to a field's page but cannot highlight the region. Demo documents are
+  drawn as HTML and do highlight the exact cell.
+- Checks are computed, not stored, so there is no `review_checks` table;
+  fields are a JSON column, not an `extracted_fields` table.
+- Not built: reviewer soft lock, assignment, sync to a system of record
+  (needs Phase 4 connectors), XLSX export, keyboard shortcuts, the 3-step
+  demo tour, access codes, the Forge demo build and spec schema, the
+  "documents processed" and "field accuracy" tiles, bank and investment
+  templates on the server (they exist in the demo only).
+
+### Verification
+On the Mac mini only. API: 88 Jest tests. Portal: 32 Playwright tests,
+including Demo Mode with every /api request failing the test. Built site: 13
+Playwright tests. A real PDF was checked by eye in a visible Chrome.
+`npm run check` and the portal typecheck pass. NOT verified: anything on
+Vercel or Railway, migrations against production data, the staff console's
+key dialog in a browser (its API is tested).
+
+### Next Session Priority
+1. Before any merge: preflight against production, a Vercel preview, set
+   `DOCUMENT_KEY` on Railway, and correct the "no client PII persisted"
+   wording on the public site before the first real document is ingested.
+2. Still open from Phase 1: identity vendor, who signs in to production.
+3. Phase 4: Integrations, Vault, Requests, hardening.
+
+### Metrics
+- Files modified: 34
+- Bugs fixed: 1 LOW
+- Tests added: 18 API, 8 browser
+- Commits: 1

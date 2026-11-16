@@ -27,7 +27,7 @@ export function RunDetail() {
 
   return (
     <Page title={run ? `Run of ${stamp(run.startedAt)}` : 'Run'} description={q.data?.workflow.name}>
-      <Link className="back" to={`/dashboard/workflows/${id}`} style={{ order: -1 }}><ChevronLeft aria-hidden />{q.data?.workflow.name ?? 'Workflow'}</Link>
+      <Link className="back" to={`${data.base}/workflows/${id}`} style={{ order: -1 }}><ChevronLeft aria-hidden />{q.data?.workflow.name ?? 'Workflow'}</Link>
       {q.isPending && <div className="card"><TableSkeleton rows={4} cols={2} /></div>}
       {q.isError && <LoadError message={errorMessage(q.error)} onRetry={() => void q.refetch()} />}
       {q.data && run && (

@@ -16,7 +16,7 @@
       ]
     },
     {
-      "source": "/(sign-in|invite|auth|select-workspace|dashboard|admin)(.*)",
+      "source": "/(sign-in|invite|auth|select-workspace|dashboard|demo|admin)(.*)",
       "headers": [
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
@@ -34,6 +34,7 @@
     { "source": "/invite/:path*", "destination": "/portal/index.html" },
     { "source": "/auth/:path*", "destination": "/portal/index.html" },
     { "source": "/dashboard/:path*", "destination": "/portal/index.html" },
+    { "source": "/demo/:path*", "destination": "/portal/index.html" },
     {
       "source": "/(.*)",
       "destination": "/shell.html"

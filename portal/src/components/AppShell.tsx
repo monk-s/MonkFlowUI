@@ -10,24 +10,27 @@ import {
   Building2, Check, ChevronsUpDown, ClipboardCheck, FolderLock, LayoutDashboard, LogOut, Menu as MenuIcon,
   MessagesSquare, PanelLeft, Plug, Search, Settings, ShieldAlert, Workflow, type LucideIcon,
 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '../auth/session';
+import { useData } from '../data/PortalDataSource';
 import { initials } from '../auth/SelectWorkspace';
 import { ROLE_LABEL } from '../lib/roles';
 import { verticalPack } from '../verticals';
 import { CommandPalette } from './CommandPalette';
 import '../styles/shell.css';
 
+/** `to` is relative to the data source's base ('/dashboard' or '/demo/<vertical>'). */
 export interface NavItem { to: string; label: string; icon: LucideIcon; permission?: string; end?: boolean }
 
 export const NAV: NavItem[] = [
-  { to: '/dashboard', label: 'Overview', icon: LayoutDashboard, permission: 'overview.view', end: true },
-  { to: '/dashboard/review', label: 'Review', icon: ClipboardCheck, permission: 'review.view' },
-  { to: '/dashboard/workflows', label: 'Workflows', icon: Workflow, permission: 'workflows.view' },
-  { to: '/dashboard/integrations', label: 'Integrations', icon: Plug, permission: 'connectors.view' },
-  { to: '/dashboard/vault', label: 'Vault', icon: FolderLock, permission: 'vault.view' },
-  { to: '/dashboard/requests', label: 'Requests', icon: MessagesSquare, permission: 'requests.create' },
+  { to: '', label: 'Overview', icon: LayoutDashboard, permission: 'overview.view', end: true },
+  { to: '/review', label: 'Review', icon: ClipboardCheck, permission: 'review.view' },
+  { to: '/workflows', label: 'Workflows', icon: Workflow, permission: 'workflows.view' },
+  { to: '/integrations', label: 'Integrations', icon: Plug, permission: 'connectors.view' },
+  { to: '/vault', label: 'Vault', icon: FolderLock, permission: 'vault.view' },
+  { to: '/requests', label: 'Requests', icon: MessagesSquare, permission: 'requests.create' },
 ];
-export const NAV_FOOT: NavItem[] = [{ to: '/dashboard/settings', label: 'Settings', icon: Settings }];
+export const NAV_FOOT: NavItem[] = [{ to: '/settings', label: 'Settings', icon: Settings }];
 
 function PageSkeleton() {
   return (
@@ -40,6 +43,14 @@ function PageSkeleton() {
 
 export function AppShell() {
   const { session, status, ending, can, switchWorkspace, signOut } = useSession();
+  const data = useData();
+  const queryClient = useQueryClient();
+  const base = data.base;
+  // Same query as the Review page's first tab, so the two never disagree.
+  const queue = useQuery({
+    queryKey: ['review', session?.org?.id, 'queued'], queryFn: () => data.getReviewList('queued'),
+    enabled: !!session?.org && can('review.view'),
+  });
   const location = useLocation();
   const navigate = useNavigate();
   const matches = useMatches();
@@ -72,19 +83,23 @@ export function AppShell() {
 
   const org = session.org;
   const pack = verticalPack(org.vertical);
-  const nav = NAV.filter((i) => !i.permission || can(i.permission));
+  const at = (i: NavItem): NavItem => ({ ...i, to: base + i.to });
+  const nav = NAV.filter((i) => !i.permission || can(i.permission)).map(at);
+  const foot = NAV_FOOT.map(at);
+  const waiting = queue.data?.counts.queued ?? 0;
   const name = `${session.user.firstName} ${session.user.lastName}`.trim() || session.user.email;
   const isStaff = session.role === 'monkflow_staff';
 
   const pick = async (id: string) => {
     if (id === org.id) return;
     await switchWorkspace(id);
-    navigate('/dashboard');
+    navigate(base);
   };
 
   const link = (item: NavItem) => (
     <NavLink key={item.to} to={item.to} end={item.end} className="nav-link" title={collapsed ? item.label : undefined}>
       <item.icon aria-hidden /><span>{item.label}</span>
+      {item.label === 'Review' && waiting > 0 && <span className="count num" aria-label={`${waiting} waiting for review`}>{waiting}</span>}
     </NavLink>
   );
 
@@ -124,10 +139,18 @@ export function AppShell() {
           {nav.map(link)}
           <div className="nav-spacer" />
         </nav>
-        <div className="sidebar-foot">{NAV_FOOT.map(link)}</div>
+        <div className="sidebar-foot">{foot.map(link)}</div>
       </aside>
 
       <div className="main">
+        {data.demo && (
+          <div className="demo-banner" role="status">
+            <span><strong>Demo workspace</strong> · synthetic data · nothing is saved</span>
+            <span className="grow" />
+            <button type="button" className="link-btn" onClick={() => { data.reset?.(); queryClient.clear(); navigate(base); }}>Reset demo</button>
+            <a href="/book">Book a working session</a>
+          </div>
+        )}
         {isStaff && (
           <div className="staff-banner" role="status">
             <ShieldAlert aria-hidden />You are in {org.name} as MonkFlow staff. Everything you do here is recorded in this client's audit log.
@@ -155,8 +178,8 @@ export function AppShell() {
                   <div className="muted" style={{ fontSize: 'var(--text-sm)' }}>{session.role ? ROLE_LABEL[session.role] : ''}</div>
                 </div>
                 <div className="menu-sep" />
-                <Menu.Item className="menu-item" onSelect={() => navigate('/dashboard/settings')}><Settings aria-hidden />Settings</Menu.Item>
-                <Menu.Item className="menu-item" onSelect={() => void signOut()}><LogOut aria-hidden />Sign out</Menu.Item>
+                <Menu.Item className="menu-item" onSelect={() => navigate(`${base}/settings`)}><Settings aria-hidden />Settings</Menu.Item>
+                <Menu.Item className="menu-item" onSelect={() => void signOut()}><LogOut aria-hidden />{data.demo ? 'Leave the demo' : 'Sign out'}</Menu.Item>
               </Menu.Content>
             </Menu.Portal>
           </Menu.Root>
@@ -164,7 +187,7 @@ export function AppShell() {
         <Outlet />
       </div>
 
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} items={[...nav, ...NAV_FOOT]} />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} items={[...nav, ...foot]} />
     </div>
   );
 }

@@ -1,9 +1,12 @@
 import { api } from '../lib/api';
-import type { ActionItem, ActivityEntry, Engagement, PeriodDays, RunDetail, Team, Telemetry, WorkflowDetail, WorkflowRow } from '../lib/types';
+import type {
+  ActionItem, ActivityEntry, Engagement, PeriodDays, ReviewItem, ReviewList, ReviewStatus, RunDetail, Team, Telemetry, WorkflowDetail, WorkflowRow,
+} from '../lib/types';
 import type { MemberRole, PortalDataSource, WorkspaceSettings } from './PortalDataSource';
 
 export class ApiDataSource implements PortalDataSource {
   readonly demo = false;
+  readonly base = '/dashboard';
 
   async getWorkspace() {
     return (await api.get<{ workspace: WorkspaceSettings }>('/portal/workspace')).workspace;
@@ -37,4 +40,16 @@ export class ApiDataSource implements PortalDataSource {
   async getWorkflows(days: PeriodDays) { return (await api.get<{ workflows: WorkflowRow[] }>(`/portal/workflows?days=${days}`)).workflows; }
   getWorkflow(id: string, days: PeriodDays) { return api.get<WorkflowDetail>(`/portal/workflows/${id}?days=${days}`); }
   getRun(workflowId: string, runId: string) { return api.get<RunDetail>(`/portal/workflows/${workflowId}/runs/${runId}`); }
+
+  getReviewList(status?: ReviewStatus) { return api.get<ReviewList>(`/portal/review${status ? `?status=${status}` : ''}`); }
+  async getReviewItem(id: string) { return (await api.get<{ item: ReviewItem }>(`/portal/review/${id}`)).item; }
+  reviewDocument(item: ReviewItem) {
+    return item.document === 'available' ? { kind: 'pdf' as const, url: `/api/v1/portal/review/${item.id}/document` } : null;
+  }
+  async editReviewFields(id: string, edits: { id: string; value: string }[]) {
+    return (await api.patch<{ item: ReviewItem }>(`/portal/review/${id}/fields`, { edits })).item;
+  }
+  async approveReview(id: string, reason?: string) { return (await api.post<{ item: ReviewItem }>(`/portal/review/${id}/approve`, { reason })).item; }
+  async rejectReview(id: string, reason: string) { return (await api.post<{ item: ReviewItem }>(`/portal/review/${id}/reject`, { reason })).item; }
+  exportReview(id: string, format: 'csv' | 'json') { return api.download(`/portal/review/${id}/export?format=${format}`); }
 }

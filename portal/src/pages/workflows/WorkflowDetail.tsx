@@ -32,7 +32,7 @@ export function WorkflowDetail() {
     <Page title={w?.name ?? 'Workflow'}
       description={w ? <><WorkflowStatusPill status={w.status} /> <span style={{ marginLeft: 8 }}>{TRIGGER[w.trigger] ?? w.trigger}</span></> : undefined}
       actions={q.data ? <PeriodSwitch value={days} onChange={setDays} /> : undefined}>
-      <Link className="back" to="/dashboard/workflows" style={{ order: -1 }}><ChevronLeft aria-hidden />All workflows</Link>
+      <Link className="back" to={`${data.base}/workflows`} style={{ order: -1 }}><ChevronLeft aria-hidden />All workflows</Link>
       {q.isPending && <div className="card"><TableSkeleton rows={4} cols={4} /></div>}
       {q.isError && <LoadError message={errorMessage(q.error)} onRetry={() => void q.refetch()} />}
       {q.data && w && (
