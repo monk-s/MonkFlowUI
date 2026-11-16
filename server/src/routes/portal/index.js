@@ -207,5 +207,6 @@ router.delete('/team/:id', requirePermission('team.manage'), catchAsync(async (r
 // ── Engagement tracker, actions, workflows, telemetry ────────
 router.use(require('./engagement.routes'));
 router.use(require('./workflow.routes'));
+router.use(require('./review.routes'));
 
 module.exports = router;

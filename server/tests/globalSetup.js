@@ -55,6 +55,7 @@ module.exports = async () => {
   process.env.JWT_SECRET = 'test-secret-not-used-anywhere-else';
   process.env.NODE_ENV = 'test';
   process.env.IDENTITY_PROVIDER = 'stub';
+  process.env.DOCUMENT_KEY = '0'.repeat(63) + '1';   // test-only key
   process.env.FRONTEND_URL = 'http://localhost:4173';
   process.env.CORS_ORIGIN = 'http://localhost:4173';
   process.env.LOG_LEVEL = 'silent';

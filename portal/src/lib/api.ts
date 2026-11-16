@@ -38,6 +38,8 @@ interface Options {
   /** Do not announce a 401 as "session ended" (used by the session check itself). */
   quiet401?: boolean;
   signal?: AbortSignal;
+  /** Return the response as a file instead of parsing it. */
+  download?: boolean;
 }
 
 async function request<T>(method: string, path: string, body?: unknown, opts: Options = {}): Promise<T> {
@@ -53,7 +55,13 @@ async function request<T>(method: string, path: string, body?: unknown, opts: Op
     signal: opts.signal,
   });
 
-  if (res.ok) return (res.status === 204 ? undefined : await res.json()) as T;
+  if (res.ok) {
+    if (opts.download) {
+      const filename = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'export';
+      return { filename, blob: await res.blob() } as T;
+    }
+    return (res.status === 204 ? undefined : await res.json()) as T;
+  }
 
   const payload = await res.json().catch(() => null);
   const error = payload?.error ?? {};
@@ -70,5 +78,6 @@ export const api = {
   get: <T>(path: string, opts?: Options) => request<T>('GET', path, undefined, opts),
   post: <T>(path: string, body: unknown = {}, opts?: Options) => request<T>('POST', path, body, opts),
   patch: <T>(path: string, body: unknown = {}, opts?: Options) => request<T>('PATCH', path, body, opts),
+  download: (path: string) => request<{ filename: string; blob: Blob }>('GET', path, undefined, { download: true }),
   del: <T>(path: string, opts?: Options) => request<T>('DELETE', path, undefined, opts),
 };

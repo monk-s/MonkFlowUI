@@ -17,6 +17,7 @@ const { query } = require('../config/database');
 const { coded } = require('../middleware/session');
 const { UUID } = require('../portal/withOrg');
 const { audit } = require('../portal/audit');
+const { generateToken, hashToken } = require('../utils/crypto');
 const { STAGES, MILESTONE_STATUSES, ACTION_KINDS, day, engagementView, actionItemView } = require('../portal/engagements');
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-12-01').nullable().optional();
@@ -76,15 +77,18 @@ const workflowView = (w) => ({
   baselineBasis: w.baseline_basis, baselineFrom: day(w.baseline_from),
 });
 
+const ingestKeyView = (k) => ({ id: k.id, name: k.name, prefix: k.key_prefix, createdAt: k.created_at, lastUsedAt: k.last_used_at });
+
 const get = catchAsync(async (req, res) => {
   const org = await orgOf(req);
-  const [engagements, milestones, actions, workflows, unassigned] = await Promise.all([
+  const [engagements, milestones, actions, workflows, unassigned, ingestKeys] = await Promise.all([
     query('SELECT * FROM engagements WHERE org_id = $1 ORDER BY created_at, id', [org.id]),
     query('SELECT * FROM milestones WHERE org_id = $1 ORDER BY position, created_at, id', [org.id]),
     query("SELECT * FROM action_items WHERE org_id = $1 AND (status = 'open' OR updated_at > NOW() - INTERVAL '30 days') ORDER BY status = 'open' DESC, created_at DESC LIMIT 100", [org.id]),
     query('SELECT id, name, status, last_run_at, baseline_minutes_per_run, baseline_basis, baseline_from FROM workflows WHERE org_id = $1 ORDER BY lower(name)', [org.id]),
     // Workflows that belong to no client yet (built under a staff login).
     query('SELECT id, name, status FROM workflows WHERE org_id IS NULL ORDER BY lower(name) LIMIT 200'),
+    query('SELECT id, name, key_prefix, created_at, last_used_at FROM ingest_keys WHERE org_id = $1 AND revoked_at IS NULL ORDER BY created_at', [org.id]),
   ]);
   res.json({
     organization: org,
@@ -92,6 +96,7 @@ const get = catchAsync(async (req, res) => {
     actions: actions.rows.map(actionItemView),
     workflows: workflows.rows.map(workflowView),
     unassignedWorkflows: unassigned.rows,
+    ingestKeys: ingestKeys.rows.map(ingestKeyView),
   });
 });
 
@@ -236,4 +241,30 @@ const setBaseline = catchAsync(async (req, res) => {
   res.json({ workflow: workflowView(w) });
 });
 
-module.exports = { get, createEngagement, updateEngagement, createMilestone, updateMilestone, removeMilestone, createAction, withdrawAction, attachWorkflow, setBaseline };
+// ── Ingest keys ───────────────────────────────────────────────
+// The key is shown once, here; only its hash is stored.
+const createIngestKey = catchAsync(async (req, res) => {
+  const org = await orgOf(req);
+  const { name } = parse(z.object({ name: z.string().trim().min(2).max(100) }), req.body);
+  const prefix = `mfi_${generateToken(4)}`;
+  const key = `${prefix}_${generateToken(32)}`;
+  const row = (await query(
+    'INSERT INTO ingest_keys (org_id, name, key_prefix, key_hash) VALUES ($1, $2, $3, $4) RETURNING id, name, key_prefix, created_at, last_used_at',
+    [org.id, name, prefix, hashToken(key)]
+  )).rows[0];
+  await log(req, org, 'ingest_key.created', 'ingest_key', row.id, { name, prefix });
+  res.status(201).json({ ingestKey: ingestKeyView(row), key });
+});
+
+const revokeIngestKey = catchAsync(async (req, res) => {
+  const org = await orgOf(req);
+  const row = (await query(
+    'UPDATE ingest_keys SET revoked_at = NOW() WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL RETURNING id, name, key_prefix',
+    [uuid(req.params.kid), org.id]
+  )).rows[0];
+  if (!row) throw ApiError.notFound('Not found');
+  await log(req, org, 'ingest_key.revoked', 'ingest_key', row.id, { name: row.name, prefix: row.key_prefix });
+  res.json({ ok: true });
+});
+
+module.exports = { createIngestKey, revokeIngestKey, get, createEngagement, updateEngagement, createMilestone, updateMilestone, removeMilestone, createAction, withdrawAction, attachWorkflow, setBaseline };

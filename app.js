@@ -5678,7 +5678,50 @@ function renderWorkspaceEngagementPage() {
       ${attach}
     </div>`;
 
-  return `${header}${engagements}${actions}${workflows}`;
+  const keyRows = (d.ingestKeys || []).map((k) => `
+    <tr>
+      <td><div style="font-weight:500;">${escapeHtml(k.name)}</div></td>
+      <td style="font-size:12px;font-family:var(--font-mono, monospace);">${escapeHtml(k.prefix)}…</td>
+      <td style="font-size:12px;">${k.lastUsedAt ? escapeHtml(new Date(k.lastUsedAt).toLocaleString()) : '<span style="color:var(--text-secondary);">Never used</span>'}</td>
+      <td style="text-align:right;"><button class="btn btn-ghost btn-sm" onclick="handleRevokeIngestKey('${k.id}')">Revoke</button></td>
+    </tr>`).join('');
+  const ingestKeys = `
+    <div class="card" style="padding:0;margin-top:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);">
+        <div>
+          <h3 style="margin:0;font-size:15px;">Review queue: pipeline keys</h3>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;">A pipeline posts extracted documents to this client's review queue with one of these (POST /api/v1/ingest/review-items).</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="handleCreateIngestKey()">${icons.plus} New key</button>
+      </div>
+      ${keyRows ? `<div class="table-wrapper"><table>
+        <thead><tr><th>Name</th><th>Key starts</th><th>Last used</th><th></th></tr></thead><tbody>${keyRows}</tbody>
+      </table></div>` : '<div style="padding:20px 16px;color:var(--text-secondary);font-size:13px;">No keys. Nothing can post documents into this workspace.</div>'}
+    </div>`;
+
+  return `${header}${engagements}${actions}${workflows}${ingestKeys}`;
+}
+
+// The key is shown once, in a dialog, and never again.
+async function handleCreateIngestKey() {
+  const name = (window.prompt('Name this key after the pipeline that will use it (for example "Rent roll pipeline").') || '').trim();
+  if (!name) return;
+  try {
+    const out = await api.post(`/admin/organizations/${workspaceDetailId}/ingest-keys`, { name });
+    if (!out) return;
+    showModal(`${wsModalHead('Copy this key now')}
+      <p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;">It is shown once. Only a hash is stored, so it cannot be shown again; revoke it and make a new one if it is lost.</p>
+      <input type="text" readonly value="${escapeHtml(out.key)}" onclick="this.select()" aria-label="Ingest key" style="width:100%;font-family:var(--font-mono, monospace);font-size:12px;">
+      <div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">I have copied it</button></div>`);
+    loadWorkspaceEngagement();
+  } catch (err) {
+    showToast(escapeHtml(err instanceof TypeError ? 'Could not reach the server. Check your connection and try again.' : err.message), 'error');
+  }
+}
+
+function handleRevokeIngestKey(id) {
+  if (!window.confirm('Revoke this key? The pipeline using it will stop being able to post documents.')) return;
+  return workspaceChange(() => api.del(`/admin/organizations/${workspaceDetailId}/ingest-keys/${id}`), 'Key revoked.');
 }
 
 function workspaceEngagement(id) { return ((workspaceDetail && workspaceDetail.engagements) || []).find((e) => e.id === id); }

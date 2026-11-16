@@ -100,6 +100,13 @@ runMigrations().then(() => {
     } catch (err) {
       logger.error('Bible study scheduler failed to start: %s', err.message);
     }
+
+    // Client documents are deleted at their retention date (migration 053).
+    const purge = () => require('./routes/ingest.routes').purgeExpiredDocuments()
+      .then((n) => { if (n) logger.info('Purged %d expired client document(s)', n); })
+      .catch((err) => logger.error('Document purge failed: %s', err.message));
+    purge();
+    setInterval(purge, 60 * 60 * 1000).unref();
   });
 
   // Graceful shutdown

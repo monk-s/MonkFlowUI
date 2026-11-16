@@ -97,3 +97,8 @@
   .dl { grid-template-columns: 1fr; }
   .dl dt { border-bottom: 0; padding-bottom: 0; }
 }
+
+/* Demo Mode: always on, on every screen. */
+.demo-banner { display: flex; align-items: center; gap: var(--s4); padding: 6px var(--s6); background: var(--navy); color: var(--on-dark); font-size: var(--text-sm); flex-wrap: wrap; }
+.demo-banner .grow { flex: 1; }
+.demo-banner a, .demo-banner .link-btn { color: var(--on-dark); text-decoration: underline; font-size: inherit; }

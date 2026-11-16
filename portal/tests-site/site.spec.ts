@@ -79,13 +79,20 @@ test.describe('routing, as vercel.json defines it', () => {
   });
 
   test('sign-in, portal and admin pages refuse to be framed and send no referrer', async ({ request }) => {
-    for (const url of ['/sign-in', `/invite/${INVITE}`, '/dashboard', '/admin']) {
+    for (const url of ['/sign-in', `/invite/${INVITE}`, '/dashboard', '/demo/cre/review', '/admin']) {
       const res = await request.get(url);
       expect(res.status(), url).toBe(200);
       expect(res.headers()['x-frame-options'], url).toBe('DENY');
       expect(res.headers()['referrer-policy'], url).toBe('no-referrer');
     }
     expect((await request.get('/')).headers()['x-frame-options']).toBeUndefined();
+  });
+
+  test('the demo opens on a deep link in the built site, without signing in', async ({ page }) => {
+    await page.goto('/demo/bank/review');
+    await expect(page.getByRole('status').filter({ hasText: 'Demo workspace' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Workspace: Demo Community Bank/ })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Needs review/ })).toContainText('3');
   });
 
   test('nothing private is published', async ({ request }) => {

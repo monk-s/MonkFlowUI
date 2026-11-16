@@ -30,6 +30,8 @@ export default defineConfig({
   webServer: [
     {
       command: 'node ../server/scripts/dev-portal.js',
+      // Without this Playwright kills the API outright and its Postgres leaks a shared-memory segment; macOS allows 32.
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
       env: { PORT: String(API_PORT), DEV_DB_PORT: '54332', FRONTEND_URL: SITE, DISABLE_RATE_LIMITS: '1' },
       url: `http://127.0.0.1:${API_PORT}/api/v1/health`,
       reuseExistingServer: false,

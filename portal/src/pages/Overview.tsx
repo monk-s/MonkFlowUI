@@ -102,7 +102,7 @@ export function Overview() {
         )}
       </section>
 
-      {engagements.data && !engagement && <GettingStarted orgName={session.org.name} manage={can('team.manage')} />}
+      {engagements.data && !engagement && <GettingStarted base={data.base} orgName={session.org.name} manage={can('team.manage')} />}
 
       {/* 3. Telemetry */}
       <section aria-labelledby="telemetry" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
@@ -144,7 +144,7 @@ export function Overview() {
         <section className="card" aria-labelledby="health">
           <div className="card-head">
             <h2 id="health">Workflow health</h2>
-            {workflows.data && workflows.data.length > 0 && <Link to="/dashboard/workflows">All workflows</Link>}
+            {workflows.data && workflows.data.length > 0 && <Link to={`${data.base}/workflows`}>All workflows</Link>}
           </div>
           {workflows.isPending && <TableSkeleton rows={3} cols={4} />}
           {workflows.isError && <div className="card-body"><LoadError message={errorMessage(workflows.error)} onRetry={() => void workflows.refetch()} /></div>}
@@ -156,7 +156,7 @@ export function Overview() {
                 <tbody>
                   {workflows.data.map((w) => (
                     <tr key={w.id}>
-                      <td><Link className="row-link" to={`/dashboard/workflows/${w.id}`}>{w.name}</Link></td>
+                      <td><Link className="row-link" to={`${data.base}/workflows/${w.id}`}>{w.name}</Link></td>
                       <td><WorkflowStatusPill status={w.status} /></td>
                       <td className="muted num">{w.lastRunAt ? relativeTime(w.lastRunAt) : 'No runs yet'}</td>
                       <td className="r num">{w.successRate === null ? <span className="muted">No finished runs</span> : percent(w.successRate)}</td>
@@ -195,13 +195,13 @@ export function Overview() {
 
 // Shown until the workspace has an engagement: the only things a new
 // workspace can usefully do.
-function GettingStarted({ orgName, manage }: { orgName: string; manage: boolean }) {
+function GettingStarted({ base, orgName, manage }: { base: string; orgName: string; manage: boolean }) {
   const steps = [
     { done: true, title: 'Your login is set up', body: `You are signed in to ${orgName}.`, to: null as string | null },
     manage
-      ? { done: false, title: 'Invite the people who will work here', body: 'Reviewers approve extracted documents. Auditors can read everything and change nothing.', to: '/dashboard/settings/team' }
-      : { done: false, title: 'See who has access', body: 'Everyone in this workspace and what they can do.', to: '/dashboard/settings/team' },
-    { done: false, title: 'Check how sign-in is set up', body: 'Required sign-in method, allowed email domains and the idle timeout for this workspace.', to: '/dashboard/settings/security' },
+      ? { done: false, title: 'Invite the people who will work here', body: 'Reviewers approve extracted documents. Auditors can read everything and change nothing.', to: `${base}/settings/team` }
+      : { done: false, title: 'See who has access', body: 'Everyone in this workspace and what they can do.', to: `${base}/settings/team` },
+    { done: false, title: 'Check how sign-in is set up', body: 'Required sign-in method, allowed email domains and the idle timeout for this workspace.', to: `${base}/settings/security` },
   ];
   return (
     <section className="card" aria-labelledby="start">

@@ -8,7 +8,8 @@
 // would leak requests to the real API.
 import { createContext, useContext } from 'react';
 import type {
-  ActionItem, ActivityEntry, Engagement, PeriodDays, Role, RunDetail, SsoProvider, Team, Telemetry, Vertical, WorkflowDetail, WorkflowRow,
+  ActionItem, ActivityEntry, Engagement, PeriodDays, ReviewDocument, ReviewItem, ReviewList, ReviewStatus, Role, RunDetail, SsoProvider, Team, Telemetry, Vertical,
+  WorkflowDetail, WorkflowRow,
 } from '../lib/types';
 
 export type MemberRole = Exclude<Role, 'monkflow_staff'>;
@@ -28,6 +29,10 @@ export interface WorkspaceSettings {
 export interface PortalDataSource {
   /** True for Demo Mode: screens show the demo banner and never imply data is saved. */
   readonly demo: boolean;
+  /** Where this workspace's pages live: '/dashboard', or '/demo/cre' in Demo Mode. Build links from it. */
+  readonly base: string;
+  /** Demo Mode only: throw away every change and start again. */
+  reset?(): void;
 
   getWorkspace(): Promise<WorkspaceSettings>;
 
@@ -52,6 +57,19 @@ export interface PortalDataSource {
   getWorkflows(days: PeriodDays): Promise<WorkflowRow[]>;
   getWorkflow(id: string, days: PeriodDays): Promise<WorkflowDetail>;
   getRun(workflowId: string, runId: string): Promise<RunDetail>;
+
+  /** Extracted documents, newest first. No status = all of them. */
+  getReviewList(status?: ReviewStatus): Promise<ReviewList>;
+  getReviewItem(id: string): Promise<ReviewItem>;
+  /** The source file to show beside the fields, or null when there is none to show. */
+  reviewDocument(item: ReviewItem): ReviewDocument | null;
+  /** Correct extracted values. Checks are re-run; the original value is kept. */
+  editReviewFields(id: string, edits: { id: string; value: string }[]): Promise<ReviewItem>;
+  /** `reason` is required when a blocking check is failing. */
+  approveReview(id: string, reason?: string): Promise<ReviewItem>;
+  rejectReview(id: string, reason: string): Promise<ReviewItem>;
+  /** The reviewed fields as a file. Every export is logged. */
+  exportReview(id: string, format: 'csv' | 'json'): Promise<{ filename: string; blob: Blob }>;
 }
 
 const Ctx = createContext<PortalDataSource | null>(null);

@@ -204,3 +204,77 @@ export interface WorkflowDetail {
 
 export interface RunLogLine { id: string; level: 'info' | 'warn' | 'error'; message: string; at: string }
 export interface RunDetail { workflow: { id: string; name: string }; run: Run; logs: RunLogLine[] }
+
+// ── Review queue (routes/portal/review.routes.js) ──
+
+export type ReviewStatus = 'queued' | 'approved' | 'rejected';
+
+export interface ReviewField {
+  id: string;
+  group: string;
+  /** Row number inside a table section (0-based); null for a single figure. */
+  row: number | null;
+  key: string;
+  label: string;
+  value: string;
+  /** What was extracted, once a person has changed it; null while untouched. */
+  original: string | null;
+  /** 0 to 1, or null when the pipeline gave none. */
+  confidence: number | null;
+  page: number | null;
+  editedByName?: string;
+  editedAt?: string;
+}
+
+export interface ReviewCheck {
+  id: string;
+  label: string;
+  /** A failing blocking check stops approval unless a reason is typed. */
+  blocking: boolean;
+  /** 'na' = could not be run because a figure it needs was not extracted. */
+  status: 'pass' | 'fail' | 'na';
+  detail: string;
+}
+
+export interface ReviewSummary {
+  id: string;
+  title: string;
+  template: string;
+  templateLabel: string;
+  subject: string | null;
+  period: string | null;
+  workflowId: string | null;
+  workflowName: string | null;
+  status: ReviewStatus;
+  receivedAt: string;
+  fieldCount: number;
+  /** Low-confidence fields nobody has corrected yet. */
+  flagged: number;
+  lowestConfidence: number | null;
+  checksPassed: number;
+  checksTotal: number;
+  blocked: boolean;
+  decidedByName: string | null;
+  decidedAt: string | null;
+}
+
+export interface ReviewTrailEntry { id: string; at: string; action: string; actor: string; metadata: Record<string, unknown> }
+
+export interface ReviewItem extends ReviewSummary {
+  groups: { key: string; label: string }[];
+  fields: ReviewField[];
+  checks: ReviewCheck[];
+  decisionReason: string | null;
+  /** 'purged' = the file was deleted at its retention date; the fields remain. */
+  document: 'none' | 'purged' | 'available';
+  documentName: string | null;
+  documentPurgeAfter: string | null;
+  trail: ReviewTrailEntry[];
+  canDecide: boolean;
+}
+
+export interface ReviewList { items: ReviewSummary[]; counts: Record<ReviewStatus, number> }
+
+/** A synthetic source document, drawn as HTML. Demo Mode only. */
+export interface SyntheticPage { page: number; heading: string; rows: { text: string; fieldId?: string }[][] }
+export type ReviewDocument = { kind: 'pdf'; url: string } | { kind: 'synthetic'; pages: SyntheticPage[] };

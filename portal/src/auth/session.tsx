@@ -59,6 +59,23 @@ export function leaveTo(navigate: (to: string, opts?: { replace?: boolean }) => 
   else navigate(to, { replace: true });
 }
 
+/**
+ * Demo Mode: a made-up session held in memory. No request is made, no cookie
+ * is set, and there is no idle timer. "Sign out" leaves the demo.
+ */
+export function DemoSessionProvider({ session, children }: { session: Session; children: ReactNode }) {
+  const value = useMemo<SessionContext>(() => ({
+    session,
+    status: 'ready',
+    ending: false,
+    setSession: () => {},
+    switchWorkspace: async () => session,
+    signOut: async () => { window.location.assign('/'); },
+    can: (permission: string) => session.permissions.includes(permission),
+  }), [session]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSessionState] = useState<Session | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready'>('loading');
