@@ -29,6 +29,10 @@ const SHOTS = [
     await page.getByRole('row').nth(1).getByRole('link').first().click();
     await page.waitForURL(/\/review\/.+/);
   }],
+  ['review-investment', `${base}/demo/investment/review`, async (page) => {
+    await page.getByRole('row').nth(1).getByRole('link').first().click();
+    await page.waitForURL(/\/review\/.+/);
+  }],
   ['lending', 'https://lending.monkflow.io', async (page) => {
     await page.getByRole('link', { name: /Open borrower portal/ }).first().click();
     await page.waitForLoadState('networkidle');

@@ -6,7 +6,7 @@ const appointmentValidator = require('../validators/appointment.validator');
 
 // Public routes
 router.get('/availability', appointmentController.getAvailability);
-router.post('/book', validate(appointmentValidator.book), appointmentController.book);
+router.post('/book', require('../middleware/rateLimiter').publicForm, validate(appointmentValidator.book), appointmentController.book);
 
 // Authenticated routes
 router.get('/', authenticate, appointmentController.list);

@@ -258,7 +258,35 @@ MK.mount = function (pathname) {
     var target = container.querySelector(hash);
     if (target) target.scrollIntoView();
   }
+  MK.enhance(container);
   if (route.onMount) route.onMount();
+};
+
+// Motion, added only when the browser supports it and the visitor has not
+// asked for less: sections fade up as they scroll in, and demo clips play
+// while they are on screen. Without this the page is complete and still.
+MK.enhance = function (container) {
+  if (MK.io) MK.io.disconnect();
+  var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var clips = container.querySelectorAll('video[data-clip]');
+  if (calm || !('IntersectionObserver' in window)) {
+    clips.forEach(function (v) { v.controls = true; });
+    return;
+  }
+  MK.io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      var el = en.target;
+      if (el.tagName === 'VIDEO') {
+        if (en.isIntersecting) { var p = el.play(); if (p && p.catch) p.catch(function () {}); } else el.pause();
+      } else if (en.isIntersecting) { el.classList.add('is-in'); MK.io.unobserve(el); }
+    });
+  }, { threshold: 0.2 });
+  clips.forEach(function (v) { MK.io.observe(v); });
+  container.querySelectorAll('.mk-section, .mk-band, .mk-cta, .mk-example, .mk-demo, .mk-proof').forEach(function (el) {
+    if (el.getBoundingClientRect().top < window.innerHeight) return; // already on screen: leave it alone
+    el.classList.add('mk-reveal');
+    MK.io.observe(el);
+  });
 };
 
 // Bank Ops Benchmark: load the public bundle once, then everything happens in the browser.

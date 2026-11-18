@@ -1,4 +1,5 @@
 const appointmentModel = require('../models/appointment.model');
+const googleCalendar = require('./google-calendar.service');
 
 const SLOT_DURATION_MINUTES = 30;
 // Availability rules and stored appointment times are Central wall-clock times.
@@ -39,6 +40,8 @@ async function getWindowSlots(userId, now = new Date()) {
   const rules = await appointmentModel.getAvailabilityRules(userId);
   const earliest = now.getTime() + MIN_NOTICE_MS;
   const today = centralParts(now).date;
+  // Anything already on the owner's Google Calendar (classes, other meetings).
+  const busy = await googleCalendar.getBusy(now, new Date(now.getTime() + LOOKAHEAD_DAYS * 864e5));
   const days = [];
 
   for (let i = 0; i < LOOKAHEAD_DAYS && days.length < WINDOW_DAYS; i++) {
@@ -56,7 +59,9 @@ async function getWindowSlots(userId, now = new Date()) {
       const startTime = hhmm(m);
       const endTime = hhmm(m + SLOT_DURATION_MINUTES);
       const startsAt = centralToInstant(date, startTime);
-      if (startsAt.getTime() < earliest) continue;
+      const startMs = startsAt.getTime();
+      if (startMs < earliest) continue;
+      if (busy.some((b) => startMs < b.end && startMs + SLOT_DURATION_MINUTES * 60000 > b.start)) continue;
       const taken = appointments.some((a) => startTime < a.end_time.substring(0, 5) && endTime > a.start_time.substring(0, 5));
       if (!taken) slots.push({ startTime, endTime, startsAt: startsAt.toISOString() });
     }

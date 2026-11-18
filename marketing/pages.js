@@ -132,20 +132,32 @@ MK.shot = function (d, eager) {
     (eager ? ' fetchpriority="high"' : ' loading="lazy"') + ' decoding="async">';
 };
 
-// Homepage hero: the demo screenshots cross-fading in a window frame (CSS only).
-MK.heroShots = function () {
-  return '<figure class="mk-frame">' +
+// The demo's short silent clip when it has one, otherwise its screenshot.
+// Clips play only while on screen (MK.enhance) and never for reduced motion.
+MK.media = function (d, eager) {
+  if (!d.clip) return MK.shot(d, eager);
+  return '<video data-clip muted loop playsinline preload="' + (eager ? 'metadata' : 'none') + '" poster="/assets/shots/' + d.shot + '.webp"' +
+    ' width="1280" height="800" aria-label="' + MK.esc(d.alt) + '"><source src="/assets/shots/' + d.shot + '.mp4" type="video/mp4"></video>';
+};
+
+MK.frame = function (inner, caption, style) {
+  return '<figure class="mk-frame"' + (style ? ' style="' + style + '"' : '') + '>' +
     '<div class="mk-frame-bar" aria-hidden="true"><i></i><i></i><i></i></div>' +
-    '<div class="mk-frame-stage">' + MK.demoList.map(function (d, i) { return MK.shot(d, i === 0); }).join('') + '</div>' +
-    '<figcaption>Working demos with made-up data.</figcaption>' +
+    '<div class="mk-frame-stage">' + inner + '</div>' +
+    '<figcaption>' + caption + '</figcaption>' +
   '</figure>';
+};
+
+// Homepage hero: the document-review demo playing in a window frame.
+MK.heroShots = function () {
+  return MK.frame(MK.media(MK.demoList[0], true), 'A working demo with made-up data.');
 };
 
 // Homepage: one short card per demo, the whole card a link.
 MK.examples = function () {
   return '<div class="mk-examples">' + MK.demoList.map(function (d) {
     return '<a class="mk-example" href="' + d.url + '" target="_blank" rel="noopener">' +
-      '<span class="mk-shot">' + MK.shot(d) + '</span>' +
+      '<span class="mk-shot">' + MK.media(d) + '</span>' +
       '<span class="mk-demo-label">' + d.label + '</span>' +
       '<h3>' + d.shortTitle + '</h3>' +
       '<p>' + d.short + '</p>' +
@@ -204,7 +216,7 @@ MK.tfsProof = function () {
 
 MK.demoCard = function (d) {
   return '<div class="mk-demo">' +
-    (d.shot ? '<span class="mk-shot">' + MK.shot(d) + '</span>' : '') +
+    (d.shot ? '<span class="mk-shot">' + MK.media(d) + '</span>' : '') +
     '<span class="mk-demo-label">' + d.label + '</span>' +
     '<h3>' + d.title + '</h3>' +
     '<p>' + d.body + '</p>' +
@@ -351,7 +363,7 @@ MK.pages.solutions = function () {
   '<section class="mk-section" style="border-top:0;padding-top:0"><div class="mk-wrap">' +
     '<ul class="mk-work">' + MK.verticalOrder.map(function (k) {
       var v = MK.verticals[k];
-      return '<li><div><h3>' + v.name + '</h3><p class="mk-small" style="margin-top:8px">' + v.audience + '</p></div>' +
+      return '<li><div><span class="mk-shot">' + MK.shot(MK.verticalShots[k]) + '</span><h3>' + v.name + '</h3><p class="mk-small" style="margin-top:8px">' + v.audience + '</p></div>' +
         '<div><p class="mk-muted">' + v.hero.sub + '</p></div>' +
         '<div><ul>' + v.workflows.slice(0, 4).map(function (w) { return '<li class="mk-muted" style="padding:6px 0;border-bottom:1px solid var(--mk-line)">' + w.title + '</li>'; }).join('') + '</ul>' +
         '<div class="mk-actions" style="margin-top:18px">' + MK.link(v.path, v.name + ' solutions', 'mk-arrow') + '</div></div></li>';
@@ -367,6 +379,7 @@ MK.pages.solutions = function () {
 MK.pages.vertical = function (key) {
   var v = MK.verticals[key];
   var demo = v.proof.demo ? MK.demos([v.proof.demo]) : '';
+  var picture = v.proof.demo ? '' : MK.frame(MK.shot(MK.verticalShots[key]), 'From our demo workspace. Made-up data, not a client deployment.', 'margin-bottom:24px');
   return '' +
   '<section class="mk-hero-simple"><div class="mk-wrap"><div class="mk-hero-copy">' +
     MK.crumbs([{ href: '/', label: 'Home' }, { href: '/solutions', label: 'Solutions' }, { label: v.name }]) +
@@ -411,7 +424,7 @@ MK.pages.vertical = function (key) {
 
   '<section class="mk-section"><div class="mk-wrap">' +
     MK.head('Proof', 'What we can show you today.', v.proof.note) +
-    (key === 'funds' ? MK.tfsProof() : demo + '<div style="margin-top:24px">' + MK.tfsProof() + '</div>') +
+    (key === 'funds' ? picture + MK.tfsProof() : demo + '<div style="margin-top:24px">' + MK.tfsProof() + '</div>') +
   '</div></section>' +
 
   '<section class="mk-band"><div class="mk-wrap mk-split">' +
@@ -436,9 +449,7 @@ MK.pages.capabilities = function () {
     '<p class="mk-lede">Four capabilities, one engineer accountable for all of them. Most engagements combine two or three around a single workflow.</p>' +
   '</div></div></section>' +
   '<section class="mk-section" style="border-top:0;padding-top:0"><div class="mk-wrap">' +
-    '<figure class="mk-frame" style="margin-bottom:56px"><div class="mk-frame-bar" aria-hidden="true"><i></i><i></i><i></i></div>' +
-      '<div class="mk-frame-stage">' + MK.shot({ shot: 'review-cre', alt: 'Review screen for a rent roll: the source document beside the extracted fields, with checks and an approve button.' }) + '</div>' +
-      '<figcaption>A review queue from our demo workspace. Made-up data.</figcaption></figure>' +
+    MK.frame(MK.shot(MK.verticalShots.cre), 'A review queue from our demo workspace. Made-up data.', 'margin-bottom:56px') +
     '<ul class="mk-work">' + MK.capabilities.map(function (c, i) {
       return '<li><div>' + MK.num(i) + '<h3 style="margin-top:10px">' + c.title + '</h3></div>' +
         '<div><p class="mk-muted">' + c.body + '</p></div>' +

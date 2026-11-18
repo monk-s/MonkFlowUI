@@ -5004,7 +5004,7 @@ function showSchedulingModal(opts) {
           <div style="width:56px;height:56px;border-radius:50%;background:var(--accent-glow-strong);color:var(--text-accent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">&#10003;</div>
           <h2 style="margin:0 0 8px;font-size:20px;color:var(--text-primary);">You're booked</h2>
           <p style="color:var(--text-primary);font-size:15px;font-weight:600;margin:0 0 8px;">${escapeHtml(when)}</p>
-          <p style="color:var(--text-secondary);font-size:14px;margin:0 0 24px;">A confirmation is on its way to ${escapeHtml(email)}. We will send the call link before the call.</p>
+          <p style="color:var(--text-secondary);font-size:14px;margin:0 0 24px;">A confirmation with the call details is on its way to ${escapeHtml(email)}.</p>
           <button class="btn btn-primary" onclick="closeModal()" style="min-width:160px;margin:0 auto;">Done</button>
         </div>
       `);

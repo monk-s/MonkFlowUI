@@ -1331,10 +1331,16 @@ key dialog in a browser (its API is tested).
 - Homepage cut to headline, product screenshots, three demos, TFS result, one call to action
 - New /contact page; product screenshots from the demos (scripts/screenshots.mjs)
 
+### Follow-up, same day
+- Slots that clash with the owner's Google Calendar are no longer offered (free/busy lookup, cached a minute, fails open)
+- Call link: set MEETING_URL (https) on Railway and it goes in the confirmation email and the calendar event; without it the email still says the link will follow
+- /contact and /appointments/book limited to 5 submissions per 10 minutes per address
+- Demo clips (scripts/clips.mjs) on the homepage and demo cards, scroll-in motion, thumbnails on /solutions and the investment-firms page
+
 ### Next Session Priority
-1. Google Calendar busy times are not checked when offering slots
-2. No per-route rate limit or CAPTCHA on /contact and /appointments/book beyond the global limiter
-3. Confirmation email promises a call link that is sent by hand
+1. Set MEETING_URL on Railway
+2. Confirm GOOGLE_CALENDAR_ID is the calendar that holds classes and meetings
+3. `.mk-facts` CSS is unused
 
 ### Metrics
 - Files modified: 14 (plus regenerated pages)

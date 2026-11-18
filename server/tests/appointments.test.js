@@ -58,3 +58,18 @@ test('booking needs company and notes, refuses a past time, and saves the compan
   expect(await service.isBookable(user.id, day.date, slot.startTime, slot.endTime)).toBe(false);
   expect((await post(body)).status).toBe(400);
 });
+
+test('times that clash with the owner\'s Google Calendar are not offered', async () => {
+  const user = await owner();
+  const calendar = require('../src/services/google-calendar.service');
+  // Busy 10:00-11:00 Central on Thursday the 19th (16:00-17:00 UTC).
+  const spy = jest.spyOn(calendar, 'getBusy').mockResolvedValue([
+    { start: Date.parse('2026-11-19T16:00:00Z'), end: Date.parse('2026-11-19T17:00:00Z') },
+  ]);
+  try {
+    expect(await service.isBookable(user.id, '2026-11-19', '09:30', '10:00', NOW)).toBe(true);
+    expect(await service.isBookable(user.id, '2026-11-19', '10:00', '10:30', NOW)).toBe(false);
+    expect(await service.isBookable(user.id, '2026-11-19', '10:30', '11:00', NOW)).toBe(false);
+    expect(await service.isBookable(user.id, '2026-11-19', '11:00', '11:30', NOW)).toBe(true);
+  } finally { spy.mockRestore(); }
+});

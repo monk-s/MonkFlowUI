@@ -171,7 +171,10 @@ async function sendAppointmentConfirmation(email, appointment) {
         <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
           <p><strong>When:</strong> ${when}</p>
         </div>
-        <p style="color: #666; font-size: 14px;">We will send the call link to this address before the call. To change the time, reply to this email.</p>
+        ${env.meetingUrl
+          ? `<p><strong>Join the call:</strong> <a href="${escHtml(env.meetingUrl)}">${escHtml(env.meetingUrl)}</a></p>
+        <p style="color: #666; font-size: 14px;">To change the time, reply to this email.</p>`
+          : `<p style="color: #666; font-size: 14px;">We will send the call link to this address before the call. To change the time, reply to this email.</p>`}
       </div>
     `,
   });

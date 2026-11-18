@@ -52,6 +52,30 @@ async function calendarFetch(method, urlPath, body) {
   return res.data;
 }
 
+// Busy periods on the owner's calendar between two instants, as [{ start, end }]
+// in milliseconds. Cached for a minute. Fails open (returns []) so a Google
+// outage or missing credentials never blocks booking; double-booking is still
+// stopped by the appointments table.
+let busyCache = { key: '', at: 0, value: [] };
+async function getBusy(from, to) {
+  const calendarId = env.googleCalendarId;
+  if (!calendarId) return [];
+  const key = `${from.toISOString().slice(0, 13)}|${to.toISOString().slice(0, 13)}`;
+  if (busyCache.key === key && Date.now() - busyCache.at < 60 * 1000) return busyCache.value;
+  try {
+    const data = await calendarFetch('POST', '/freeBusy', {
+      timeMin: from.toISOString(), timeMax: to.toISOString(), items: [{ id: calendarId }],
+    });
+    const periods = (data && data.calendars && data.calendars[calendarId] && data.calendars[calendarId].busy) || [];
+    const value = periods.map((b) => ({ start: Date.parse(b.start), end: Date.parse(b.end) }));
+    busyCache = { key, at: Date.now(), value };
+    return value;
+  } catch (err) {
+    console.error('[Google Calendar] Busy lookup failed:', err.message);
+    return [];
+  }
+}
+
 async function createCalendarEvent(appointment) {
   const client = await getAuthClient();
   if (!client) {
@@ -89,12 +113,14 @@ async function createCalendarEvent(appointment) {
       appointment.company ? `Company: ${appointment.company}` : null,
       `Type: ${appointment.meeting_type || 'Consultation'}`,
       appointment.notes ? `Notes: ${appointment.notes}` : null,
+      env.meetingUrl ? `Call link: ${env.meetingUrl}` : null,
       '',
       'Booked via MonkFlow Scheduling',
     ].filter(Boolean).join('\n'),
     // Stored clock times are Central, whatever zone the visitor booked from.
     start: { dateTime: startDateTime, timeZone: 'America/Chicago' },
     end: { dateTime: endDateTime, timeZone: 'America/Chicago' },
+    ...(env.meetingUrl && { location: env.meetingUrl }),
     reminders: { useDefault: true },
     colorId: '10',
   };
@@ -124,4 +150,4 @@ async function deleteCalendarEvent(eventId) {
   }
 }
 
-module.exports = { createCalendarEvent, deleteCalendarEvent };
+module.exports = { createCalendarEvent, deleteCalendarEvent, getBusy };

@@ -111,6 +111,7 @@ MK.tfs = {
 
 // Working demos built by MonkFlow. Synthetic data, no client names.
 // shot / alt: the screenshot in assets/shots (regenerate with scripts/screenshots.mjs).
+// clip: a short silent recording of the same name exists too (scripts/clips.mjs).
 // shortTitle / short: the one-line version shown on the homepage.
 MK.demoList = [
   {
@@ -124,6 +125,7 @@ MK.demoList = [
     url: '/demo/bank/review',
     cta: 'Open the demo',
     shot: 'review-bank',
+    clip: true,
     alt: 'Review screen: a personal financial statement on the left, the extracted figures on the right, one figure flagged as not matching the document.',
   },
   {
@@ -137,6 +139,7 @@ MK.demoList = [
     url: 'https://lending.monkflow.io',
     cta: 'Open the demo',
     shot: 'lending',
+    clip: true,
     alt: 'Borrower checklist for a sample loan: 16 of 19 documents received, one sent back for revision.',
   },
   {
@@ -150,6 +153,7 @@ MK.demoList = [
     url: 'https://demo.monkflow.io',
     cta: 'Watch the walkthrough',
     shot: 'land',
+    clip: true,
     shotH: 1083,
     alt: 'Map of matching land parcels with one selected, showing its acreage, zoning and owner from public records.',
   },
@@ -378,6 +382,13 @@ MK.verticals = {
 };
 
 MK.verticalOrder = ['cre', 'banks', 'funds'];
+
+// The picture shown for each firm type on /solutions (and on its own page when it has no demo).
+MK.verticalShots = {
+  cre: { shot: 'review-cre', alt: 'Review screen for a rent roll: the source document beside the extracted fields.' },
+  banks: { shot: 'lending', alt: 'Borrower checklist for a sample loan: 16 of 19 documents received.' },
+  funds: { shot: 'review-investment', alt: 'Review screen for an investor document: the source beside the extracted fields, with checks.' },
+};
 
 // Advisory-firm (RIA) page content. Kept because /for-advisors is linked
 // from existing outreach.

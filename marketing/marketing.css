@@ -293,20 +293,25 @@ html.has-session #landing-container { display: none; }
 .mk-frame-bar { display: flex; gap: 6px; padding: 10px 12px; background: var(--mk-sunk); border-bottom: 1px solid var(--mk-line); }
 .mk-frame-bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--mk-line-strong); }
 .mk-frame-stage { position: relative; aspect-ratio: 16 / 10; background: var(--mk-sunk); }
-.mk-frame-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
-/* The first screenshot is the base layer; the others fade in over it in turn. */
-.mk-frame-stage img + img { opacity: 0; animation: mk-fade 18s infinite; }
-.mk-frame-stage img:nth-child(2) { animation-delay: 5s; }
-.mk-frame-stage img:nth-child(3) { animation-delay: 11s; }
-@keyframes mk-fade { 0% { opacity: 0; } 4% { opacity: 1; } 33% { opacity: 1; } 37% { opacity: 0; } 100% { opacity: 0; } }
+.mk-frame-stage img, .mk-frame-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 .mk-frame figcaption { padding: 10px 14px; font-size: 13px; color: var(--mk-ink-3); border-top: 1px solid var(--mk-line); }
-@media (prefers-reduced-motion: reduce) { .mk-frame-stage img + img { animation: none; } }
 
 .mk-shot { display: block; border: 1px solid var(--mk-line); border-radius: 6px; overflow: hidden; background: var(--mk-sunk); aspect-ratio: 16 / 10; margin-bottom: 8px; }
-.mk-shot img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.mk-shot img, .mk-shot video { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
 .mk-examples { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 .mk-example { display: grid; gap: 10px; align-content: start; padding: 16px 16px 22px; background: var(--mk-surface); border: 1px solid var(--mk-line); border-radius: 10px; transition: border-color 160ms ease; }
-.mk-example:hover { border-color: var(--mk-ink); }
+.mk-example { transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
+.mk-example:hover { border-color: var(--mk-ink); transform: translateY(-3px); box-shadow: 0 14px 30px -22px rgba(15, 27, 45, 0.45); }
+.mk-example .mk-shot img, .mk-example .mk-shot video { transition: transform 400ms ease; }
+.mk-example:hover .mk-shot img, .mk-example:hover .mk-shot video { transform: scale(1.03); }
+.mk-work .mk-shot { margin-bottom: 16px; }
+
+/* Scroll-in motion. The class is added by MK.enhance, so nothing is hidden without JavaScript. */
+.mk-reveal { opacity: 0; transform: translateY(18px); transition: opacity 500ms ease, transform 500ms ease; }
+.mk-reveal.is-in { opacity: 1; transform: none; }
+.mk-examples .mk-reveal:nth-child(2) { transition-delay: 90ms; }
+.mk-examples .mk-reveal:nth-child(3) { transition-delay: 180ms; }
+@media (prefers-reduced-motion: reduce) { .mk-reveal { opacity: 1; transform: none; transition: none; } .mk-example, .mk-example .mk-shot img, .mk-example .mk-shot video { transition: none; transform: none; } }
 .mk-example h3 { font-family: var(--mk-serif); font-size: 21px; line-height: 1.25; letter-spacing: -0.01em; }
 .mk-example p { font-size: 15.5px; color: var(--mk-ink-2); }
 
