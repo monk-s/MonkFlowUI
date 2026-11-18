@@ -4857,279 +4857,128 @@ function showLegalPage(type) {
 }
 
 // opts (all optional, passed by the public site's [data-book] buttons):
-//   intent   'audit' pre-selects the Workflow audit meeting type
-//   vertical pre-selects the "Your firm" option, e.g. 'Bank'
+//   intent   'audit' is noted for Nate on the booking
+//   vertical the firm type of the page the visitor came from, e.g. 'Bank'
+// One screen: pick a day and time (shown in the visitor's own time zone), fill
+// four required fields, book. The server decides which days and times exist.
 function showSchedulingModal(opts) {
   const schedIntent = (opts && opts.intent) || '';
   const schedVertical = (opts && opts.vertical) || '';
   // Clients open this from inside the portal; prospects from the public site.
-  const schedTitle = isAuthenticated ? 'Schedule a check-in' : 'Book a working session';
-  // Analytics: the highest-intent action on the site. Guarded — no-op until
-  // the Plausible account is live (see index.html). Safe if window.plausible
-  // is undefined because the inline stub in index.html always defines it.
+  const schedTitle = isAuthenticated ? 'Schedule a check-in' : 'Book a call';
+  // Analytics: the highest-intent action on the site. Safe if Plausible is not loaded.
   try { window.plausible && window.plausible('Schedule Modal Opened', { props: { intent: schedIntent || 'call', vertical: schedVertical || 'unspecified' } }); } catch (_) {}
-  let currentStep = 1;
-  let selectedDate = null;
-  let selectedSlot = null;
-  let availableSlots = [];
-  let calendarMonth = new Date().getMonth();
-  let calendarYear = new Date().getFullYear();
+
+  let days = null;       // null while loading, then [{ date, slots: [{ startTime, endTime, startsAt }] }]
+  let dayIdx = 0;
+  let slot = null;
+  let sending = false;
+  const draft = { name: '', email: '', company: '', notes: '' };
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago';
+  const zonePart = new Intl.DateTimeFormat('en-US', { timeZoneName: 'long' }).formatToParts(new Date()).find(p => p.type === 'timeZoneName');
+  const zoneName = zonePart ? zonePart.value : 'your local time';
+  const timeOf = (iso) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const dayLabel = (day) => {
+    const first = new Date(day.slots[0].startsAt);
+    const diff = Math.round((new Date(first.getFullYear(), first.getMonth(), first.getDate()) - new Date(new Date().setHours(0, 0, 0, 0))) / 864e5);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Tomorrow';
+    return first.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+  const whenText = () => new Date(slot.startsAt).toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  const chip = (active) => `padding:10px 0;border-radius:8px;border:1px solid ${active ? 'var(--accent)' : 'var(--border)'};background:${active ? 'var(--accent)' : 'var(--bg-tertiary)'};color:${active ? 'var(--on-accent)' : 'var(--text-primary)'};font-size:13px;font-weight:${active ? '700' : '500'};cursor:pointer;text-align:center;`;
+
+  function keepDraft() {
+    for (const key of Object.keys(draft)) {
+      const el = document.getElementById('sched-' + key);
+      if (el) draft[key] = el.value;
+    }
+  }
 
   function render() {
-    const stepIndicator = `
-      <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:20px;">
-        ${[1,2,3].map(s => `
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;
-              ${s < currentStep ? 'background:#2b6a59;color:#fff;' : s === currentStep ? 'background:#2b6a59;color:#fff;' : 'background:var(--border);color:var(--text-tertiary);'}
-            ">${s < currentStep ? '&#10003;' : s}</div>
-            ${s < 3 ? `<div style="width:32px;height:2px;background:${s < currentStep ? '#2b6a59' : 'var(--border)'};"></div>` : ''}
+    keepDraft();
+    const header = `
+      <div class="modal-header">
+        <h2 class="modal-title">${schedTitle}</h2>
+        <button class="modal-close" aria-label="Close" onclick="closeModal()">${icons.x}</button>
+      </div>`;
+    if (days === null) {
+      showModal(`${header}<div style="text-align:center;padding:40px 0;color:var(--text-secondary);" role="status">Loading open times...</div>`);
+      return;
+    }
+    if (!days.length) {
+      showModal(`${header}<div style="text-align:center;padding:32px 0;color:var(--text-secondary);">No open times right now. Please <a href="/contact" style="color:var(--text-accent);">send a message</a> and we will find one.</div>`);
+      return;
+    }
+    const day = days[dayIdx];
+    showModal(`${header}
+      <p style="margin:0 0 14px;font-size:13px;color:var(--text-secondary);">30 minutes with the engineer who would build your system. Times shown in ${escapeHtml(zoneName)}.</p>
+      <div role="group" aria-label="Day" style="display:grid;grid-template-columns:repeat(${days.length},1fr);gap:8px;margin-bottom:12px;">
+        ${days.map((d, i) => `<button type="button" aria-pressed="${i === dayIdx}" onclick="window._schedDay(${i})" style="${chip(i === dayIdx)}">${dayLabel(d)}</button>`).join('')}
+      </div>
+      <div role="group" aria-label="Time" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;max-height:168px;overflow:auto;">
+        ${day.slots.map((s, i) => `<button type="button" aria-pressed="${slot === s}" onclick="window._schedSlot(${i})" style="${chip(slot === s)}">${timeOf(s.startsAt)}</button>`).join('')}
+      </div>
+      ${slot ? `
+      <form id="sched-form" onsubmit="window._schedSubmit(event)" style="margin-top:18px;border-top:1px solid var(--border);padding-top:16px;">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:12px;">${escapeHtml(whenText())}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px;">
+          <div class="form-group">
+            <label class="form-label" for="sched-name">Full name</label>
+            <input type="text" id="sched-name" required maxlength="200" autocomplete="name" value="${escapeHtml(draft.name)}" style="width:100%;" />
           </div>
-        `).join('')}
-      </div>
-      <div style="text-align:center;font-size:12px;color:var(--text-secondary);margin-bottom:16px;">
-        Step ${currentStep} of 3 — ${currentStep === 1 ? 'Choose a Date' : currentStep === 2 ? 'Pick a Time' : 'Your Details'}
-      </div>
-    `;
-
-    if (currentStep === 1) {
-      renderStep1(stepIndicator);
-    } else if (currentStep === 2) {
-      renderStep2(stepIndicator);
-    } else {
-      renderStep3(stepIndicator);
-    }
-  }
-
-  function renderStep1(stepIndicator) {
-    const today = new Date();
-    const firstDay = new Date(calendarYear, calendarMonth, 1);
-    const lastDay = new Date(calendarYear, calendarMonth + 1, 0);
-    const startDow = firstDay.getDay();
-    const daysInMonth = lastDay.getDate();
-    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-
-    let calendarCells = '';
-    ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => {
-      calendarCells += `<div style="text-align:center;font-size:11px;color:var(--text-tertiary);padding:6px 0;font-weight:600;">${d}</div>`;
-    });
-    for (let i = 0; i < startDow; i++) {
-      calendarCells += `<div></div>`;
-    }
-    for (let d = 1; d <= daysInMonth; d++) {
-      const cellDate = new Date(calendarYear, calendarMonth, d);
-      const dateStr = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const isPast = cellDate < new Date(today.getFullYear(), today.getMonth(), today.getDate());
-      const isWeekend = cellDate.getDay() === 0 || cellDate.getDay() === 6;
-      const isDisabled = isPast || isWeekend;
-      const isToday = cellDate.toDateString() === today.toDateString();
-      const isSelected = selectedDate === dateStr;
-      let style = 'width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;margin:2px auto;cursor:pointer;transition:all 0.15s;border:none;background:transparent;color:var(--text-primary);';
-      if (isDisabled) {
-        style += 'opacity:0.25;cursor:not-allowed;';
-      } else if (isSelected) {
-        style += 'background:#2b6a59;color:#fff;font-weight:700;';
-      } else if (isToday) {
-        style += 'border:2px solid #2b6a59;font-weight:600;';
-      }
-      calendarCells += `<button style="${style}" ${isDisabled ? 'disabled' : `onclick="window._schedSelectDate('${dateStr}')"`}>${d}</button>`;
-    }
-
-    const canGoPrev = calendarYear > today.getFullYear() || (calendarYear === today.getFullYear() && calendarMonth > today.getMonth());
-
-    showModal(`
-      <div class="modal-header">
-        <h2 class="modal-title">${schedTitle}</h2>
-        <button class="modal-close" onclick="closeModal()">${icons.x}</button>
-      </div>
-      ${stepIndicator}
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <button onclick="window._schedPrevMonth()" style="background:none;border:none;color:${canGoPrev ? 'var(--text-secondary)' : 'var(--text-tertiary)'};cursor:${canGoPrev ? 'pointer' : 'default'};font-size:18px;padding:4px 8px;" ${canGoPrev ? '' : 'disabled'}>&larr;</button>
-        <span style="font-weight:600;font-size:15px;color:var(--text-primary);">${monthNames[calendarMonth]} ${calendarYear}</span>
-        <button onclick="window._schedNextMonth()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:18px;padding:4px 8px;">&rarr;</button>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">
-        ${calendarCells}
-      </div>
-      ${selectedDate ? `<div style="margin-top:16px;text-align:center;">
-        <button class="btn btn-primary" onclick="window._schedGoStep2()" style="min-width:160px;">Continue</button>
-      </div>` : ''}
-    `);
-  }
-
-  function renderStep2(stepIndicator) {
-    const dateObj = new Date(selectedDate + 'T12:00:00');
-    const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-
-    let slotsHtml = '';
-    if (availableSlots === 'loading') {
-      slotsHtml = `<div style="text-align:center;padding:40px 0;color:var(--text-secondary);">
-        <div style="width:24px;height:24px;border:3px solid var(--border);border-top-color:#2b6a59;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
-        Loading available times...
-      </div>`;
-    } else if (availableSlots.every(s => s.booked)) {
-      slotsHtml = `<div style="text-align:center;padding:40px 0;color:var(--text-secondary);">
-        Fully booked on this date. Please choose another day.
-      </div>`;
-    } else {
-      slotsHtml = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:420px;margin:0 auto;">
-        ${availableSlots.map(slot => {
-          if (slot.booked) {
-            return `<button disabled
-              style="padding:10px 0;border-radius:8px;border:1px solid rgba(255,70,70,0.25);
-              background:rgba(255,70,70,0.08);color:rgba(255,70,70,0.45);
-              font-size:13px;font-weight:500;cursor:not-allowed;text-align:center;text-decoration:line-through;">${slot.start} – ${slot.end}</button>`;
-          }
-          const isActive = selectedSlot && selectedSlot.start === slot.start;
-          return `<button onclick="window._schedSelectSlot('${slot.start}','${slot.end}')"
-            style="padding:10px 0;border-radius:8px;border:1px solid ${isActive ? '#2b6a59' : 'var(--border)'};
-            background:${isActive ? '#2b6a59' : 'var(--bg-tertiary)'};color:${isActive ? '#fff' : 'var(--text-primary)'};
-            font-size:13px;font-weight:${isActive ? '700' : '500'};cursor:pointer;transition:all 0.15s;text-align:center;">${slot.start} – ${slot.end}</button>`;
-        }).join('')}
-      </div>`;
-    }
-
-    showModal(`
-      <div class="modal-header">
-        <h2 class="modal-title">${schedTitle}</h2>
-        <button class="modal-close" onclick="closeModal()">${icons.x}</button>
-      </div>
-      ${stepIndicator}
-      <div style="text-align:center;margin-bottom:16px;">
-        <span style="font-size:13px;color:var(--text-secondary);">${formattedDate}</span>
-        <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#2b6a59;cursor:pointer;font-size:12px;margin-left:8px;">Change</button>
-      </div>
-      ${slotsHtml}
-      <div style="text-align:center;margin-top:8px;font-size:11px;color:var(--text-tertiary);">All times shown in Central Time (CT)</div>
-      ${selectedSlot ? `<div style="margin-top:12px;text-align:center;">
-        <button class="btn btn-primary" onclick="window._schedGoStep3()" style="min-width:160px;">Continue</button>
-      </div>` : ''}
-    `);
-  }
-
-  function renderStep3(stepIndicator) {
-    const dateObj = new Date(selectedDate + 'T12:00:00');
-    const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-
-    showModal(`
-      <div class="modal-header">
-        <h2 class="modal-title">${schedTitle}</h2>
-        <button class="modal-close" onclick="closeModal()">${icons.x}</button>
-      </div>
-      ${stepIndicator}
-      <div style="background:rgba(43,106,89,0.08);border:1px solid rgba(43,106,89,0.2);border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
-        <div>
-          <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${formattedDate} &middot; ${selectedSlot.start} - ${selectedSlot.end} CT</div>
-          <button onclick="window._schedBackToStep1()" style="background:none;border:none;color:#2b6a59;cursor:pointer;font-size:11px;padding:0;">Change date &amp; time</button>
+          <div class="form-group">
+            <label class="form-label" for="sched-email">Work email</label>
+            <input type="email" id="sched-email" required maxlength="320" autocomplete="email" value="${escapeHtml(draft.email)}" style="width:100%;" />
+          </div>
         </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Full Name *</label>
-        <input type="text" id="sched-name" placeholder="Jane Smith" style="width:100%;" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Email Address *</label>
-        <input type="email" id="sched-email" placeholder="jane@company.com" style="width:100%;" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Company</label>
-        <input type="text" id="sched-company" placeholder="Acme Corp (optional)" style="width:100%;" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Your firm</label>
-        <select id="sched-vertical">
-          <option value="">Select one (optional)</option>
-          ${['Commercial real estate', 'Bank', 'Investment firm', 'RIA / advisory firm', 'Other'].map(v => `<option value="${v}"${v === schedVertical ? ' selected' : ''}>${v}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Meeting Type</label>
-        <select id="sched-type">
-          ${[['Working session', 'Working session (20 min)'], ['Workflow audit', 'Ask about a workflow audit'], ['Project scoping', 'Project scoping'], ['Security review', 'Security or compliance questions']].map(([v, label]) => `<option value="${v}"${(schedIntent === 'audit' && v === 'Workflow audit') ? ' selected' : ''}>${label}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Notes</label>
-        <textarea id="sched-notes" rows="2" placeholder="Anything you'd like us to know? (optional)" style="resize:vertical;width:100%;"></textarea>
-      </div>
-      <div class="modal-footer" style="gap:8px;">
-        <button class="btn btn-ghost" onclick="window._schedGoStep2Back()">Back</button>
-        <button class="btn btn-primary" id="sched-submit-btn" onclick="window._schedSubmit()">Book Consultation</button>
-      </div>
+        <div class="form-group">
+          <label class="form-label" for="sched-company">Company</label>
+          <input type="text" id="sched-company" required maxlength="200" autocomplete="organization" value="${escapeHtml(draft.company)}" style="width:100%;" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="sched-notes">What would you like to talk about?</label>
+          <textarea id="sched-notes" required maxlength="1800" rows="2" style="resize:vertical;width:100%;">${escapeHtml(draft.notes)}</textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary" id="sched-submit-btn" ${sending ? 'disabled' : ''}>${sending ? 'Booking...' : 'Book call'}</button>
+        </div>
+      </form>` : ''}
     `);
   }
 
-  function fetchAvailability(date) {
-    availableSlots = 'loading';
-    selectedSlot = null;
+  function load() {
+    days = null;
+    slot = null;
     render();
-    fetch(`${API_BASE}/appointments/availability?userId=${OWNER_USER_ID}&date=${date}`)
+    return fetch(`${API_BASE}/appointments/availability?userId=${OWNER_USER_ID}`)
       .then(res => res.json())
-      .then(data => {
-        availableSlots = (data.data || []).map(s => ({ start: s.startTime || s.start, end: s.endTime || s.end, booked: !!s.booked }));
-        render();
-      })
-      .catch(() => {
-        availableSlots = [];
-        render();
-        showToast('Failed to load availability', 'error');
-      });
+      .then(data => { days = (data.data || []).filter(d => d.slots && d.slots.length); dayIdx = 0; render(); })
+      .catch(() => { days = []; render(); showToast('Failed to load open times', 'error'); });
   }
 
-  // Wire up global callbacks for inline onclick handlers
-  window._schedSelectDate = (dateStr) => {
-    selectedDate = dateStr;
+  // Wire up global callbacks for inline handlers
+  window._schedDay = (i) => { dayIdx = i; slot = null; render(); };
+  window._schedSlot = (i) => {
+    const first = !slot;
+    slot = days[dayIdx].slots[i];
     render();
+    if (first) { const name = document.getElementById('sched-name'); if (name) name.focus(); }
   };
-  window._schedPrevMonth = () => {
-    const today = new Date();
-    if (calendarYear > today.getFullYear() || (calendarYear === today.getFullYear() && calendarMonth > today.getMonth())) {
-      calendarMonth--;
-      if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
-      render();
-    }
-  };
-  window._schedNextMonth = () => {
-    calendarMonth++;
-    if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; }
-    render();
-  };
-  window._schedGoStep2 = () => {
-    currentStep = 2;
-    fetchAvailability(selectedDate);
-  };
-  window._schedSelectSlot = (start, end) => {
-    selectedSlot = { start, end };
-    render();
-  };
-  window._schedGoStep3 = () => {
-    currentStep = 3;
-    render();
-  };
-  window._schedGoStep2Back = () => {
-    currentStep = 2;
-    render();
-  };
-  window._schedBackToStep1 = () => {
-    currentStep = 1;
-    selectedSlot = null;
-    render();
-  };
-  window._schedSubmit = async () => {
-    const name = document.getElementById('sched-name')?.value?.trim();
-    const email = document.getElementById('sched-email')?.value?.trim();
-    const company = document.getElementById('sched-company')?.value?.trim();
-    const notes = document.getElementById('sched-notes')?.value?.trim();
-    const meetingType = document.getElementById('sched-type')?.value;
-    // The booking API has no firm-type field, so it travels in the notes.
-    const firmType = document.getElementById('sched-vertical')?.value;
-    const notesWithFirm = [firmType ? `Firm type: ${firmType}` : '', notes || ''].filter(Boolean).join('\n');
-
+  window._schedSubmit = async (event) => {
+    event.preventDefault();
+    keepDraft();
+    const name = draft.name.trim(), email = draft.email.trim(), company = draft.company.trim(), notes = draft.notes.trim();
     if (!name) { showToast('Please enter your name', 'error'); return; }
-    if (!email || !email.includes('@')) { showToast('Please enter a valid email', 'error'); return; }
-
-    const btn = document.getElementById('sched-submit-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Booking...'; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { showToast('Please enter a valid email', 'error'); return; }
+    if (!company) { showToast('Please enter your company', 'error'); return; }
+    if (!notes) { showToast('Please say what you would like to talk about', 'error'); return; }
+    // The booking API has no field for these, so they travel in the notes.
+    const fullNotes = [schedVertical ? `Firm type: ${schedVertical}` : '', schedIntent === 'audit' ? 'Asked about: workflow audit' : '', notes].filter(Boolean).join('\n');
+    const day = days[dayIdx];
+    const when = whenText();
+    sending = true;
+    render();
 
     try {
       const res = await fetch(`${API_BASE}/appointments/book`, {
@@ -5137,67 +4986,43 @@ function showSchedulingModal(opts) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: OWNER_USER_ID,
-          date: selectedDate,
-          startTime: selectedSlot.start,
-          endTime: selectedSlot.end,
+          date: day.date,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
           bookerName: name,
           bookerEmail: email,
-          company: company || undefined,
-          notes: notesWithFirm || undefined,
-          meetingType: meetingType,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago',
+          bookerCompany: company,
+          notes: fullNotes,
+          timezone: zone,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Booking failed');
+      if (!res.ok) throw new Error((data.error && data.error.message) || data.error || 'Booking failed');
 
-      // Show confirmation
-      const dateObj = new Date(selectedDate + 'T12:00:00');
-      const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
       showModal(`
         <div style="text-align:center;padding:20px 0;">
-          <div style="width:56px;height:56px;border-radius:50%;background:rgba(43,106,89,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">&#10003;</div>
+          <div style="width:56px;height:56px;border-radius:50%;background:var(--accent-glow-strong);color:var(--text-accent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">&#10003;</div>
           <h2 style="margin:0 0 8px;font-size:20px;color:var(--text-primary);">You're booked</h2>
-          <p style="color:var(--text-secondary);font-size:14px;margin:0 0 24px;">Your consultation has been scheduled.</p>
-          <div style="background:var(--bg-tertiary);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:left;margin-bottom:24px;">
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-              <span style="color:var(--text-secondary);font-size:13px;">Date</span>
-              <span style="color:var(--text-primary);font-size:13px;font-weight:600;">${formattedDate}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-              <span style="color:var(--text-secondary);font-size:13px;">Time</span>
-              <span style="color:var(--text-primary);font-size:13px;font-weight:600;">${selectedSlot.start} - ${selectedSlot.end} CT</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-              <span style="color:var(--text-secondary);font-size:13px;">Type</span>
-              <span style="color:var(--text-primary);font-size:13px;font-weight:600;">${meetingType}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;">
-              <span style="color:var(--text-secondary);font-size:13px;">Confirmation</span>
-              <span style="color:var(--text-primary);font-size:13px;font-weight:600;">Sent to ${email}</span>
-            </div>
-          </div>
-          <button class="btn btn-primary" onclick="closeModal()" style="min-width:160px;text-align:center;display:flex;align-items:center;justify-content:center;">Done</button>
+          <p style="color:var(--text-primary);font-size:15px;font-weight:600;margin:0 0 8px;">${escapeHtml(when)}</p>
+          <p style="color:var(--text-secondary);font-size:14px;margin:0 0 24px;">A confirmation is on its way to ${escapeHtml(email)}. We will send the call link before the call.</p>
+          <button class="btn btn-primary" onclick="closeModal()" style="min-width:160px;margin:0 auto;">Done</button>
         </div>
       `);
-      try { window.plausible && window.plausible('Booking Submitted', { props: { type: meetingType, vertical: firmType || 'unspecified' } }); } catch (_) {}
-      showToast('Consultation booked successfully!');
+      try { window.plausible && window.plausible('Booking Submitted', { props: { type: schedIntent || 'call', vertical: schedVertical || 'unspecified' } }); } catch (_) {}
     } catch (err) {
-      const msg = err.message || 'Failed to book consultation';
+      sending = false;
+      const msg = String(err.message || 'Failed to book the call');
       if (msg.toLowerCase().includes('no longer available')) {
-        showToast('That slot was just booked — please pick another time.', 'error');
-        currentStep = 2;
-        selectedSlot = null;
-        fetchAvailability(selectedDate);
+        showToast('That time was just taken. Please pick another.', 'error');
+        load();
         return;
       }
       showToast(msg, 'error');
-      if (btn) { btn.disabled = false; btn.textContent = 'Book Consultation'; }
+      render();
     }
   };
 
-  // Initialize
-  render();
+  load();
 }
 
 // ── Modal API Handlers ──────────────────────────────────

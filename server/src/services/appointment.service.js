@@ -1,53 +1,80 @@
 const appointmentModel = require('../models/appointment.model');
 
 const SLOT_DURATION_MINUTES = 30;
+// Availability rules and stored appointment times are Central wall-clock times.
+const TZ = 'America/Chicago';
+const WINDOW_DAYS = 3;            // bookable days offered, counting today
+const MIN_NOTICE_MS = 2 * 60 * 60 * 1000;
+const LOOKAHEAD_DAYS = 14;        // how far to look for those days
 
-/**
- * Get available time slots for a given user and date.
- */
-async function getAvailableSlots(userId, dateStr) {
-  const date = new Date(dateStr);
-  const dayOfWeek = date.getDay(); // 0=Sunday
+const partsFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
 
-  // Get availability rule for this day
-  const rules = await appointmentModel.getAvailabilityRules(userId);
-  const rule = rules.find(r => r.day_of_week === dayOfWeek && r.is_active);
-
-  if (!rule) return []; // No availability on this day
-
-  // Check if date is blocked
-  const blocked = await appointmentModel.isDateBlocked(userId, dateStr);
-  if (blocked) return [];
-
-  // Generate slots
-  const slots = [];
-  const [startH, startM] = rule.start_time.split(':').map(Number);
-  const [endH, endM] = rule.end_time.split(':').map(Number);
-  const startMinutes = startH * 60 + startM;
-  const endMinutes = endH * 60 + endM;
-
-  for (let m = startMinutes; m + SLOT_DURATION_MINUTES <= endMinutes; m += SLOT_DURATION_MINUTES) {
-    const h = Math.floor(m / 60);
-    const min = m % 60;
-    const slotStart = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
-    const endM2 = m + SLOT_DURATION_MINUTES;
-    const h2 = Math.floor(endM2 / 60);
-    const min2 = endM2 % 60;
-    const slotEnd = `${String(h2).padStart(2, '0')}:${String(min2).padStart(2, '0')}`;
-    slots.push({ startTime: slotStart, endTime: slotEnd });
-  }
-
-  // Mark occupied slots
-  const appointments = await appointmentModel.findByDateRange(userId, dateStr);
-
-  return slots.map(slot => {
-    const booked = appointments.some(appt => {
-      const apptStart = appt.start_time.substring(0, 5);
-      const apptEnd = appt.end_time.substring(0, 5);
-      return slot.startTime < apptEnd && slot.endTime > apptStart;
-    });
-    return { ...slot, booked };
-  });
+/** Central date and time of an instant: { date: 'YYYY-MM-DD', time: 'HH:MM' }. */
+function centralParts(instant) {
+  const p = {};
+  for (const part of partsFmt.formatToParts(instant)) p[part.type] = part.value;
+  return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
 }
 
-module.exports = { getAvailableSlots };
+/** The instant of a Central wall-clock date and time. */
+function centralToInstant(date, time) {
+  const guess = new Date(`${date}T${time}:00Z`);
+  const shown = centralParts(guess);
+  return new Date(guess.getTime() + (guess.getTime() - new Date(`${shown.date}T${shown.time}:00Z`).getTime()));
+}
+
+const hhmm = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+/**
+ * The bookable days: the next WINDOW_DAYS dates that still have an open slot
+ * at least MIN_NOTICE_MS from `now`. Days with no availability rule (weekends),
+ * blocked dates and fully booked days are skipped.
+ * Returns [{ date, slots: [{ startTime, endTime, startsAt }] }], times Central,
+ * startsAt the ISO instant so a browser can show its own time zone.
+ */
+async function getWindowSlots(userId, now = new Date()) {
+  const rules = await appointmentModel.getAvailabilityRules(userId);
+  const earliest = now.getTime() + MIN_NOTICE_MS;
+  const today = centralParts(now).date;
+  const days = [];
+
+  for (let i = 0; i < LOOKAHEAD_DAYS && days.length < WINDOW_DAYS; i++) {
+    const day = new Date(`${today}T00:00:00Z`);
+    day.setUTCDate(day.getUTCDate() + i);
+    const date = day.toISOString().slice(0, 10);
+    const rule = rules.find((r) => r.day_of_week === day.getUTCDay() && r.is_active);
+    if (!rule || await appointmentModel.isDateBlocked(userId, date)) continue;
+
+    const [startH, startM] = rule.start_time.split(':').map(Number);
+    const [endH, endM] = rule.end_time.split(':').map(Number);
+    const appointments = await appointmentModel.findByDateRange(userId, date);
+    const slots = [];
+    for (let m = startH * 60 + startM; m + SLOT_DURATION_MINUTES <= endH * 60 + endM; m += SLOT_DURATION_MINUTES) {
+      const startTime = hhmm(m);
+      const endTime = hhmm(m + SLOT_DURATION_MINUTES);
+      const startsAt = centralToInstant(date, startTime);
+      if (startsAt.getTime() < earliest) continue;
+      const taken = appointments.some((a) => startTime < a.end_time.substring(0, 5) && endTime > a.start_time.substring(0, 5));
+      if (!taken) slots.push({ startTime, endTime, startsAt: startsAt.toISOString() });
+    }
+    if (slots.length) days.push({ date, slots });
+  }
+  return days;
+}
+
+/** Open slots for one date; empty when the date is outside the booking window. */
+async function getAvailableSlots(userId, dateStr, now = new Date()) {
+  const day = (await getWindowSlots(userId, now)).find((d) => d.date === dateStr);
+  return day ? day.slots.map((s) => ({ ...s, booked: false })) : [];
+}
+
+/** True when this exact slot is one a visitor could have been offered. */
+async function isBookable(userId, date, startTime, endTime, now = new Date()) {
+  const slots = await getAvailableSlots(userId, date, now);
+  return slots.some((s) => s.startTime === startTime && s.endTime === endTime);
+}
+
+module.exports = { getWindowSlots, getAvailableSlots, isBookable, centralToInstant, TZ };

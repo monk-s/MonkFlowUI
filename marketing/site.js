@@ -161,13 +161,20 @@ MK.routes = [
     },
   },
   {
+    path: '/contact',
+    title: 'Contact | MonkFlow',
+    description: 'Send MonkFlow a message, or book a call with the engineer who would build your system.',
+    render: function () { return MK.pages.contact(); },
+    jsonLd: function () { return [MK.ld.org(), MK.ld.crumbs([['Home', '/'], ['Contact', '/contact']])]; },
+  },
+  {
     // Shareable booking link for outreach emails: the homepage with the
     // booking modal open. Accepts ?intent=audit and ?v=<firm type>.
     path: '/book',
     canonical: '/',
     noPrerender: true,
-    title: 'Book a Working Session | MonkFlow',
-    description: 'Book 20 minutes with the engineer who would build your system.',
+    title: 'Book a Call | MonkFlow',
+    description: 'Book 30 minutes with the engineer who would build your system.',
     render: function () { return MK.pages.home(); },
     onMount: function () {
       var q = new URLSearchParams(window.location.search);
@@ -244,13 +251,6 @@ MK.mount = function (pathname) {
   container.classList.add('mk');
   container.innerHTML = MK.shell(route.path, route.render());
   MK.setMeta(route);
-
-  // Outreach links can pre-select a firm type: /?v=cre | banks | funds
-  var v = new URLSearchParams(window.location.search).get('v');
-  if (v) {
-    var card = container.querySelector('[data-vertical-card="' + v.replace(/[^a-z]/g, '') + '"]');
-    if (card) card.classList.add('is-match');
-  }
 
   // In-page anchors such as /how-we-work#engagements
   var hash = window.location.hash;
@@ -341,7 +341,6 @@ MK.onClick = function (e) {
   if ((el = e.target.closest('a[data-link]'))) {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
     e.preventDefault();
-    if (el.hasAttribute('data-vertical-card')) MK.track('Vertical Card Click', { vertical: el.getAttribute('data-vertical-card') });
     navigateToPath(el.getAttribute('href'));
   }
 };
@@ -361,7 +360,35 @@ MK.onInput = function (e) {
   if (!form._tracked) { form._tracked = true; MK.track('ROI Estimate Used'); }
 };
 
+// The /contact form. Posts to the same endpoint the staff console uses.
+MK.onSubmit = function (e) {
+  var form = e.target.closest && e.target.closest('[data-contact]');
+  if (!form) return;
+  e.preventDefault();
+  var f = form.elements, status = form.querySelector('[data-contact-status]'), btn = form.querySelector('button[type="submit"]');
+  var done = function () {
+    form.innerHTML = '<p class="mk-lede">Thank you. Your message is in, and we will reply within one business day.</p>';
+    MK.track('Contact Form Sent');
+  };
+  if (f.website.value) return done(); // a bot filled the hidden field
+  btn.disabled = true;
+  status.textContent = 'Sending...';
+  fetch('/api/v1/contact', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'omit',
+    body: JSON.stringify({ name: f.name.value.trim(), email: f.email.value.trim(), subject: 'Website contact: ' + f.company.value.trim(), message: f.message.value.trim() }),
+  }).then(function (r) {
+    if (!r.ok) throw new Error(r.status);
+    done();
+  }).catch(function () {
+    btn.disabled = false;
+    status.textContent = 'That did not send. Please try again, or book a call instead.';
+  });
+};
+
 if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('submit', MK.onSubmit);
   document.addEventListener('click', MK.onClick);
   document.addEventListener('input', MK.onInput);
 }

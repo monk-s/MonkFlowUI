@@ -92,14 +92,9 @@ async function createCalendarEvent(appointment) {
       '',
       'Booked via MonkFlow Scheduling',
     ].filter(Boolean).join('\n'),
-    start: {
-      dateTime: startDateTime,
-      timeZone: appointment.timezone || 'America/Chicago',
-    },
-    end: {
-      dateTime: endDateTime,
-      timeZone: appointment.timezone || 'America/Chicago',
-    },
+    // Stored clock times are Central, whatever zone the visitor booked from.
+    start: { dateTime: startDateTime, timeZone: 'America/Chicago' },
+    end: { dateTime: endDateTime, timeZone: 'America/Chicago' },
     reminders: { useDefault: true },
     colorId: '10',
   };

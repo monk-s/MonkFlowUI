@@ -1315,3 +1315,29 @@ key dialog in a browser (its API is tested).
 - Bugs fixed: 1 LOW
 - Tests added: 18 API, 8 browser
 - Commits: 1
+
+## Session: 2026-11-18
+
+### Audit Findings
+- [HIGH] Booking offered times that had already passed, and the API accepted them — FIXED (server decides the window: next 3 working days, 2 hours' notice)
+- [HIGH] Company name dropped on every booking (`company` sent, `bookerCompany` expected) — FIXED
+- [HIGH] Google Calendar event used the visitor's time zone with Central clock times — FIXED (always America/Chicago)
+- [MEDIUM] Booking errors showed "[object Object]" (error body is an object) — FIXED
+- [MEDIUM] Public contact messages were stored but nobody was emailed — FIXED (owner notification)
+- [LOW] `.mk-facts` CSS is now unused on the homepage — logged
+
+### Improvements Made
+- Booking popup is one screen: day, time (visitor's time zone), four required fields
+- Homepage cut to headline, product screenshots, three demos, TFS result, one call to action
+- New /contact page; product screenshots from the demos (scripts/screenshots.mjs)
+
+### Next Session Priority
+1. Google Calendar busy times are not checked when offering slots
+2. No per-route rate limit or CAPTCHA on /contact and /appointments/book beyond the global limiter
+3. Confirmation email promises a call link that is sent by hand
+
+### Metrics
+- Files modified: 14 (plus regenerated pages)
+- Bugs fixed: 5
+- Tests added: 3
+- Commits: 1
