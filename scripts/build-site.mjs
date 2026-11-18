@@ -27,7 +27,7 @@ const PUBLIC = [
   'logo.svg', 'logo-mark.svg', 'robots.txt', 'sitemap.xml',
   'assets', 'marketing',
   // Prerendered public pages (scripts/prerender.mjs).
-  'solutions', 'case-studies', 'for-advisors', 'capabilities', 'how-we-work', 'security', 'tools',
+  'solutions', 'case-studies', 'for-advisors', 'capabilities', 'how-we-work', 'security', 'tools', 'contact',
 ];
 
 // Never published, whatever folder they turn up in.

@@ -147,21 +147,34 @@ function formatAppointmentDate(d) {
   return d;
 }
 
-async function sendAppointmentConfirmation(email, bookerName, appointment) {
-  const dateStr = formatAppointmentDate(appointment.date);
+// "Thursday, November 19 at 3:00 PM EST". Stored times are Central; `zone` only
+// picks how the instant is shown, and an unknown zone falls back to Central.
+function appointmentWhen(appointment, zone) {
+  const { centralToInstant, TZ } = require('./appointment.service');
+  const instant = centralToInstant(formatAppointmentDate(appointment.date), String(appointment.start_time).slice(0, 5));
+  const fmt = (timeZone) => new Intl.DateTimeFormat('en-US', {
+    timeZone, weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+  }).format(instant);
+  try { return fmt(zone || TZ); } catch { return fmt(TZ); }
+}
+
+// Sent to an address nobody has verified, so it repeats nothing the booker typed.
+async function sendAppointmentConfirmation(email, appointment) {
+  const when = appointmentWhen(appointment, appointment.timezone);
   return sendEmail({
     to: email,
-    subject: `Appointment Confirmed — ${dateStr}`,
+    subject: 'Your call with MonkFlow is confirmed',
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-        <h1 style="color: #00cc6a;">Appointment Confirmed</h1>
-        <p>Hi ${bookerName}, your appointment has been confirmed.</p>
+        <h1 style="color: #1f3a5f;">Call confirmed</h1>
+        <p>Hi, your 30-minute call with MonkFlow is confirmed.</p>
         <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
-          <p><strong>Date:</strong> ${dateStr}</p>
-          <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
-          <p><strong>Type:</strong> ${appointment.meeting_type}</p>
+          <p><strong>When:</strong> ${when}</p>
         </div>
-        <p style="color: #666; font-size: 14px;">You'll receive a reminder before your appointment.</p>
+        ${env.meetingUrl
+          ? `<p><strong>Join the call:</strong> <a href="${escHtml(env.meetingUrl)}">${escHtml(env.meetingUrl)}</a></p>
+        <p style="color: #666; font-size: 14px;">To change the time, reply to this email.</p>`
+          : `<p style="color: #666; font-size: 14px;">We will send the call link to this address before the call. To change the time, reply to this email.</p>`}
       </div>
     `,
   });
@@ -183,11 +196,11 @@ async function sendAppointmentNotification(userId, appointment) {
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h1 style="color: #00cc6a;">New Appointment Booked</h1>
         <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
-          <p><strong>Client:</strong> ${appointment.booker_name} (${appointment.booker_email})</p>
-          <p><strong>Date:</strong> ${notifDateStr}</p>
-          <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
-          <p><strong>Type:</strong> ${appointment.meeting_type}</p>
-          ${appointment.notes ? `<p><strong>Notes:</strong> ${appointment.notes}</p>` : ''}
+          <p><strong>Client:</strong> ${escHtml(appointment.booker_name)} (${escHtml(appointment.booker_email)})</p>
+          <p><strong>Company:</strong> ${escHtml(appointment.booker_company)}</p>
+          <p><strong>When:</strong> ${appointmentWhen(appointment)} (${notifDateStr})</p>
+          <p><strong>Their time zone:</strong> ${escHtml(appointment.timezone)}</p>
+          ${appointment.notes ? `<p><strong>Notes:</strong> ${escHtml(appointment.notes)}</p>` : ''}
         </div>
         <p><a href="${env.frontendUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Dashboard</a></p>
       </div>
@@ -227,15 +240,36 @@ async function sendWorkflowFailureAlert(email, firstName, workflowName, errorMes
   });
 }
 
-async function sendContactFormReceipt(email, name, subject) {
+// Sent to an address nobody has verified, so it repeats nothing the sender typed.
+async function sendContactFormReceipt(email) {
+  if (typeof email !== 'string') return; // an array here would become a recipient list
   return sendEmail({
     to: email,
-    subject: `We received your message: ${subject}`,
+    subject: 'We received your message',
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h1 style="color: #00cc6a;">Message Received</h1>
-        <p>Hi ${name}, thanks for reaching out! We've received your message about "${subject}" and will get back to you within 24 hours.</p>
+        <p>Thanks for reaching out! We've received your message and will get back to you within 24 hours.</p>
         <p>— The MonkFlow Team</p>
+      </div>
+    `,
+  });
+}
+
+// A message from the public /contact page, sent to the owner only.
+async function sendContactNotification({ name, email, subject, message }) {
+  const userModel = require('../models/user.model');
+  const owner = process.env.OWNER_NOTIFICATION_EMAIL
+    || (process.env.OWNER_USER_ID && (await userModel.findById(process.env.OWNER_USER_ID))?.email);
+  if (!owner) return;
+  return sendEmail({
+    to: owner,
+    subject: `Website message: ${String(subject).replace(/[\r\n]+/g, ' ').slice(0, 120)}`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <p><strong>From:</strong> ${escHtml(name)} (${escHtml(email)})</p>
+        <p><strong>Subject:</strong> ${escHtml(subject)}</p>
+        <p style="white-space: pre-wrap;">${escHtml(message)}</p>
       </div>
     `,
   });
@@ -243,6 +277,7 @@ async function sendContactFormReceipt(email, name, subject) {
 
 module.exports = {
   sendEmail,
+  sendContactNotification,
   sendWelcome,
   sendPasswordReset,
   sendPortalInvitation,

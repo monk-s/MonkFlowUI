@@ -110,24 +110,52 @@ MK.tfs = {
 };
 
 // Working demos built by MonkFlow. Synthetic data, no client names.
+// shot / alt: the screenshot in assets/shots (regenerate with scripts/screenshots.mjs).
+// clip: a short silent recording of the same name exists too (scripts/clips.mjs).
+// shortTitle / short: the one-line version shown on the homepage.
 MK.demoList = [
+  {
+    key: 'review',
+    vertical: 'banks',
+    label: 'Working demo · Document review',
+    title: 'Document review queue',
+    shortTitle: 'Reads a financial statement and flags what does not add up',
+    short: 'The software fills in every field from the document and marks the one figure that does not match the page. A person approves it before it is saved.',
+    body: 'A document comes in and every field is filled from it, each linked to the page it came from. Totals are checked against the lines above them, and anything that does not add up is flagged. A reviewer corrects, approves or rejects, and every action is logged.',
+    url: '/demo/bank/review',
+    cta: 'Open the demo',
+    shot: 'review-bank',
+    clip: true,
+    alt: 'Review screen: a personal financial statement on the left, the extracted figures on the right, one figure flagged as not matching the document.',
+  },
   {
     key: 'lending',
     vertical: 'banks',
     label: 'Working demo · Banking',
     title: 'Commercial loan document portal',
+    shortTitle: 'Collects loan documents from borrowers',
+    short: 'Each borrower gets one link showing what has arrived and what is still missing. The banker accepts or sends back each document.',
     body: 'Each borrower gets one link to a live checklist of what has arrived and what is missing. The personal financial statement and debt schedule are completed online and come back as clean PDFs. The banker accepts or returns each document and sends reminders listing exactly what is outstanding. Uploads are encrypted at rest.',
     url: 'https://lending.monkflow.io',
     cta: 'Open the demo',
+    shot: 'lending',
+    clip: true,
+    alt: 'Borrower checklist for a sample loan: 16 of 19 documents received, one sent back for revision.',
   },
   {
     key: 'land',
     vertical: 'cre',
     label: 'Working demo · Commercial real estate',
     title: 'Land search for brokers',
+    shortTitle: 'Finds land that fits a client request',
+    short: 'Type the request the way the client wrote it. Every parcel in the county is checked against public records and sorted into a shortlist.',
     body: 'Type a client\'s land request the way they wrote it. The tool sets the filters, checks every parcel in the search area against public county records, and sorts each one as a match, needs a look, or not available, with the owner, zoning and reason. One click produces a client-ready PDF with a numbered map and a page per parcel.',
     url: 'https://demo.monkflow.io',
     cta: 'Watch the walkthrough',
+    shot: 'land',
+    clip: true,
+    shotH: 1083,
+    alt: 'Map of matching land parcels with one selected, showing its acreage, zoning and owner from public records.',
   },
 ];
 
@@ -354,6 +382,13 @@ MK.verticals = {
 };
 
 MK.verticalOrder = ['cre', 'banks', 'funds'];
+
+// The picture shown for each firm type on /solutions (and on its own page when it has no demo).
+MK.verticalShots = {
+  cre: { shot: 'review-cre', alt: 'Review screen for a rent roll: the source document beside the extracted fields.' },
+  banks: { shot: 'lending', alt: 'Borrower checklist for a sample loan: 16 of 19 documents received.' },
+  funds: { shot: 'review-investment', alt: 'Review screen for an investor document: the source beside the extracted fields, with checks.' },
+};
 
 // Advisory-firm (RIA) page content. Kept because /for-advisors is linked
 // from existing outreach.

@@ -4,8 +4,12 @@ const { query } = require('../config/database');
 
 const submit = catchAsync(async (req, res) => {
   const { name, email, subject, message } = req.body;
-  if (!name || !email || !subject || !message) {
+  const fields = [name, email, subject, message];
+  if (!fields.every((f) => typeof f === 'string' && f.trim()) || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     throw ApiError.badRequest('All fields are required: name, email, subject, message');
+  }
+  if (name.length > 200 || email.length > 320 || subject.length > 300 || message.length > 5000) {
+    throw ApiError.badRequest('That message is too long');
   }
 
   const userId = req.user?.userId || null;
@@ -18,7 +22,8 @@ const submit = catchAsync(async (req, res) => {
   // Send receipt email
   try {
     const emailService = require('../services/email.service');
-    await emailService.sendContactFormReceipt(email, name, subject);
+    await emailService.sendContactFormReceipt(email);
+    await emailService.sendContactNotification({ name, email, subject, message });
   } catch (err) {
     console.error('Failed to send contact receipt:', err.message);
   }

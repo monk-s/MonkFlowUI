@@ -15,6 +15,8 @@ const env = {
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   googleServiceAccountKey: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '',
   googleCalendarId: process.env.GOOGLE_CALENDAR_ID || '',
+  // The standing video-call link (Google Meet or Zoom room) sent with every booking.
+  meetingUrl: /^https:\/\/\S+$/.test(process.env.MEETING_URL || '') ? process.env.MEETING_URL : '',
   ownerUserId: process.env.OWNER_USER_ID || '',
   serpApiKey: process.env.SERPAPI_KEY || '',
   leadgenEnabled: process.env.LEADGEN_ENABLED === 'true',

@@ -1315,3 +1315,35 @@ key dialog in a browser (its API is tested).
 - Bugs fixed: 1 LOW
 - Tests added: 18 API, 8 browser
 - Commits: 1
+
+## Session: 2026-11-18
+
+### Audit Findings
+- [HIGH] Booking offered times that had already passed, and the API accepted them — FIXED (server decides the window: next 3 working days, 2 hours' notice)
+- [HIGH] Company name dropped on every booking (`company` sent, `bookerCompany` expected) — FIXED
+- [HIGH] Google Calendar event used the visitor's time zone with Central clock times — FIXED (always America/Chicago)
+- [MEDIUM] Booking errors showed "[object Object]" (error body is an object) — FIXED
+- [MEDIUM] Public contact messages were stored but nobody was emailed — FIXED (owner notification)
+- [LOW] `.mk-facts` CSS is now unused on the homepage — logged
+
+### Improvements Made
+- Booking popup is one screen: day, time (visitor's time zone), four required fields
+- Homepage cut to headline, product screenshots, three demos, TFS result, one call to action
+- New /contact page; product screenshots from the demos (scripts/screenshots.mjs)
+
+### Follow-up, same day
+- Slots that clash with the owner's Google Calendar are no longer offered (free/busy lookup, cached a minute, fails open)
+- Call link: set MEETING_URL (https) on Railway and it goes in the confirmation email and the calendar event; without it the email still says the link will follow
+- /contact and /appointments/book limited to 5 submissions per 10 minutes per address
+- Demo clips (scripts/clips.mjs) on the homepage and demo cards, scroll-in motion, thumbnails on /solutions and the investment-firms page
+
+### Next Session Priority
+1. Set MEETING_URL on Railway
+2. Confirm GOOGLE_CALENDAR_ID is the calendar that holds classes and meetings
+3. `.mk-facts` CSS is unused
+
+### Metrics
+- Files modified: 14 (plus regenerated pages)
+- Bugs fixed: 5
+- Tests added: 3
+- Commits: 1

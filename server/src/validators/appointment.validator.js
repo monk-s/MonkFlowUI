@@ -4,12 +4,12 @@ const book = z.object({
   userId: z.string().uuid(),
   bookerName: z.string().min(1).max(200),
   bookerEmail: z.string().email(),
-  bookerCompany: z.string().max(200).optional(),
+  bookerCompany: z.string().trim().min(1).max(200),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   startTime: z.string().regex(/^\d{2}:\d{2}$/),
   endTime: z.string().regex(/^\d{2}:\d{2}$/),
   timezone: z.string().max(50).optional(),
-  notes: z.string().max(2000).optional(),
+  notes: z.string().trim().min(1).max(2000),
   meetingType: z.string().max(50).optional(),
 });
 

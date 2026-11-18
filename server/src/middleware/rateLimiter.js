@@ -92,4 +92,15 @@ const signInPerEmail = rateLimit({
   message: { error: { message: 'Too many attempts for this account. Wait 15 minutes, or reset your password.', details: { code: 'rate_limited', retryAfterSeconds: 900 } } },
 });
 
-module.exports = { sessionRead, signInAttempt, signInPerEmail, global, auth, agentExecute, webhook, clientErrorsGlobal, clientErrorsPerIp };
+// The two forms anyone can post to (contact, book a call). A person sends one
+// or two; this stops a script filling the inbox or the calendar.
+const publicForm = rateLimit({
+  skip,
+  windowMs: 10 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { message: 'Too many submissions. Please try again in a few minutes.' } },
+});
+
+module.exports = { publicForm, sessionRead, signInAttempt, signInPerEmail, global, auth, agentExecute, webhook, clientErrorsGlobal, clientErrorsPerIp };

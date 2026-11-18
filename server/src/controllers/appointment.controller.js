@@ -18,14 +18,22 @@ const list = catchAsync(async (req, res) => {
 
 const getAvailability = catchAsync(async (req, res) => {
   const { userId, date } = req.query;
-  if (!userId || !date) throw ApiError.badRequest('userId and date are required');
-  const slots = await appointmentService.getAvailableSlots(userId, date);
+  if (!userId) throw ApiError.badRequest('userId is required');
+  // No date: the whole booking window (the next bookable days) in one response.
+  const slots = date
+    ? await appointmentService.getAvailableSlots(userId, date)
+    : await appointmentService.getWindowSlots(userId);
   res.json({ data: slots });
 });
 
 const book = catchAsync(async (req, res) => {
   const data = req.validated;
   const confirmationToken = generateToken(16);
+
+  // Past times, times inside the notice period and days beyond the window.
+  if (!(await appointmentService.isBookable(data.userId, data.date, data.startTime, data.endTime))) {
+    throw ApiError.badRequest('That time is no longer available');
+  }
 
   const appointment = await appointmentModel.bookWithLock({
     ...data,
@@ -38,7 +46,7 @@ const book = catchAsync(async (req, res) => {
   try {
     const emailService = require('../services/email.service');
     console.log(`[Appointment] Sending confirmation email to ${data.bookerEmail}...`);
-    const confResult = await emailService.sendAppointmentConfirmation(data.bookerEmail, data.bookerName, appointment);
+    const confResult = await emailService.sendAppointmentConfirmation(data.bookerEmail, appointment);
     console.log(`[Appointment] Confirmation email result:`, JSON.stringify(confResult));
     console.log(`[Appointment] Sending notification email for user ${data.userId}...`);
     const notifResult = await emailService.sendAppointmentNotification(data.userId, appointment);
@@ -54,7 +62,7 @@ const book = catchAsync(async (req, res) => {
       ...appointment,
       booker_name: data.bookerName,
       booker_email: data.bookerEmail,
-      company: data.company,
+      company: data.bookerCompany,
       notes: data.notes,
       meeting_type: data.meetingType,
     });
