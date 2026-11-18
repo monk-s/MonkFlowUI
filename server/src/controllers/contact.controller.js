@@ -18,7 +18,7 @@ const submit = catchAsync(async (req, res) => {
   // Send receipt email
   try {
     const emailService = require('../services/email.service');
-    await emailService.sendContactFormReceipt(email, name, subject);
+    await emailService.sendContactFormReceipt(email);
   } catch (err) {
     console.error('Failed to send contact receipt:', err.message);
   }
