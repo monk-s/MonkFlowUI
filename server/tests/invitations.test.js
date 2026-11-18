@@ -197,5 +197,7 @@ describe('sending invitations', () => {
     const org = await h.createOrg();
     const client = await h.member(org, 'admin');
     expect((await h.api().get('/api/v1/admin/organizations').set('Cookie', client.cookie)).status).toBe(403);
+    // Nor the legacy team invite, which would email any address they name.
+    expect((await h.api().post('/api/v1/team/invite').set('Cookie', client.cookie).send({ email: 'victim@example.test' })).status).toBe(403);
   });
 });

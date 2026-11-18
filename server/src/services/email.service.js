@@ -203,7 +203,7 @@ async function sendTeamInvite(email, name, inviteToken) {
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h1 style="color: #00cc6a;">Team Invitation</h1>
-        <p>Hi${name ? ` ${name}` : ''}, you've been invited to join a MonkFlow team.</p>
+        <p>Hi${name ? ` ${escHtml(name)}` : ''}, you've been invited to join a MonkFlow team.</p>
         <p><a href="${inviteUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
       </div>
     `,
