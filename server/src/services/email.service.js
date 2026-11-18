@@ -147,21 +147,31 @@ function formatAppointmentDate(d) {
   return d;
 }
 
+// "Thursday, November 19 at 3:00 PM EST". Stored times are Central; `zone` only
+// picks how the instant is shown, and an unknown zone falls back to Central.
+function appointmentWhen(appointment, zone) {
+  const { centralToInstant, TZ } = require('./appointment.service');
+  const instant = centralToInstant(formatAppointmentDate(appointment.date), String(appointment.start_time).slice(0, 5));
+  const fmt = (timeZone) => new Intl.DateTimeFormat('en-US', {
+    timeZone, weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+  }).format(instant);
+  try { return fmt(zone || TZ); } catch { return fmt(TZ); }
+}
+
 // Sent to an address nobody has verified, so it repeats nothing the booker typed.
 async function sendAppointmentConfirmation(email, appointment) {
-  const dateStr = formatAppointmentDate(appointment.date);
+  const when = appointmentWhen(appointment, appointment.timezone);
   return sendEmail({
     to: email,
-    subject: `Appointment Confirmed — ${dateStr}`,
+    subject: 'Your call with MonkFlow is confirmed',
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-        <h1 style="color: #00cc6a;">Appointment Confirmed</h1>
-        <p>Hi, your appointment has been confirmed.</p>
+        <h1 style="color: #1f3a5f;">Call confirmed</h1>
+        <p>Hi, your 30-minute call with MonkFlow is confirmed.</p>
         <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
-          <p><strong>Date:</strong> ${dateStr}</p>
-          <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
+          <p><strong>When:</strong> ${when}</p>
         </div>
-        <p style="color: #666; font-size: 14px;">You'll receive a reminder before your appointment.</p>
+        <p style="color: #666; font-size: 14px;">We will send the call link to this address before the call. To change the time, reply to this email.</p>
       </div>
     `,
   });
@@ -184,9 +194,9 @@ async function sendAppointmentNotification(userId, appointment) {
         <h1 style="color: #00cc6a;">New Appointment Booked</h1>
         <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
           <p><strong>Client:</strong> ${escHtml(appointment.booker_name)} (${escHtml(appointment.booker_email)})</p>
-          <p><strong>Date:</strong> ${notifDateStr}</p>
-          <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
-          <p><strong>Type:</strong> ${escHtml(appointment.meeting_type)}</p>
+          <p><strong>Company:</strong> ${escHtml(appointment.booker_company)}</p>
+          <p><strong>When:</strong> ${appointmentWhen(appointment)} (${notifDateStr})</p>
+          <p><strong>Their time zone:</strong> ${escHtml(appointment.timezone)}</p>
           ${appointment.notes ? `<p><strong>Notes:</strong> ${escHtml(appointment.notes)}</p>` : ''}
         </div>
         <p><a href="${env.frontendUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Dashboard</a></p>
@@ -243,8 +253,28 @@ async function sendContactFormReceipt(email) {
   });
 }
 
+// A message from the public /contact page, sent to the owner only.
+async function sendContactNotification({ name, email, subject, message }) {
+  const userModel = require('../models/user.model');
+  const owner = process.env.OWNER_NOTIFICATION_EMAIL
+    || (process.env.OWNER_USER_ID && (await userModel.findById(process.env.OWNER_USER_ID))?.email);
+  if (!owner) return;
+  return sendEmail({
+    to: owner,
+    subject: `Website message: ${String(subject).replace(/[\r\n]+/g, ' ').slice(0, 120)}`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <p><strong>From:</strong> ${escHtml(name)} (${escHtml(email)})</p>
+        <p><strong>Subject:</strong> ${escHtml(subject)}</p>
+        <p style="white-space: pre-wrap;">${escHtml(message)}</p>
+      </div>
+    `,
+  });
+}
+
 module.exports = {
   sendEmail,
+  sendContactNotification,
   sendWelcome,
   sendPasswordReset,
   sendPortalInvitation,
