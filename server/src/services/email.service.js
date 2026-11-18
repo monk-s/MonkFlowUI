@@ -147,7 +147,8 @@ function formatAppointmentDate(d) {
   return d;
 }
 
-async function sendAppointmentConfirmation(email, bookerName, appointment) {
+// Sent to an address nobody has verified, so it repeats nothing the booker typed.
+async function sendAppointmentConfirmation(email, appointment) {
   const dateStr = formatAppointmentDate(appointment.date);
   return sendEmail({
     to: email,
@@ -155,11 +156,10 @@ async function sendAppointmentConfirmation(email, bookerName, appointment) {
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h1 style="color: #00cc6a;">Appointment Confirmed</h1>
-        <p>Hi ${bookerName}, your appointment has been confirmed.</p>
+        <p>Hi, your appointment has been confirmed.</p>
         <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
           <p><strong>Date:</strong> ${dateStr}</p>
           <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
-          <p><strong>Type:</strong> ${appointment.meeting_type}</p>
         </div>
         <p style="color: #666; font-size: 14px;">You'll receive a reminder before your appointment.</p>
       </div>
@@ -183,11 +183,11 @@ async function sendAppointmentNotification(userId, appointment) {
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h1 style="color: #00cc6a;">New Appointment Booked</h1>
         <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
-          <p><strong>Client:</strong> ${appointment.booker_name} (${appointment.booker_email})</p>
+          <p><strong>Client:</strong> ${escHtml(appointment.booker_name)} (${escHtml(appointment.booker_email)})</p>
           <p><strong>Date:</strong> ${notifDateStr}</p>
           <p><strong>Time:</strong> ${appointment.start_time} - ${appointment.end_time}</p>
-          <p><strong>Type:</strong> ${appointment.meeting_type}</p>
-          ${appointment.notes ? `<p><strong>Notes:</strong> ${appointment.notes}</p>` : ''}
+          <p><strong>Type:</strong> ${escHtml(appointment.meeting_type)}</p>
+          ${appointment.notes ? `<p><strong>Notes:</strong> ${escHtml(appointment.notes)}</p>` : ''}
         </div>
         <p><a href="${env.frontendUrl}" style="background: #00cc6a; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Dashboard</a></p>
       </div>
@@ -227,14 +227,16 @@ async function sendWorkflowFailureAlert(email, firstName, workflowName, errorMes
   });
 }
 
-async function sendContactFormReceipt(email, name, subject) {
+// Sent to an address nobody has verified, so it repeats nothing the sender typed.
+async function sendContactFormReceipt(email) {
+  if (typeof email !== 'string') return; // an array here would become a recipient list
   return sendEmail({
     to: email,
-    subject: `We received your message: ${subject}`,
+    subject: 'We received your message',
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h1 style="color: #00cc6a;">Message Received</h1>
-        <p>Hi ${name}, thanks for reaching out! We've received your message about "${subject}" and will get back to you within 24 hours.</p>
+        <p>Thanks for reaching out! We've received your message and will get back to you within 24 hours.</p>
         <p>— The MonkFlow Team</p>
       </div>
     `,

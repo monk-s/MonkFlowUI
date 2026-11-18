@@ -8,14 +8,41 @@ const invoiceService = require('../services/invoice.service');
 const { query } = require('../config/database');
 const env = require('../config/env');
 
+// The OAuth state names the account to bind, so it is signed and short-lived:
+// "<issued ms>.<userId>.<hmac>". The key is derived from JWT_SECRET and used for
+// nothing else, and the state is not a JWT, so it can never pass as a Bearer login.
+const STATE_TTL_MS = 30 * 60 * 1000;
+function stateMac(body) {
+  if (!env.jwtSecret) throw new Error('JWT_SECRET is required to sign the QuickBooks state');
+  const key = crypto.createHmac('sha256', env.jwtSecret).update('qbo-oauth-state-key').digest();
+  return crypto.createHmac('sha256', key).update(body).digest('hex');
+}
+function signState(userId, now = Date.now()) {
+  const body = `${now}.${userId}`;
+  return `${body}.${stateMac(body)}`;
+}
+function userIdFromState(state, now = Date.now()) {
+  if (typeof state !== 'string') return null;
+  const parts = state.split('.');
+  if (parts.length !== 3) return null;
+  const [issued, userId, mac] = parts;
+  const given = Buffer.from(mac);
+  const expected = Buffer.from(stateMac(`${issued}.${userId}`));
+  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return null;
+  const age = now - Number(issued);
+  return age >= 0 && age <= STATE_TTL_MS ? userId : null;
+}
+
 const getAuthUrl = catchAsync(async (req, res) => {
-  const url = qboService.getAuthUrl(req.user.userId);
+  const url = qboService.getAuthUrl(signState(req.user.userId));
   res.json({ data: { url } });
 });
 
 const handleCallback = catchAsync(async (req, res) => {
   const { code, realmId, state } = req.query;
   if (!code || !realmId) throw ApiError.badRequest('Missing code or realmId from Intuit');
+  const userId = userIdFromState(state);
+  if (!userId) throw ApiError.badRequest('This QuickBooks connection link is invalid or has expired. Start the connection again from MonkFlow.');
 
   const tokens = await qboService.exchangeCode(code, realmId);
   const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000);
@@ -26,10 +53,6 @@ const handleCallback = catchAsync(async (req, res) => {
     const info = await qboService.getCompanyInfo(tokens.accessToken, realmId);
     companyName = info.CompanyName;
   } catch (e) { /* non-critical */ }
-
-  // The state param contains the userId
-  const userId = state || (req.user && req.user.userId);
-  if (!userId) throw ApiError.badRequest('Could not determine user for QBO connection');
 
   await qboModel.upsertConnection(userId, {
     realmId,
@@ -215,6 +238,8 @@ const handleWebhook = catchAsync(async (req, res) => {
 });
 
 module.exports = {
+  signState,
+  userIdFromState,
   getAuthUrl, handleCallback, getConnectionStatus,
   syncCustomer, syncAllCustomers,
   generateInvoice, sendInvoice, handleWebhook,

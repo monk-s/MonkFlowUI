@@ -38,7 +38,7 @@ const book = catchAsync(async (req, res) => {
   try {
     const emailService = require('../services/email.service');
     console.log(`[Appointment] Sending confirmation email to ${data.bookerEmail}...`);
-    const confResult = await emailService.sendAppointmentConfirmation(data.bookerEmail, data.bookerName, appointment);
+    const confResult = await emailService.sendAppointmentConfirmation(data.bookerEmail, appointment);
     console.log(`[Appointment] Confirmation email result:`, JSON.stringify(confResult));
     console.log(`[Appointment] Sending notification email for user ${data.userId}...`);
     const notifResult = await emailService.sendAppointmentNotification(data.userId, appointment);
