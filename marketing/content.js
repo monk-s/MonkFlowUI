@@ -10,8 +10,8 @@
    - No prices and no "fixed-fee" language anywhere. Engagements are scoped
      individually.
    - Security claims are limited to what is true today: AES-256 at rest,
-     TLS in transit, no client PII persisted on MonkFlow infrastructure,
-     private deployment and zero-retention model options. Do NOT claim
+     TLS in transit, client documents kept only as long as the client
+     sets (encrypted, then deleted), private deployment and zero-retention model options. Do NOT claim
      cyber liability insurance, a DPA on file, or any certification.
    - Listing a vendor system means "we build around it". Only mark a system
      `live: true` when it is running in production for a real client.
@@ -216,7 +216,7 @@ MK.verticals = {
     roi: { unit: 'Deals screened per month', volume: 20, minutes: 180, minutesLabel: 'Minutes of data entry and assembly per deal', rate: 85 },
     proof: { demo: 'land', note: 'Our named client work is in wealth management. For commercial real estate, here is working software you can look at, and the same intake-to-system-of-record pattern running in production at a financial firm.' },
     security: [
-      'Deal documents and investor records stay in your systems. We do not keep a copy of investor PII on MonkFlow infrastructure.',
+      'Deal documents stay in your systems wherever you want them to. Where our review portal is used, source files are encrypted at rest and deleted on a retention date you set.',
       'Role-based access, so a broker, an analyst and an LP each see only what they should.',
       'Every extraction, edit and approval is logged with who and when.',
     ],
@@ -286,14 +286,14 @@ MK.verticals = {
     roi: { unit: 'Commercial loan files per month', volume: 30, minutes: 240, minutesLabel: 'Minutes of document chasing, spreading and memo assembly per file', rate: 95 },
     proof: { demo: 'lending', note: 'Our named client work is in wealth management. For banking, we built a working commercial loan document portal you can open right now.' },
     security: [
-      'Borrower and customer data stays in your systems. We do not keep a copy of customer PII on MonkFlow infrastructure.',
+      'Borrower and customer data stays in your systems wherever you want it to. Where our review portal is used, source files are encrypted at rest and deleted on a retention date you set.',
       'Deployment inside your own cloud environment is available, so data never leaves your perimeter.',
       'AES-256 encryption at rest and TLS in transit, role-based access for lenders, credit and operations, and an event log of every upload, download and decision.',
       'We complete your vendor due-diligence questionnaire and walk your information security team through the architecture before any data moves.',
     ],
     faq: [
       { q: 'Do you replace our core or loan origination system?', a: 'No. We build the layer around them: the borrower-facing portal, the extraction and review step, and the integration that puts approved data where it belongs.' },
-      { q: 'Where does borrower data live?', a: 'In your systems. What we build can be deployed inside your own cloud environment. Files are encrypted at rest with AES-256, and we do not keep a copy of customer PII on MonkFlow infrastructure.' },
+      { q: 'Where does borrower data live?', a: 'In your systems. What we build can be deployed inside your own cloud environment. If you use our review portal, source files are encrypted at rest with AES-256 and deleted on a retention date you set; the figures you reviewed stay in the portal as part of your audit trail.' },
       { q: 'How is AI used in credit work?', a: 'For reading and drafting only: pulling figures out of returns and statements, and producing a first draft of a memo in your format. Calculations are deterministic, every figure links to its source page, and a credit analyst reviews and approves the result. Models can run in your own cloud or under zero-retention configurations.' },
       { q: 'Have you worked with banks before?', a: 'Our named client work so far is in wealth management, with Team Financial Strategies. For banking we have built a working commercial loan document portal with encrypted uploads, online financial forms and a banker dashboard, which you can try today.' },
       { q: 'What does an engagement cost?', a: 'It depends on the workflow, the systems involved and your deployment requirements. Every engagement is scoped individually, and you see a written scope and quote before any build work starts.' },
@@ -360,7 +360,7 @@ MK.verticals = {
     roi: { unit: 'Investor onboardings and reports per month', volume: 15, minutes: 120, minutesLabel: 'Minutes of collection, re-typing and assembly for each', rate: 90 },
     proof: { demo: null, note: 'This is the vertical where our named client work sits.' },
     security: [
-      'Investor and client records stay in your systems. We do not keep a copy of investor PII on MonkFlow infrastructure.',
+      'Investor and client records stay in your systems wherever you want them to. Where our review portal is used, source files are encrypted at rest and deleted on a retention date you set.',
       'Role-based access for investor relations, finance, compliance and outside investors.',
       'A complete audit trail of every submission, sync, signature and approval.',
       'Private deployment and zero-retention model configurations for anything that touches AI.',
