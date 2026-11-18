@@ -25,7 +25,7 @@ const withPortal = !process.argv.includes('--no-portal');
 const PUBLIC = [
   'index.html', 'shell.html', 'app.js', 'styles.css',
   'logo.svg', 'logo-mark.svg', 'robots.txt', 'sitemap.xml',
-  'assets', 'marketing',
+  'assets', 'marketing', 'data',
   // Prerendered public pages (scripts/prerender.mjs).
   'solutions', 'case-studies', 'for-advisors', 'capabilities', 'how-we-work', 'security', 'tools', 'contact',
 ];
