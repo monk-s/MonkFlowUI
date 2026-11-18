@@ -1088,8 +1088,8 @@ function renderNotificationPanel() {
         <div class="notification-item ${n.read ? '' : 'unread'}" onclick="event.stopPropagation();markNotificationRead(${n.id})">
           <div class="notification-icon ${n.type}">${icons[n.icon] || icons.bell}</div>
           <div class="notification-content">
-            <div class="notification-title">${n.title}</div>
-            <div class="notification-message">${n.message}</div>
+            <div class="notification-title">${escapeHtml(n.title)}</div>
+            <div class="notification-message">${escapeHtml(n.message)}</div>
             <div class="notification-time">${n.time}</div>
           </div>
           ${!n.read ? '<div class="notification-unread-dot"></div>' : ''}
@@ -1510,7 +1510,7 @@ function renderProjects() {
                 <div style="font-weight:600;">${p.name}</div>
                 <div style="font-size:11px;color:var(--text-tertiary);">${p.description || ''}</div>
               </td>
-              ${isOwner ? `<td style="font-size:13px;">${p.client_first_name || ''} ${p.client_last_name || ''}<br/><span style="color:var(--text-tertiary);font-size:11px;">${p.client_email || ''}</span></td>` : ''}
+              ${isOwner ? `<td style="font-size:13px;">${escapeHtml(p.client_first_name || '')} ${escapeHtml(p.client_last_name || '')}<br/><span style="color:var(--text-tertiary);font-size:11px;">${escapeHtml(p.client_email || '')}</span></td>` : ''}
               <td>
                 <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:12px;background:${statusColors[p.status] || '#666'}22;color:${statusColors[p.status] || '#666'};font-weight:500;font-size:12px;">
                   <span style="width:6px;height:6px;border-radius:50%;background:${statusColors[p.status] || '#666'}"></span>
@@ -6437,14 +6437,14 @@ function renderAdminDashboard() {
       <tr style="cursor:pointer;" onclick="loadAdminAccountDetail('${account.id}')">
         <td>
           <div style="display:flex;align-items:center;gap:10px;">
-            <div class="avatar" style="width:32px;height:32px;font-size:11px;">${(account.first_name?.[0] || '').toUpperCase()}${(account.last_name?.[0] || '').toUpperCase()}</div>
+            <div class="avatar" style="width:32px;height:32px;font-size:11px;">${escapeHtml((account.first_name?.[0] || '').toUpperCase())}${escapeHtml((account.last_name?.[0] || '').toUpperCase())}</div>
             <div>
-              <div style="font-weight:500;">${account.first_name || ''} ${account.last_name || ''}</div>
+              <div style="font-weight:500;">${escapeHtml(account.first_name || '')} ${escapeHtml(account.last_name || '')}</div>
             </div>
           </div>
         </td>
-        <td style="font-size:12px;color:var(--text-secondary);">${account.email || ''}</td>
-        <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${roleBadgeColor}22;color:${roleBadgeColor};">${account.role || 'user'}</span></td>
+        <td style="font-size:12px;color:var(--text-secondary);">${escapeHtml(account.email || '')}</td>
+        <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${roleBadgeColor}22;color:${roleBadgeColor};">${escapeHtml(account.role || 'user')}</span></td>
         <td>${account.workflow_count ?? 0}</td>
         <td>${account.agent_count ?? 0}</td>
         <td>${account.runs_30d ?? 0}</td>
@@ -6700,8 +6700,8 @@ function renderAdminAccountDetail() {
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
           <button class="btn btn-ghost btn-sm" onclick="navigateTo('admin')">${icons.arrowLeft} Back to Admin</button>
         </div>
-        <h1 style="margin:0;">${user.first_name || ''} ${user.last_name || ''}</h1>
-        <p class="page-desc">${user.email || ''} &mdash; ${user.role || 'user'}</p>
+        <h1 style="margin:0;">${escapeHtml(user.first_name || '')} ${escapeHtml(user.last_name || '')}</h1>
+        <p class="page-desc">${escapeHtml(user.email || '')} &mdash; ${escapeHtml(user.role || 'user')}</p>
       </div>
     </div>
 

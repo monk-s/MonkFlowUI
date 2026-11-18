@@ -142,8 +142,9 @@ async function sendMessage({ chatId, providerId, text }) {
 // Unipile signs webhooks with HMAC-SHA256 of the raw body using a shared secret.
 function verifyWebhookSignature(rawBody, signatureHeader) {
   if (!env.unipileWebhookSecret) {
-    logger.warn('[unipile] webhook secret not configured — accepting unverified payload');
-    return true;
+    // Fail closed: with no secret nothing can be verified, so nothing is accepted.
+    logger.warn('[unipile] webhook secret not configured — rejecting webhook');
+    return false;
   }
   if (!signatureHeader) return false;
   const crypto = require('crypto');
