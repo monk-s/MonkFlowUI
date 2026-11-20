@@ -68,9 +68,9 @@ describe('password sign-in', () => {
     expect(done.body.session.permissions).not.toContain('team.manage');
   });
 
-  test('the session cookie also authenticates the older API routes', async () => {
-    const org = await h.createOrg();
-    const { user, cookie } = await h.member(org, 'admin');
+  test('the session cookie also authenticates the older API routes, for staff', async () => {
+    const user = await h.createUser({ platformAdmin: true, mfaEnrolled: true });
+    const cookie = await h.cookieFor(user, null);
     const res = await h.api().get('/api/v1/users/me').set('Cookie', cookie);
     expect(res.status).toBe(200);
     expect(res.body.user.email).toBe(user.email);
@@ -258,8 +258,8 @@ describe('cross-site requests', () => {
   });
 
   test('the older API routes refuse a cross-site write made with the session cookie', async () => {
-    const org = await h.createOrg();
-    const { user, cookie } = await h.member(org, 'admin');
+    const user = await h.createUser({ platformAdmin: true, mfaEnrolled: true });
+    const cookie = await h.cookieFor(user, null);
     const forged = await h.api().patch('/api/v1/users/me').set('Cookie', cookie).set('Origin', 'https://evil.example').send({ firstName: 'Mallory' });
     expect(forged.status).toBe(403);
     expect(h.code(forged)).toBe('bad_origin');
