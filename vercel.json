@@ -3,24 +3,90 @@
   "buildCommand": "node scripts/build-site.mjs",
   "outputDirectory": "dist",
   "redirects": [
-    { "source": "/sprint", "destination": "/", "permanent": true },
-    { "source": "/sprint.html", "destination": "/", "permanent": true },
-    { "source": "/login", "destination": "/sign-in", "permanent": false },
-    { "source": "/join", "destination": "/sign-in", "permanent": false }
+    {
+      "source": "/sprint",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/sprint.html",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/login",
+      "destination": "/sign-in",
+      "permanent": false
+    },
+    {
+      "source": "/join",
+      "destination": "/sign-in",
+      "permanent": false
+    }
   ],
   "headers": [
     {
       "source": "/portal/assets/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
       ]
     },
     {
-      "source": "/(sign-in|invite|auth|select-workspace|dashboard|demo|admin)(.*)",
+      "source": "/(sign-in|invite|auth|select-workspace|dashboard|demo)(.*)",
       "headers": [
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "no-referrer" }
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        }
+      ]
+    },
+    {
+      "source": "/admin(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://plausible.io; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; media-src 'self'; connect-src 'self' https://plausible.io; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        }
+      ]
+    },
+    {
+      "source": "/((?!sign-in|invite|auth|select-workspace|dashboard|demo|admin|api/|portal/).*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://plausible.io; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; media-src 'self'; connect-src 'self' https://plausible.io; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        }
       ]
     }
   ],
@@ -29,12 +95,30 @@
       "source": "/api/:path*",
       "destination": "https://resourceful-abundance-production.up.railway.app/api/:path*"
     },
-    { "source": "/sign-in", "destination": "/portal/index.html" },
-    { "source": "/select-workspace", "destination": "/portal/index.html" },
-    { "source": "/invite/:path*", "destination": "/portal/index.html" },
-    { "source": "/auth/:path*", "destination": "/portal/index.html" },
-    { "source": "/dashboard/:path*", "destination": "/portal/index.html" },
-    { "source": "/demo/:path*", "destination": "/portal/index.html" },
+    {
+      "source": "/sign-in",
+      "destination": "/portal/index.html"
+    },
+    {
+      "source": "/select-workspace",
+      "destination": "/portal/index.html"
+    },
+    {
+      "source": "/invite/:path*",
+      "destination": "/portal/index.html"
+    },
+    {
+      "source": "/auth/:path*",
+      "destination": "/portal/index.html"
+    },
+    {
+      "source": "/dashboard/:path*",
+      "destination": "/portal/index.html"
+    },
+    {
+      "source": "/demo/:path*",
+      "destination": "/portal/index.html"
+    },
     {
       "source": "/(.*)",
       "destination": "/shell.html"

@@ -70,28 +70,32 @@ app.get('/api/v1/health', async (req, res) => {
 });
 
 // Routes
+// The pre-portal API serves the staff console at /admin and nothing else.
+// Client workspaces use /api/v1/portal, so a client sign-in is refused here
+// whatever an individual route forgets to check.
+const staffOnly = [require('./middleware/auth').authenticate, require('./middleware/requireSuperadmin')];
 app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/users', userRoutes);
-app.use('/api/v1/workflows', workflowRoutes);
+app.use('/api/v1/users', staffOnly, userRoutes);
+app.use('/api/v1/workflows', staffOnly, workflowRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
-app.use('/api/v1/agents', agentRoutes);
+app.use('/api/v1/agents', staffOnly, agentRoutes);
 app.use('/api/v1/appointments', appointmentRoutes);
-app.use('/api/v1/notifications', notificationRoutes);
-app.use('/api/v1/logs', logRoutes);
-app.use('/api/v1/settings', settingsRoutes);
-app.use('/api/v1/api-keys', apiKeyRoutes);
-app.use('/api/v1/team', teamRoutes);
+app.use('/api/v1/notifications', staffOnly, notificationRoutes);
+app.use('/api/v1/logs', staffOnly, logRoutes);
+app.use('/api/v1/settings', staffOnly, settingsRoutes);
+app.use('/api/v1/api-keys', staffOnly, apiKeyRoutes);
+app.use('/api/v1/team', staffOnly, teamRoutes);
 app.use('/api/v1/contact', contactRoutes);
-app.use('/api/v1/dashboard', dashboardRoutes);
+app.use('/api/v1/dashboard', staffOnly, dashboardRoutes);
 app.use('/api/v1/projects', projectRoutes);
 app.use('/api/v1/leadgen', leadgenRoutes);
 app.use('/api/v1/admin', adminRoutes);
-app.use('/api/v1/plans', planRoutes);
+app.use('/api/v1/plans', staffOnly, planRoutes);
 app.use('/api/v1/quickbooks', quickbooksRoutes);
 app.use('/api/v1/billing', billingRoutes);
 app.use('/api/v1/outreach', outreachRoutes);
 app.use('/api/v1/stonkbot', stonkbotRoutes);
-app.use('/api/v1/integrations', integrationRoutes);
+app.use('/api/v1/integrations', staffOnly, integrationRoutes);
 app.use('/api/v1/client-errors', clientErrorRoutes);
 app.use('/api/v1/linkedin', linkedinRoutes);
 app.use('/api/v1/portal', portalRoutes);

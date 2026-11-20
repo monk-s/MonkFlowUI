@@ -88,6 +88,20 @@ test.describe('routing, as vercel.json defines it', () => {
     expect((await request.get('/')).headers()['x-frame-options']).toBeUndefined();
   });
 
+  test('every page sends a content security policy, and the portal allows no inline script', async ({ request }) => {
+    for (const url of ['/sign-in', '/dashboard', '/demo/cre/review']) {
+      const csp = (await request.get(url)).headers()['content-security-policy'] ?? '';
+      expect(csp, url).toContain("script-src 'self';");
+      expect(csp, url).toContain("frame-ancestors 'none'");
+    }
+    // The public site and /admin still use inline handlers, so theirs is looser.
+    for (const url of ['/', '/contact', '/admin']) {
+      const csp = (await request.get(url)).headers()['content-security-policy'] ?? '';
+      expect(csp, url).toContain("object-src 'none'");
+      expect(csp, url).toContain("frame-ancestors 'none'");
+    }
+  });
+
   test('the demo opens on a deep link in the built site, without signing in', async ({ page }) => {
     await page.goto('/demo/bank/review');
     await expect(page.getByRole('status').filter({ hasText: 'Demo workspace' })).toBeVisible();

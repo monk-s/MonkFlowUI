@@ -1347,3 +1347,22 @@ key dialog in a browser (its API is tested).
 - Bugs fixed: 5
 - Tests added: 3
 - Commits: 1
+
+## Session: 2026-11-19 (portal hardening, phase 1)
+
+### Audit Findings
+- [HIGH] Eleven pre-portal route groups (users, workflows, agents, notifications, logs, settings, api-keys, team, dashboard, plans, integrations) accepted any signed-in client — FIXED: staff only, enforced at the mount in app.js
+- [HIGH] Built-in sign-in has no second factor in production (identity/local.js `mfa: false`); only the test stub has one — OPEN, next pull request
+- [MEDIUM] Integration credentials stored as plain JSON — FIXED for new writes (sealed with secretBox); existing rows need `server/scripts/seal-integrations.js --apply`
+- [MEDIUM] No Content-Security-Policy on any page — FIXED (strict on portal paths, looser on the public site and /admin)
+
+### Next Session Priority
+1. TOTP second factor for the built-in identity provider
+2. Run seal-integrations.js against production
+3. Phase 2: audit log screen
+
+### Metrics
+- Files modified: 8
+- Bugs fixed: 3
+- Tests added: 4
+- Commits: 1
