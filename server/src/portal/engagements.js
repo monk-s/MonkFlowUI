@@ -28,6 +28,7 @@ const milestoneView = (m) => ({
 const actionItemView = (a) => ({
   id: a.id, kind: a.kind, title: a.title, detail: a.detail, dueOn: day(a.due_on), status: a.status,
   engagementId: a.engagement_id, completedByName: a.completed_by_name, completedAt: a.completed_at, createdAt: a.created_at,
+  origin: a.origin, requestedByName: a.requested_by_name, reply: a.reply,
 });
 
 /**

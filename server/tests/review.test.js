@@ -108,8 +108,9 @@ describe('ingest', () => {
     expect(h.code(await ingest(rentRoll({ document: { filename: 'x.exe', contentBase64: Buffer.from('MZ not a pdf').toString('base64') } })))).toBe('invalid_input');
     const theirs = await h.createWorkflow(other, admin.user);
     expect(h.code(await ingest(rentRoll({ workflowId: theirs.id })))).toBe('invalid_input');
-    expect((await h.db.query('SELECT count(*)::int AS n FROM review_items')).rows[0].n).toBe(0);
-    expect((await h.db.query('SELECT count(*)::int AS n FROM documents')).rows[0].n).toBe(0);
+    const mine = [[org.id, other.id]];
+    expect((await h.db.query('SELECT count(*)::int AS n FROM review_items WHERE org_id = ANY($1)', mine)).rows[0].n).toBe(0);
+    expect((await h.db.query('SELECT count(*)::int AS n FROM documents WHERE org_id = ANY($1)', mine)).rows[0].n).toBe(0);
   });
 
   test('a document arrives once, encrypted, and is logged as the pipeline', async () => {

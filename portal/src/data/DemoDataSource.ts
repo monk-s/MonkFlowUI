@@ -7,9 +7,10 @@
 import { ApiError } from '../lib/api';
 import type {
   ActionItem, ActivityEntry, DayCount, Engagement, HoursSaved, PeriodDays, ReviewItem, ReviewList, ReviewStatus, ReviewSummary, Run, RunTotals, Session,
-  SyntheticPage, Team, Telemetry, WorkflowDetail, WorkflowRow, WorkflowSummary, AuditEntry, AuditFilter, AuditPage,
+  SyntheticPage, Team, Telemetry, WorkflowDetail, WorkflowRow, WorkflowSummary, AuditEntry, AuditFilter, AuditPage, Connection, PortalRequest, Requests, VaultDocument,
 } from '../lib/types';
 import { runChecks, TEMPLATES } from '../demo/checks';
+import { verticalPack } from '../verticals';
 import { EXAMPLE_WORKSPACES, exampleEngagement, rng, type ExampleWorkspace } from '../demo/fixtures';
 import type { PortalDataSource, WorkspaceSettings } from './PortalDataSource';
 
@@ -21,7 +22,7 @@ const DAY = 864e5;
 const ymd = (t: number) => new Date(t).toISOString().slice(0, 10);
 
 type StoredItem = Omit<ReviewItem, keyof ReturnType<typeof derive>> & { pages: SyntheticPage[] };
-interface State { actions: ActionItem[]; engagement: Engagement; activity: ActivityEntry[]; review: StoredItem[] }
+interface State { actions: ActionItem[]; engagement: Engagement; activity: ActivityEntry[]; review: StoredItem[]; requests?: PortalRequest[] }
 
 /** Everything about an item that follows from its fields. Same rules as server/src/portal/review.js. */
 function derive(item: Pick<ReviewItem, 'template' | 'fields' | 'status'>) {
@@ -108,6 +109,54 @@ export class DemoDataSource implements PortalDataSource {
         ],
       })),
     };
+  }
+
+  // ── Requests, Vault, Integrations ──
+  async getRequests(): Promise<Requests> {
+    const now = Date.now();
+    const example: PortalRequest = {
+      id: 'req-0', title: 'Add the reviewer\'s initials to the export', detail: 'Our file checklist has a column for it.', status: 'done',
+      createdAt: new Date(now - 9 * DAY).toISOString(), dueOn: null, requestedByName: 'Priya Raman',
+      reply: 'Done. It is the last column of the export from this week\'s run.', closedByName: 'MonkFlow', closedAt: new Date(now - 7 * DAY).toISOString(),
+    };
+    return {
+      sent: [...(this.state.requests ?? []), example],
+      received: this.state.actions.filter((a) => a.kind !== 'signoff').map((a) => ({
+        id: a.id, title: a.title, detail: a.detail, status: 'open' as const, createdAt: new Date(now - 2 * DAY).toISOString(), dueOn: a.dueOn,
+        requestedByName: null, reply: null, closedByName: null, closedAt: null,
+      })),
+      canCreate: true,
+    };
+  }
+  async createRequest(input: { title: string; detail: string }) {
+    (this.state.requests ??= []).unshift({
+      id: `req-${Date.now()}`, title: input.title, detail: input.detail || null, status: 'open', createdAt: new Date().toISOString(), dueOn: null,
+      requestedByName: YOU, reply: null, closedByName: null, closedAt: null,
+    });
+    this.log('request.created', input.title);
+    this.save();
+  }
+  async withdrawRequest(id: string) {
+    const r = (this.state.requests ?? []).find((x) => x.id === id);
+    if (r) { r.status = 'withdrawn'; this.log('request.withdrawn', r.title); }
+    this.save();
+  }
+  async getVault(): Promise<VaultDocument[]> {
+    return this.state.review.map((r, i) => ({
+      id: r.id, filename: `${r.title.replace(/[^\w.\- ]/g, '').replace(/ +/g, '-').toLowerCase()}.pdf`, bytes: 180_000 + i * 42_500, storedAt: r.receivedAt,
+      title: r.title, typeLabel: r.templateLabel, reviewId: r.id, reviewStatus: r.status,
+      available: true, deleteAfter: new Date(new Date(r.receivedAt).getTime() + 90 * DAY).toISOString(), deletedAt: null,
+    }));
+  }
+  async getConnections(): Promise<Connection[]> {
+    const now = Date.now();
+    const at = (hours: number) => new Date(now - hours * 36e5).toISOString();
+    const [a, b, c] = verticalPack(this.example.vertical).systems;
+    return [
+      { id: 'c1', system: a, status: 'healthy', note: 'Nightly export, read-only.', lastSyncAt: at(7), updatedAt: at(7) },
+      { id: 'c2', system: b, status: 'healthy', note: 'Reviewed figures are written back after approval.', lastSyncAt: at(26), updatedAt: at(26) },
+      { id: 'c3', system: c, status: 'planned', note: 'Scheduled for the production stage.', lastSyncAt: null, updatedAt: at(240) },
+    ];
   }
 
   // The demo's audit log is what has happened in this browser: the workspace

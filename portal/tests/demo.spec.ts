@@ -85,3 +85,25 @@ test('the audit log lists what happened, filters, and reports the record intact'
   await page.getByRole('button', { name: 'Export CSV' }).click();
   expect((await download).suggestedFilename()).toBe('audit-log.csv');
 });
+
+test('requests, vault and integrations are live: ask, withdraw, open a stored document', async ({ page }) => {
+  await page.goto('/demo/bank/requests');
+  await page.getByRole('button', { name: 'New request' }).click();
+  await page.getByLabel('What do you need?').fill('Add the loan officer to the export');
+  await page.getByRole('button', { name: 'Send request' }).click();
+  const mine = page.getByRole('region', { name: 'Your requests to MonkFlow' });
+  const row = mine.getByRole('row').filter({ hasText: 'Add the loan officer to the export' });
+  await expect(row).toContainText('Open');
+  await expect(mine.getByRole('row').filter({ hasText: 'Reply' })).toContainText('Closed');
+  await expect(page.getByRole('region', { name: "MonkFlow's requests to you" }).getByRole('row').nth(1)).toContainText('Waiting on you');
+  await row.getByRole('button', { name: 'Withdraw' }).click();
+  await expect(row).toContainText('Withdrawn');
+
+  await page.goto('/demo/bank/integrations');
+  await expect(page.getByRole('row').filter({ hasText: 'nCino' })).toContainText('Healthy');
+  await expect(page.getByText('none are stored or shown in this portal')).toBeVisible();
+
+  await page.goto('/demo/bank/vault');
+  await page.getByRole('table').getByRole('link').first().click();
+  await expect(page).toHaveURL(/\/demo\/bank\/review\/doc-\d+$/);
+});
