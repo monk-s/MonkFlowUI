@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const ApiError = require('../utils/ApiError');
 const { loadSession, COOKIE, parseCookies } = require('../services/session.service');
-const { crossSiteWrite, coded } = require('./session');
+const { crossSiteWrite, coded, mfaPending } = require('./session');
 
 /**
  * Authentication for the existing (pre-portal-v2) API routes.
@@ -32,6 +32,8 @@ const fromCookie = async (req) => {
   if (!parseCookies(req.headers.cookie)[COOKIE]) return null;
   const session = await loadSession(req, { touch: req.headers['x-mf-background'] !== '1' });
   if (!session) return null;
+  // The staff console is behind the second factor too.
+  if (mfaPending(session)) throw coded(403, 'mfa_setup_required', 'Finish setting up two-step sign-in to continue.');
   req.session = session;
   return { userId: session.userId, email: session.email, role: session.legacyRole };
 };

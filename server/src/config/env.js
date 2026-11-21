@@ -78,10 +78,6 @@ const env = {
   // Idle limit for sessions that are not in a workspace (staff, picker).
   sessionIdleMinutesDefault: 30,
   inviteExpiresDays: parseInt(process.env.INVITE_EXPIRES_DAYS, 10) || 7,
-  // The old JWT endpoints (/auth/login, /auth/refresh). Kept for one release
-  // so a browser still running the previous app.js can sign in while the new
-  // front end deploys. Set LEGACY_JWT_LOGIN=false to turn them off.
-  legacyJwtLogin: process.env.LEGACY_JWT_LOGIN !== 'false',
   isDev: (process.env.NODE_ENV || 'development') === 'development',
   isProd: process.env.NODE_ENV === 'production',
 };

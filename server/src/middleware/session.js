@@ -23,6 +23,9 @@ function coded(status, code, message, extra) {
   return err;
 }
 
+/** A password sign-in that has not yet passed (or set up) its second factor. */
+const mfaPending = (session) => !!identity().capabilities.mfa && session.authMethod === 'password' && !session.mfaVerified;
+
 const requireSession = async (req, res, next) => {
   try {
     const touch = req.headers['x-mf-background'] !== '1';
@@ -39,7 +42,7 @@ const requireOrg = [requireSession, (req, res, next) => {
   if (!req.session.orgId) return next(coded(409, 'no_workspace_selected', 'Choose a workspace to continue.'));
   // Password sign-ins must finish adding a second factor before they can
   // read workspace data, when the identity provider supports one.
-  if (identity().capabilities.mfa && req.session.authMethod === 'password' && !req.session.mfaVerified) {
+  if (mfaPending(req.session)) {
     return next(coded(403, 'mfa_setup_required', 'Finish setting up two-step sign-in to continue.'));
   }
   next();
@@ -86,4 +89,4 @@ const sameOrigin = (req, res, next) => {
   next();
 };
 
-module.exports = { requireSession, requireOrg, requirePermission, requirePlatformAdmin, sameOrigin, crossSiteWrite, coded };
+module.exports = { requireSession, requireOrg, requirePermission, requirePlatformAdmin, sameOrigin, crossSiteWrite, coded, mfaPending };
