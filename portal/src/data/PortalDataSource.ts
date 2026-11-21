@@ -9,7 +9,7 @@
 import { createContext, useContext } from 'react';
 import type {
   ActionItem, ActivityEntry, Engagement, PeriodDays, ReviewDocument, ReviewItem, ReviewList, ReviewStatus, Role, RunDetail, SsoProvider, Team, Telemetry, Vertical,
-  WorkflowDetail, WorkflowRow,
+  WorkflowDetail, WorkflowRow, AuditFilter, AuditPage,
 } from '../lib/types';
 
 export type MemberRole = Exclude<Role, 'monkflow_staff'>;
@@ -70,6 +70,11 @@ export interface PortalDataSource {
   rejectReview(id: string, reason: string): Promise<ReviewItem>;
   /** The reviewed fields as a file. Every export is logged. */
   exportReview(id: string, format: 'csv' | 'json'): Promise<{ filename: string; blob: Blob }>;
+
+  // Audit log (permission audit.view)
+  getAudit(filter: AuditFilter, before?: string): Promise<AuditPage>;
+  /** The filtered log as a CSV file. The export is itself logged. */
+  exportAudit(filter: AuditFilter): Promise<{ filename: string; blob: Blob }>;
 }
 
 const Ctx = createContext<PortalDataSource | null>(null);

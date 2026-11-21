@@ -132,6 +132,16 @@ export interface ActionItem {
   canAct: boolean;
 }
 
+export interface AuditEntry { id: string; at: string; action: string; actor: string; actorEmail: string | null; actorRole: string | null; target: string; detail: string; ip: string | null }
+export interface AuditFilter { q?: string; from?: string; to?: string }
+export interface AuditPage {
+  entries: AuditEntry[];
+  /** Pass as `before` to get the next, older page; null on the last page. */
+  nextBefore: string | null;
+  /** Result of the tamper check over the whole log; sent with the first page only. */
+  chain: { ok: boolean; entries: number } | null;
+}
+
 export interface ActivityEntry { id: string; at: string; action: string; summary: string; actor: string }
 
 export interface RunTotals {

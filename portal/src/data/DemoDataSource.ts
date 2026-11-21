@@ -7,7 +7,7 @@
 import { ApiError } from '../lib/api';
 import type {
   ActionItem, ActivityEntry, DayCount, Engagement, HoursSaved, PeriodDays, ReviewItem, ReviewList, ReviewStatus, ReviewSummary, Run, RunTotals, Session,
-  SyntheticPage, Team, Telemetry, WorkflowDetail, WorkflowRow, WorkflowSummary,
+  SyntheticPage, Team, Telemetry, WorkflowDetail, WorkflowRow, WorkflowSummary, AuditEntry, AuditFilter, AuditPage,
 } from '../lib/types';
 import { runChecks, TEMPLATES } from '../demo/checks';
 import { EXAMPLE_WORKSPACES, exampleEngagement, rng, type ExampleWorkspace } from '../demo/fixtures';
@@ -65,7 +65,7 @@ export class DemoDataSource implements PortalDataSource {
       user: { id: 'demo-user', email: 'alex.morgan@demo.example', firstName: 'Alex', lastName: 'Morgan', isPlatformAdmin: false },
       org, role: 'admin', workspaces: [org], authMethod: 'password', mfaVerified: true, mfaSetupRequired: false,
       idleMinutes: 30, idleExpiresAt: far, expiresAt: far,
-      permissions: ['overview.view', 'workflows.view', 'review.view', 'review.decide', 'engagement.signoff', 'actions.complete', 'connectors.view', 'vault.view', 'requests.create', 'team.view', 'team.manage', 'data.export'],
+      permissions: ['overview.view', 'workflows.view', 'review.view', 'review.decide', 'engagement.signoff', 'actions.complete', 'connectors.view', 'vault.view', 'requests.create', 'team.view', 'team.manage', 'data.export', 'audit.view'],
     };
   }
 
@@ -108,6 +108,32 @@ export class DemoDataSource implements PortalDataSource {
         ],
       })),
     };
+  }
+
+  // The demo's audit log is what has happened in this browser: the workspace
+  // activity plus every decision and edit on a review item.
+  private auditEntries(f: AuditFilter): AuditEntry[] {
+    const row = (id: string, at: string, action: string, actor: string, detail: string): AuditEntry => ({
+      id, at, action, actor, actorEmail: actor === 'MonkFlow' ? null : `${actor.replace(' ', '.').toLowerCase()}@demo.example`,
+      actorRole: actor === 'MonkFlow' ? 'monkflow_staff' : 'admin', target: '', detail, ip: null,
+    });
+    const all = [
+      ...this.state.activity.map((a) => row(a.id, a.at, a.action, a.actor, a.summary)),
+      ...this.state.review.flatMap((r) => r.trail.map((t) => row(`${r.id}-${t.id}`, t.at, t.action, t.actor, r.title))),
+    ].sort((a, b) => b.at.localeCompare(a.at));
+    const q = (f.q ?? '').trim().toLowerCase();
+    return all.filter((e) => (!q || e.action.includes(q) || (e.actorEmail ?? '').includes(q))
+      && (!f.from || e.at.slice(0, 10) >= f.from) && (!f.to || e.at.slice(0, 10) <= f.to));
+  }
+  async getAudit(filter: AuditFilter): Promise<AuditPage> {
+    const entries = this.auditEntries(filter);
+    return { entries, nextBefore: null, chain: { ok: true, entries: this.auditEntries({}).length } };
+  }
+  async exportAudit(filter: AuditFilter) {
+    const cell = (v: unknown) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const lines = [['Time (UTC)', 'Person', 'Email', 'Role', 'Action', 'Target', 'Detail', 'IP address'],
+      ...this.auditEntries(filter).map((e) => [e.at, e.actor, e.actorEmail, e.actorRole, e.action, e.target, e.detail, e.ip])];
+    return { filename: 'audit-log.csv', blob: new Blob([lines.map((l) => l.map(cell).join(',')).join('\r\n') + '\r\n'], { type: 'text/csv' }) };
   }
 
   private log(action: string, summary: string) {

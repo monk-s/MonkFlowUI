@@ -154,4 +154,4 @@ function toCsv(row) {
   return lines.map((l) => l.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
-module.exports = { TEMPLATES, FLAG_BELOW, num, runChecks, summary, detail, toCsv };
+module.exports = { TEMPLATES, FLAG_BELOW, num, runChecks, summary, detail, toCsv, csvCell };
