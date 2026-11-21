@@ -65,7 +65,7 @@ router.get('/actions', requirePermission('overview.view'), catchAsync(async (req
     items: (await db.query(
       `SELECT a.*, e.name AS engagement_name
          FROM action_items a LEFT JOIN engagements e ON e.id = a.engagement_id
-        WHERE a.status = 'open'`
+        WHERE a.status = 'open' AND a.origin = 'monkflow'`
     )).rows,
   }));
   const signOff = can(req.session.role, 'engagement.signoff');
@@ -84,7 +84,7 @@ router.post('/actions/:id/complete', requirePermission('actions.complete'), catc
   const id = idParam(req);
   const name = personName(req.session);
   await withOrg(req.session.orgId, async (db) => {
-    const current = (await db.query('SELECT id, title, status FROM action_items WHERE id = $1 FOR UPDATE', [id])).rows[0];
+    const current = (await db.query("SELECT id, title, status FROM action_items WHERE id = $1 AND origin = 'monkflow' FOR UPDATE", [id])).rows[0];
     if (!current) throw ApiError.notFound('Not found');
     if (current.status !== 'open') throw coded(409, 'not_open', 'This request is no longer open.');
     await db.query(

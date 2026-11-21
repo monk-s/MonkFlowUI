@@ -81,7 +81,7 @@ const ingestKeyView = (k) => ({ id: k.id, name: k.name, prefix: k.key_prefix, cr
 
 const get = catchAsync(async (req, res) => {
   const org = await orgOf(req);
-  const [engagements, milestones, actions, workflows, unassigned, ingestKeys] = await Promise.all([
+  const [engagements, milestones, actions, workflows, unassigned, ingestKeys, connections] = await Promise.all([
     query('SELECT * FROM engagements WHERE org_id = $1 ORDER BY created_at, id', [org.id]),
     query('SELECT * FROM milestones WHERE org_id = $1 ORDER BY position, created_at, id', [org.id]),
     query("SELECT * FROM action_items WHERE org_id = $1 AND (status = 'open' OR updated_at > NOW() - INTERVAL '30 days') ORDER BY status = 'open' DESC, created_at DESC LIMIT 100", [org.id]),
@@ -89,6 +89,7 @@ const get = catchAsync(async (req, res) => {
     // Workflows that belong to no client yet (built under a staff login).
     query('SELECT id, name, status FROM workflows WHERE org_id IS NULL ORDER BY lower(name) LIMIT 200'),
     query('SELECT id, name, key_prefix, created_at, last_used_at FROM ingest_keys WHERE org_id = $1 AND revoked_at IS NULL ORDER BY created_at', [org.id]),
+    query('SELECT * FROM connections WHERE org_id = $1 ORDER BY lower(system)', [org.id]),
   ]);
   res.json({
     organization: org,
@@ -97,6 +98,7 @@ const get = catchAsync(async (req, res) => {
     workflows: workflows.rows.map(workflowView),
     unassignedWorkflows: unassigned.rows,
     ingestKeys: ingestKeys.rows.map(ingestKeyView),
+    connections: connections.rows.map(connectionView),
   });
 });
 
@@ -201,11 +203,63 @@ const createAction = catchAsync(async (req, res) => {
 const withdrawAction = catchAsync(async (req, res) => {
   const org = await orgOf(req);
   const a = (await query(
-    "UPDATE action_items SET status = 'withdrawn', updated_at = NOW() WHERE id = $1 AND org_id = $2 AND status = 'open' RETURNING id, title",
+    "UPDATE action_items SET status = 'withdrawn', updated_at = NOW() WHERE id = $1 AND org_id = $2 AND status = 'open' AND origin = 'monkflow' RETURNING id, title",
     [uuid(req.params.aid), org.id]
   )).rows[0];
   if (!a) throw ApiError.notFound('Not found');
   await log(req, org, 'action.withdrawn', 'action_item', a.id, { title: a.title });
+  res.json({ ok: true });
+});
+
+// A request the client made (origin = 'client') is closed by MonkFlow, with
+// the answer the client will read.
+const closeRequest = catchAsync(async (req, res) => {
+  const org = await orgOf(req);
+  const d = parse(z.object({ reply: z.string().trim().min(2, 'Write the reply the client will read').max(4000) }), req.body);
+  const a = (await query(
+    `UPDATE action_items SET status = 'done', reply = $3, completed_by_name = 'MonkFlow', completed_at = NOW(), updated_at = NOW()
+      WHERE id = $1 AND org_id = $2 AND status = 'open' AND origin = 'client' RETURNING id, title`,
+    [uuid(req.params.aid), org.id, d.reply]
+  )).rows[0];
+  if (!a) throw ApiError.notFound('Not found');
+  await log(req, org, 'request.closed', 'action_item', a.id, { title: a.title });
+  res.json({ ok: true });
+});
+
+// ── Integration status (the client's Integrations page) ──────
+// Status and a note only. Never a credential: those stay out of this table.
+const CONNECTION_STATUSES = ['planned', 'healthy', 'attention', 'down'];
+const connectionSchema = z.object({
+  system: z.string().trim().min(2, 'Name the system').max(100),
+  status: z.enum(CONNECTION_STATUSES),
+  note: text(500),
+  synced: z.boolean().optional(),   // true = stamp "last sync" with now
+});
+const connectionView = (c) => ({ id: c.id, system: c.system, status: c.status, note: c.note, lastSyncAt: c.last_sync_at, updatedAt: c.updated_at });
+
+const saveConnection = catchAsync(async (req, res) => {
+  const org = await orgOf(req);
+  const d = parse(connectionSchema, req.body);
+  const c = req.params.cid
+    ? (await query(
+      `UPDATE connections SET system = $3, status = $4, note = $5, last_sync_at = CASE WHEN $6 THEN NOW() ELSE last_sync_at END, updated_at = NOW()
+        WHERE id = $1 AND org_id = $2 RETURNING *`,
+      [uuid(req.params.cid), org.id, d.system, d.status, d.note || null, !!d.synced]
+    )).rows[0]
+    : (await query(
+      'INSERT INTO connections (org_id, system, status, note, last_sync_at) VALUES ($1, $2, $3, $4, CASE WHEN $5 THEN NOW() END) RETURNING *',
+      [org.id, d.system, d.status, d.note || null, !!d.synced]
+    )).rows[0];
+  if (!c) throw ApiError.notFound('Not found');
+  await log(req, org, 'connection.status_set', 'connection', c.id, { system: c.system, status: c.status });
+  res.status(req.params.cid ? 200 : 201).json({ connection: connectionView(c) });
+});
+
+const removeConnection = catchAsync(async (req, res) => {
+  const org = await orgOf(req);
+  const c = (await query('DELETE FROM connections WHERE id = $1 AND org_id = $2 RETURNING id, system', [uuid(req.params.cid), org.id])).rows[0];
+  if (!c) throw ApiError.notFound('Not found');
+  await log(req, org, 'connection.removed', 'connection', c.id, { system: c.system });
   res.json({ ok: true });
 });
 
@@ -267,4 +321,6 @@ const revokeIngestKey = catchAsync(async (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = { createIngestKey, revokeIngestKey, get, createEngagement, updateEngagement, createMilestone, updateMilestone, removeMilestone, createAction, withdrawAction, attachWorkflow, setBaseline };
+module.exports = { createIngestKey, revokeIngestKey, get, createEngagement, updateEngagement, createMilestone, updateMilestone, removeMilestone, createAction, withdrawAction, attachWorkflow, setBaseline,
+  closeRequest, saveConnection, removeConnection,
+};

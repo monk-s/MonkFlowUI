@@ -5457,7 +5457,7 @@ function renderWorkspaceEngagementPage() {
       <button class="btn btn-primary" onclick="showEngagementModal()">New engagement</button>
     </div>`;
 
-  const actionRows = d.actions.map((a) => `
+  const actionRows = d.actions.filter((a) => a.origin !== 'client').map((a) => `
     <tr>
       <td style="font-size:12px;">${escapeHtml(ACTION_KINDS[a.kind] || a.kind)}</td>
       <td><div style="font-weight:500;">${escapeHtml(a.title)}</div>${a.detail ? `<div style="font-size:12px;color:var(--text-secondary);">${escapeHtml(a.detail)}</div>` : ''}</td>
@@ -5524,7 +5524,98 @@ function renderWorkspaceEngagementPage() {
       </table></div>` : '<div style="padding:20px 16px;color:var(--text-secondary);font-size:13px;">No keys. Nothing can post documents into this workspace.</div>'}
     </div>`;
 
-  return `${header}${engagements}${actions}${workflows}${ingestKeys}`;
+  // Requests the client made in their portal (Requests page). Close each with a reply.
+  const askedRows = d.actions.filter((a) => a.origin === 'client').map((a) => `
+    <tr>
+      <td><div style="font-weight:500;">${escapeHtml(a.title)}</div>${a.detail ? `<div style="font-size:12px;color:var(--text-secondary);white-space:pre-wrap;">${escapeHtml(a.detail)}</div>` : ''}
+        ${a.reply ? `<div style="font-size:12px;margin-top:4px;"><strong>Your reply:</strong> ${escapeHtml(a.reply)}</div>` : ''}</td>
+      <td style="font-size:12px;">${escapeHtml(a.requestedByName || '')}</td>
+      <td style="font-size:12px;">${escapeHtml(wsDate(String(a.createdAt).slice(0, 10)))}</td>
+      <td style="font-size:12px;">${a.status === 'open' ? 'Waiting on you' : a.status === 'done' ? 'Closed' : 'Withdrawn by the client'}</td>
+      <td style="text-align:right;">${a.status === 'open' ? `<button class="btn btn-ghost btn-sm" onclick="handleCloseRequest('${a.id}')">Reply and close</button>` : ''}</td>
+    </tr>`).join('');
+  const asked = `
+    <div class="card" style="padding:0;margin-bottom:16px;">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);"><h3 style="margin:0;font-size:15px;">Requests from the client</h3></div>
+      ${askedRows ? `<div class="table-wrapper"><table>
+        <thead><tr><th>Request</th><th>From</th><th>Asked</th><th>Status</th><th></th></tr></thead><tbody>${askedRows}</tbody>
+      </table></div>` : '<div style="padding:20px 16px;color:var(--text-secondary);font-size:13px;">The client has not asked for anything in the portal.</div>'}
+    </div>`;
+
+  const connectionRows = (d.connections || []).map((c) => `
+    <tr>
+      <td style="font-weight:500;">${escapeHtml(c.system)}</td>
+      <td style="font-size:12px;">${escapeHtml(CONNECTION_STATUSES[c.status] || c.status)}</td>
+      <td style="font-size:12px;">${escapeHtml(c.note || '')}</td>
+      <td style="font-size:12px;">${c.lastSyncAt ? escapeHtml(new Date(c.lastSyncAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })) : ''}</td>
+      <td style="text-align:right;white-space:nowrap;">
+        <button class="btn btn-ghost btn-sm" onclick="showConnectionModal('${c.id}')">Update</button>
+        <button class="btn btn-ghost btn-sm" onclick="handleRemoveConnection('${c.id}')">Remove</button>
+      </td>
+    </tr>`).join('');
+  const connections = `
+    <div class="card" style="padding:0;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);">
+        <h3 style="margin:0;font-size:15px;">Integrations (status the client sees)</h3>
+        <button class="btn btn-ghost btn-sm" onclick="showConnectionModal()">${icons.plus} Add system</button>
+      </div>
+      ${connectionRows ? `<div class="table-wrapper"><table>
+        <thead><tr><th>System</th><th>Status</th><th>Note</th><th>Last sync</th><th></th></tr></thead><tbody>${connectionRows}</tbody>
+      </table></div>` : '<div style="padding:20px 16px;color:var(--text-secondary);font-size:13px;">No systems listed. The client\'s Integrations page is empty.</div>'}
+    </div>`;
+
+  return `${header}${engagements}${actions}${asked}${connections}${workflows}${ingestKeys}`;
+}
+
+const CONNECTION_STATUSES = { planned: 'Planned', healthy: 'Healthy', attention: 'Needs attention', down: 'Down' };
+
+function handleCloseRequest(id) {
+  const reply = (window.prompt('Reply to the client. They read this on their Requests page, and the request closes.') || '').trim();
+  if (!reply) return;
+  return workspaceChange(() => api.post(`/admin/organizations/${workspaceDetailId}/actions/${id}/close`, { reply }), 'Request closed with your reply.');
+}
+
+function showConnectionModal(id) {
+  const c = ((workspaceDetail && workspaceDetail.connections) || []).find((x) => x.id === id) || {};
+  showModal(`${wsModalHead(id ? 'Update integration status' : 'Add a system')}
+    <div class="form-group">
+      <label class="form-label" for="con-system">System</label>
+      <input type="text" id="con-system" maxlength="100" value="${escapeHtml(c.system || '')}" placeholder="For example Yardi" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="con-status">Status</label>
+      <select id="con-status">${wsOptions(CONNECTION_STATUSES, c.status || 'planned')}</select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="con-note">Note the client sees (optional)</label>
+      <input type="text" id="con-note" maxlength="500" value="${escapeHtml(c.note || '')}" />
+      ${wsHint('Status only. Never put a password, key or account number here.')}
+    </div>
+    <div class="form-group">
+      <label style="font-size:13px;"><input type="checkbox" id="con-synced" /> Data synced just now (sets "Last sync" to this moment)</label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="ws-submit" onclick="handleSaveConnection('${id || ''}')">Save</button>
+    </div>`);
+  document.getElementById('con-system')?.focus();
+}
+
+function handleSaveConnection(id) {
+  const system = document.getElementById('con-system').value.trim();
+  if (system.length < 2) return workspaceFormError('Name the system.');
+  const body = {
+    system, status: document.getElementById('con-status').value,
+    note: document.getElementById('con-note').value.trim() || null,
+    synced: document.getElementById('con-synced').checked,
+  };
+  const base = `/admin/organizations/${workspaceDetailId}/connections`;
+  return workspaceModalSave(() => (id ? api.patch(`${base}/${id}`, body) : api.post(base, body)), 'Integration status saved. The client sees it now.');
+}
+
+function handleRemoveConnection(id) {
+  if (!window.confirm('Remove this system from the client\'s Integrations page?')) return;
+  return workspaceChange(() => api.del(`/admin/organizations/${workspaceDetailId}/connections/${id}`), 'Removed.');
 }
 
 // The key is shown once, in a dialog, and never again.

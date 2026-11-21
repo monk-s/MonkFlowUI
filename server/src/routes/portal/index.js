@@ -209,5 +209,6 @@ router.use(require('./engagement.routes'));
 router.use(require('./workflow.routes'));
 router.use(require('./review.routes'));
 router.use(require('./audit.routes'));
+router.use(require('./sections.routes'));
 
 module.exports = router;

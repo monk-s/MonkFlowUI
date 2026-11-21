@@ -14,7 +14,9 @@ import { ApiDataSource } from './data/ApiDataSource';
 import { DemoDataSource, isDemoKey } from './data/DemoDataSource';
 import { DataSourceProvider } from './data/PortalDataSource';
 import { Overview } from './pages/Overview';
-import { NotYet } from './pages/NotYet';
+import { Integrations } from './pages/sections/Integrations';
+import { Requests } from './pages/sections/Requests';
+import { Vault } from './pages/sections/Vault';
 import { NotFound } from './pages/NotFound';
 import { SettingsLayout } from './pages/settings/SettingsLayout';
 import { Team } from './pages/settings/Team';
@@ -57,9 +59,9 @@ const pages: RouteObject[] = [
   { path: 'workflows', element: <Workflows />, handle: { title: 'Workflows' } },
   { path: 'workflows/:id', element: <WorkflowDetail />, handle: { title: 'Workflows' } },
   { path: 'workflows/:id/runs/:runId', element: <RunDetail />, handle: { title: 'Workflows' } },
-  { path: 'integrations/*', element: <NotYet section="integrations" />, handle: { title: 'Integrations' } },
-  { path: 'vault/*', element: <NotYet section="vault" />, handle: { title: 'Vault' } },
-  { path: 'requests/*', element: <NotYet section="requests" />, handle: { title: 'Requests' } },
+  { path: 'integrations', element: <Integrations />, handle: { title: 'Integrations' } },
+  { path: 'vault', element: <Vault />, handle: { title: 'Vault' } },
+  { path: 'requests', element: <Requests />, handle: { title: 'Requests' } },
   {
     path: 'settings',
     element: <SettingsLayout />,

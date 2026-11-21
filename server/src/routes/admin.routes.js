@@ -35,6 +35,11 @@ router.patch('/organizations/:id/milestones/:mid', engagement.updateMilestone);
 router.delete('/organizations/:id/milestones/:mid', engagement.removeMilestone);
 router.post('/organizations/:id/actions', engagement.createAction);
 router.delete('/organizations/:id/actions/:aid', engagement.withdrawAction);
+// Phase 4: answer a client's request; record integration status.
+router.post('/organizations/:id/actions/:aid/close', engagement.closeRequest);
+router.post('/organizations/:id/connections', engagement.saveConnection);
+router.patch('/organizations/:id/connections/:cid', engagement.saveConnection);
+router.delete('/organizations/:id/connections/:cid', engagement.removeConnection);
 router.post('/organizations/:id/workflows', engagement.attachWorkflow);
 router.patch('/organizations/:id/workflows/:wid', engagement.setBaseline);
 // Phase 3: keys a client's pipeline uses to post documents for review.

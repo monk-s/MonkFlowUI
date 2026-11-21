@@ -181,13 +181,18 @@ describe('in the database, even when a query forgets its WHERE', () => {
       'DELETE FROM milestones',
       "UPDATE engagements SET stage = 'production'",
       `INSERT INTO engagements (org_id, name) VALUES ('${A.id}', 'Self-made')`,
-      `INSERT INTO action_items (org_id, kind, title) VALUES ('${A.id}', 'other', 'Self-made')`,
       "UPDATE org_workflows SET name = 'Rewritten'",
       'SELECT definition FROM workflows',
       'SELECT trigger_payload FROM workflow_executions',
       'SELECT * FROM execution_logs',
     ];
     for (const sql of denied) await expect(withOrg(A.id, (db) => db.query(sql))).rejects.toThrow(/permission denied/);
+
+    // It may file a request of its own, in its own workspace, and nothing else.
+    const insert = (orgId, origin) => withOrg(A.id, (db) => db.query('INSERT INTO action_items (org_id, kind, title, origin) VALUES ($1, $2, $3, $4)', [orgId, 'other', 'Self-made', origin]));
+    await expect(insert(A.id, 'monkflow')).rejects.toThrow(/row-level security/);
+    await expect(insert(B.id, 'client')).rejects.toThrow(/row-level security/);
+    expect((await insert(A.id, 'client')).rowCount).toBe(1);
   });
 
   test('the portal role cannot read the users or sessions tables at all', async () => {

@@ -1,6 +1,6 @@
 import { api } from '../lib/api';
 import type {
-  ActionItem, ActivityEntry, AuditFilter, AuditPage, Engagement, PeriodDays, ReviewItem, ReviewList, ReviewStatus, RunDetail, Team, Telemetry, WorkflowDetail, WorkflowRow,
+  ActionItem, ActivityEntry, AuditFilter, AuditPage, Connection, Requests, VaultDocument, Engagement, PeriodDays, ReviewItem, ReviewList, ReviewStatus, RunDetail, Team, Telemetry, WorkflowDetail, WorkflowRow,
 } from '../lib/types';
 import type { MemberRole, PortalDataSource, WorkspaceSettings } from './PortalDataSource';
 
@@ -55,6 +55,12 @@ export class ApiDataSource implements PortalDataSource {
   async approveReview(id: string, reason?: string) { return (await api.post<{ item: ReviewItem }>(`/portal/review/${id}/approve`, { reason })).item; }
   async rejectReview(id: string, reason: string) { return (await api.post<{ item: ReviewItem }>(`/portal/review/${id}/reject`, { reason })).item; }
   exportReview(id: string, format: 'csv' | 'json') { return api.download(`/portal/review/${id}/export?format=${format}`); }
+
+  getRequests() { return api.get<Requests>('/portal/requests'); }
+  async createRequest(input: { title: string; detail: string }) { await api.post('/portal/requests', input); }
+  async withdrawRequest(id: string) { await api.post(`/portal/requests/${id}/withdraw`); }
+  async getVault() { return (await api.get<{ documents: VaultDocument[] }>('/portal/vault')).documents; }
+  async getConnections() { return (await api.get<{ connections: Connection[] }>('/portal/connections')).connections; }
 
   getAudit(filter: AuditFilter, before?: string) { return api.get<AuditPage>(`/portal/audit?${auditQuery(filter, before)}`); }
   exportAudit(filter: AuditFilter) { return api.download(`/portal/audit/export?${auditQuery(filter)}`); }

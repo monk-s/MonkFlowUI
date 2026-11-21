@@ -132,6 +132,23 @@ export interface ActionItem {
   canAct: boolean;
 }
 
+// ── Requests, Vault, Integrations (routes/portal/sections.routes.js) ──
+export interface PortalRequest {
+  id: string; title: string; detail: string | null; status: 'open' | 'done' | 'withdrawn';
+  createdAt: string; dueOn: string | null; requestedByName: string | null;
+  /** MonkFlow's answer, on a closed request this workspace made. */
+  reply: string | null; closedByName: string | null; closedAt: string | null;
+}
+export interface Requests { sent: PortalRequest[]; received: PortalRequest[]; canCreate: boolean }
+export interface VaultDocument {
+  id: string; filename: string; bytes: number; storedAt: string; title: string; typeLabel: string | null;
+  /** The review item this file belongs to, where it can be opened. */
+  reviewId: string | null; reviewStatus: ReviewStatus | null;
+  /** False once the file has been deleted at its retention date. */
+  available: boolean; deleteAfter: string | null; deletedAt: string | null;
+}
+export interface Connection { id: string; system: string; status: 'planned' | 'healthy' | 'attention' | 'down'; note: string | null; lastSyncAt: string | null; updatedAt: string }
+
 export interface AuditEntry { id: string; at: string; action: string; actor: string; actorEmail: string | null; actorRole: string | null; target: string; detail: string; ip: string | null }
 export interface AuditFilter { q?: string; from?: string; to?: string }
 export interface AuditPage {
