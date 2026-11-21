@@ -60,7 +60,7 @@ const findByResetToken = async (tokenHash) => {
 // Strip sensitive fields for API responses
 const sanitize = (user) => {
   if (!user) return null;
-  const { password_hash, password_reset_token, password_reset_expires, ...safe } = user;
+  const { password_hash, password_reset_token, password_reset_expires, mfa_secret, mfa_pending_secret, mfa_last_step, ...safe } = user;
   return safe;
 };
 

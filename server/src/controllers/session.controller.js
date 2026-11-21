@@ -291,7 +291,7 @@ const confirmMfa = catchAsync(async (req, res) => {
   if (!publicConfig().mfa) throw ApiError.notFound('Not found');
   const { code } = parse(codeSchema, req.body);
   const factorId = String(req.body.factorId || '');
-  const result = await identity().confirmTotp({ factorId, code });
+  const result = await identity().confirmTotp({ factorId, code, email: req.session.email });
   if (!result.ok) throw coded(401, 'invalid_code', 'That code is not right. Check your authenticator app and try again.');
   await query('UPDATE sessions SET mfa_verified = TRUE WHERE id = $1', [req.session.id]);
   await query('UPDATE users SET mfa_enrolled_at = COALESCE(mfa_enrolled_at, NOW()) WHERE id = $1', [req.session.userId]);
