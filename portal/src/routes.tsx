@@ -19,6 +19,7 @@ import { NotFound } from './pages/NotFound';
 import { SettingsLayout } from './pages/settings/SettingsLayout';
 import { Team } from './pages/settings/Team';
 import { Security } from './pages/settings/Security';
+import { Audit } from './pages/settings/Audit';
 import { Profile } from './pages/settings/Profile';
 import { Workflows } from './pages/workflows/Workflows';
 import { WorkflowDetail } from './pages/workflows/WorkflowDetail';
@@ -67,6 +68,7 @@ const pages: RouteObject[] = [
       { index: true, element: <Navigate to="team" replace /> },
       { path: 'team', element: <Team /> },
       { path: 'security', element: <Security /> },
+      { path: 'audit', element: <Audit /> },
       { path: 'profile', element: <Profile /> },
     ],
   },

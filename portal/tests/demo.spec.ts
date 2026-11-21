@@ -73,3 +73,15 @@ test('an unknown demo goes to the CRE one', async ({ page }) => {
   await page.goto('/demo/dental');
   await expect(page).toHaveURL(/\/demo\/cre$/);
 });
+
+test('the audit log lists what happened, filters, and reports the record intact', async ({ page }) => {
+  await page.goto('/demo/investment/settings/audit');
+  await expect(page.getByRole('status').filter({ hasText: 'Record intact' })).toBeVisible();
+  const rows = page.getByRole('table').getByRole('row');
+  await expect(rows.nth(1)).toBeVisible();
+  await page.getByLabel('Person or action').fill('no-such-action');
+  await expect(page.getByText('No entries match')).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export CSV' }).click();
+  expect((await download).suggestedFilename()).toBe('audit-log.csv');
+});
