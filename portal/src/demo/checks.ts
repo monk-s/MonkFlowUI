@@ -1,9 +1,9 @@
 // Reconciliation checks for Demo Mode, which runs with no API.
 //
 // The evaluator is a copy of server/src/portal/review.js (the copy real
-// workspaces use). Change both. The bank and investment templates exist only
-// here: on the server only the CRE templates are built.
+// workspaces use). Change both.
 import type { ReviewCheck, ReviewField } from '../lib/types';
+import templates from './templates.json';
 
 type Rule = { id: string; label: string; blocking: boolean } & (
   | { kind: 'sum'; group: string; key: string; equals: string }
@@ -15,43 +15,9 @@ export interface Template { label: string; groups: { key: string; label: string 
 
 export const MONTHS = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12'];
 
-export const TEMPLATES: Record<string, Template> = {
-  rent_roll: {
-    label: 'Rent roll',
-    groups: [{ key: 'property', label: 'Property' }, { key: 'units', label: 'Units' }, { key: 'totals', label: 'Totals' }],
-    checks: [
-      { id: 'rent_sum', kind: 'sum', label: 'Unit rents add up to the stated monthly total', group: 'units', key: 'rent', equals: 'totals.monthly_rent', blocking: true },
-      { id: 'occupancy', kind: 'ratio', label: 'Occupancy equals occupied units over total units', top: 'property.occupied_units', bottom: 'property.total_units', equals: 'property.occupancy', blocking: false },
-    ],
-  },
-  t12: {
-    label: 'T-12 statement',
-    groups: [{ key: 'income', label: 'Income' }, { key: 'expenses', label: 'Expenses' }, { key: 'totals', label: 'Totals' }],
-    checks: [
-      { id: 'income_months', kind: 'rowsum', label: 'Each income line: twelve months add up to its annual figure', group: 'income', keys: MONTHS, total: 'annual', blocking: true },
-      { id: 'expense_months', kind: 'rowsum', label: 'Each expense line: twelve months add up to its annual figure', group: 'expenses', keys: MONTHS, total: 'annual', blocking: true },
-      { id: 'income_total', kind: 'sum', label: 'Income lines add up to total income', group: 'income', key: 'annual', equals: 'totals.total_income', blocking: true },
-      { id: 'expense_total', kind: 'sum', label: 'Expense lines add up to total expenses', group: 'expenses', key: 'annual', equals: 'totals.total_expenses', blocking: true },
-      { id: 'noi', kind: 'diff', label: 'NOI equals total income minus total expenses', a: 'totals.total_income', b: 'totals.total_expenses', equals: 'totals.noi', blocking: true },
-    ],
-  },
-  financial_statement: {
-    label: 'Personal financial statement',
-    groups: [{ key: 'borrower', label: 'Borrower' }, { key: 'assets', label: 'Assets' }, { key: 'liabilities', label: 'Liabilities' }, { key: 'totals', label: 'Totals' }],
-    checks: [
-      { id: 'assets', kind: 'sum', label: 'Asset lines add up to total assets', group: 'assets', key: 'amount', equals: 'totals.total_assets', blocking: true },
-      { id: 'liabilities', kind: 'sum', label: 'Liability lines add up to total liabilities', group: 'liabilities', key: 'amount', equals: 'totals.total_liabilities', blocking: true },
-      { id: 'net_worth', kind: 'diff', label: 'Net worth equals total assets minus total liabilities', a: 'totals.total_assets', b: 'totals.total_liabilities', equals: 'totals.net_worth', blocking: true },
-    ],
-  },
-  subscription: {
-    label: 'Subscription agreement',
-    groups: [{ key: 'investor', label: 'Investor' }, { key: 'commitments', label: 'Commitments' }, { key: 'totals', label: 'Totals' }],
-    checks: [
-      { id: 'commitment', kind: 'sum', label: 'Commitments by class add up to the total commitment', group: 'commitments', key: 'amount', equals: 'totals.total_commitment', blocking: true },
-    ],
-  },
-};
+// A copy of server/src/portal/templates.json (the two builds cannot read each
+// other's folders). server/tests/review.test.js fails if they differ.
+export const TEMPLATES = templates as Record<string, Template>;
 
 /** "$1,450.00" -> 1450, "(250)" -> -250, "93.8%" -> 93.8, "1,5O0" -> NaN. */
 export function num(value: string | null | undefined): number {

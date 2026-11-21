@@ -8,30 +8,11 @@
  *
  * The portal's Demo Mode has its own copy of the evaluator
  * (portal/src/demo/checks.ts) because it runs with no API. Change both.
+ * The templates themselves are one definition: ./templates.json.
  */
-const MONTHS = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12'];
-
-const TEMPLATES = {
-  rent_roll: {
-    label: 'Rent roll',
-    groups: [{ key: 'property', label: 'Property' }, { key: 'units', label: 'Units' }, { key: 'totals', label: 'Totals' }],
-    checks: [
-      { id: 'rent_sum', kind: 'sum', label: 'Unit rents add up to the stated monthly total', group: 'units', key: 'rent', equals: 'totals.monthly_rent', blocking: true },
-      { id: 'occupancy', kind: 'ratio', label: 'Occupancy equals occupied units over total units', top: 'property.occupied_units', bottom: 'property.total_units', equals: 'property.occupancy', blocking: false },
-    ],
-  },
-  t12: {
-    label: 'T-12 statement',
-    groups: [{ key: 'income', label: 'Income' }, { key: 'expenses', label: 'Expenses' }, { key: 'totals', label: 'Totals' }],
-    checks: [
-      { id: 'income_months', kind: 'rowsum', label: 'Each income line: twelve months add up to its annual figure', group: 'income', keys: MONTHS, total: 'annual', blocking: true },
-      { id: 'expense_months', kind: 'rowsum', label: 'Each expense line: twelve months add up to its annual figure', group: 'expenses', keys: MONTHS, total: 'annual', blocking: true },
-      { id: 'income_total', kind: 'sum', label: 'Income lines add up to total income', group: 'income', key: 'annual', equals: 'totals.total_income', blocking: true },
-      { id: 'expense_total', kind: 'sum', label: 'Expense lines add up to total expenses', group: 'expenses', key: 'annual', equals: 'totals.total_expenses', blocking: true },
-      { id: 'noi', kind: 'diff', label: 'NOI equals total income minus total expenses', a: 'totals.total_income', b: 'totals.total_expenses', equals: 'totals.noi', blocking: true },
-    ],
-  },
-};
+// Shared with the portal's Demo Mode: portal/src/demo/templates.json is a copy
+// of this file, and tests/review.test.js fails if the two differ.
+const TEMPLATES = require('./templates.json');
 
 /** "$1,450.00" -> 1450, "(250)" -> -250, "93.8%" -> 93.8, "1,5O0" -> NaN. */
 function num(value) {
