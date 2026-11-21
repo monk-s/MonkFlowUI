@@ -790,46 +790,6 @@ function showApp() {
   handleHashRoute();
 }
 
-function showOnboarding() {
-  if (isAdmin()) { closeOnboarding(); return; }
-
-  const steps = [
-    { icon: icons.dashboard, title: 'Your tools', desc: 'Everything we have built for your firm, with what is live and what is still in progress.', action: 'navigateTo("workflows")', btn: 'View My Tools' },
-    { icon: icons.analytics, title: 'How they are running', desc: 'Run counts, success rates and trends, so you can see the work your tools are doing.', action: 'navigateTo("analytics")', btn: 'View Analytics' },
-    { icon: icons.help, title: 'A direct line', desc: 'Questions or changes go straight to the engineer who built your system. There is no ticket queue.', action: 'navigateTo("help")', btn: 'Get Help' },
-  ];
-
-  showModal(`
-    <div class="modal-header">
-      <h2 class="modal-title">Welcome to your portal</h2>
-      <button class="modal-close" onclick="closeOnboarding()">${icons.x}</button>
-    </div>
-    <div style="padding:24px;">
-      <p style="color:var(--text-secondary);margin-bottom:24px;font-size:14px;">Here is what you will find inside.</p>
-      <div style="display:flex;flex-direction:column;gap:16px;">
-        ${steps.map((s, i) => `
-          <div style="display:flex;align-items:flex-start;gap:16px;padding:16px;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border);">
-            <div style="flex-shrink:0;width:40px;height:40px;border-radius:8px;background:var(--accent-glow);color:var(--accent);display:flex;align-items:center;justify-content:center;">${s.icon}</div>
-            <div style="flex:1;">
-              <h4 style="margin:0 0 4px;font-size:14px;color:var(--text-primary);">${s.title}</h4>
-              <p style="margin:0 0 10px;font-size:13px;color:var(--text-tertiary);">${s.desc}</p>
-              <button class="btn btn-ghost" style="font-size:12px;padding:4px 12px;" onclick="closeOnboarding();${s.action}">${s.btn}</button>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-      <div style="margin-top:20px;text-align:center;">
-        <button class="btn btn-primary" onclick="closeOnboarding()" style="min-width:200px;">Got it</button>
-      </div>
-    </div>
-  `);
-}
-
-function closeOnboarding() {
-  localStorage.setItem('onboarding_completed', 'true');
-  closeModal();
-}
-
 // ── Sign out ───────────────────────────────────────────
 async function handleLogout() {
   try {
@@ -841,17 +801,6 @@ async function handleLogout() {
 }
 
 // ── Data Fetching Helpers ──────────────────────────────
-async function fetchDashboardData() {
-  try {
-    const [wfData, agentData, logData, notifData] = await Promise.all([
-      api.get('/workflows?limit=5'),
-      api.get('/agents?limit=5'),
-      api.get('/logs?limit=5'),
-      api.get('/notifications?limit=5&read=false'),
-    ]);
-    return { workflows: wfData?.data || [], agents: agentData?.data || [], logs: logData?.data || [], notifications: notifData?.data || [], unreadCount: notifData?.unreadCount || 0 };
-  } catch { return null; }
-}
 
 async function fetchNotifications() {
   try {
@@ -6730,10 +6679,6 @@ async function connectQuickBooks() {
   } catch (e) { showToast('QuickBooks connection failed: ' + e.message, 'error'); }
 }
 
-async function disconnectQuickBooks() {
-  showToast('QuickBooks disconnection coming soon', 'info');
-}
-
 async function loadBillingInvoices() {
   try {
     const res = await api.get('/billing/invoices');
@@ -6755,38 +6700,6 @@ async function adminGenerateInvoices() {
     // This would typically be done via the billing scheduler
     showToast('Invoice generation triggered. Check billing scheduler logs.', 'success');
   } catch (e) { showToast('Failed: ' + e.message, 'error'); }
-}
-
-async function startCheckout(planSlug) {
-  try {
-    showToast('Redirecting to checkout...', 'info');
-    const res = await api.post('/billing/checkout', { planSlug });
-    if (res.data?.url) {
-      window.location.href = res.data.url;
-    } else {
-      showToast('Could not create checkout session. Please contact support.', 'error');
-    }
-  } catch (err) {
-    if (err.message?.includes('Stripe is not configured')) {
-      showToast('Payment processing is being set up. Please contact support to upgrade.', 'info');
-    } else {
-      showToast(err.message || 'Checkout failed', 'error');
-    }
-  }
-}
-
-async function openBillingPortal() {
-  try {
-    showToast('Opening billing portal...', 'info');
-    const res = await api.post('/billing/portal');
-    if (res.data?.url) {
-      window.location.href = res.data.url;
-    } else {
-      showToast('Could not open billing portal.', 'error');
-    }
-  } catch (err) {
-    showToast(err.message || 'Failed to open billing portal', 'error');
-  }
 }
 
 function showUpgradeModal(message) {
