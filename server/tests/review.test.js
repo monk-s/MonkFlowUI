@@ -52,6 +52,22 @@ test('numbers are read the way documents write them', () => {
   expect(['1,5O0', '', 'n/a', null].map(num).every(Number.isNaN)).toBe(true);
 });
 
+test("the demo's copy of the templates matches the server's", () => {
+  const read = (p) => require('fs').readFileSync(require('path').join(__dirname, p), 'utf8');
+  expect(read('../../portal/src/demo/templates.json')).toBe(read('../src/portal/templates.json'));
+});
+
+test('bank and fund documents are checked: a financial statement and a subscription agreement', () => {
+  const line = (group, row, value) => ({ group, row, key: 'amount', label: 'Amount', value });
+  const total = (key, value) => ({ group: 'totals', row: null, key, label: key, value });
+  const pfs = [line('assets', 0, '$250,000'), line('assets', 1, '$50,000'), line('liabilities', 0, '$120,000'),
+    total('total_assets', '$300,000'), total('total_liabilities', '$120,000'), total('net_worth', '$190,000')];
+  expect(Object.fromEntries(runChecks('financial_statement', pfs).map((c) => [c.id, c.status])))
+    .toEqual({ assets: 'pass', liabilities: 'pass', net_worth: 'fail' });
+  const sub = [line('commitments', 0, '500,000'), line('commitments', 1, '250,000'), total('total_commitment', '750,000')];
+  expect(runChecks('subscription', sub).map((c) => c.status)).toEqual(['pass']);
+});
+
 test('a T-12 is checked line by line and down to NOI', () => {
   const months = (group, row, each, annual) => [
     ...Array.from({ length: 12 }, (_, i) => ({ group, row, key: `m${i + 1}`, label: `Month ${i + 1}`, value: String(each) })),
