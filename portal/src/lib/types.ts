@@ -251,6 +251,11 @@ export interface ReviewField {
   page: number | null;
   editedByName?: string;
   editedAt?: string;
+  /** Document types with per-field approval only. */
+  approvedByName?: string;
+  approvedAt?: string;
+  /** Where the field sits on its page image, as fractions: x, y, width, height. */
+  box?: [number, number, number, number];
 }
 
 export interface ReviewCheck {
@@ -261,6 +266,8 @@ export interface ReviewCheck {
   /** 'na' = could not be run because a figure it needs was not extracted. */
   status: 'pass' | 'fail' | 'na';
   detail: string;
+  /** Why a failing check was accepted. Document types with per-field approval only. */
+  note?: { text: string; by: string; at: string };
 }
 
 export interface ReviewSummary {
@@ -288,7 +295,10 @@ export interface ReviewSummary {
 export interface ReviewTrailEntry { id: string; at: string; action: string; actor: string; metadata: Record<string, unknown> }
 
 export interface ReviewItem extends ReviewSummary {
-  groups: { key: string; label: string }[];
+  /** `reference` = office records to compare against, not extracted; `hidden` = shown only through Compare. */
+  groups: { key: string; label: string; reference?: boolean; hidden?: boolean }[];
+  /** Every field is approved one by one before the document can be. Set by the document type. */
+  fieldApproval?: boolean;
   fields: ReviewField[];
   checks: ReviewCheck[];
   decisionReason: string | null;
@@ -304,4 +314,21 @@ export interface ReviewList { items: ReviewSummary[]; counts: Record<ReviewStatu
 
 /** A synthetic source document, drawn as HTML. Demo Mode only. */
 export interface SyntheticPage { page: number; heading: string; rows: { text: string; fieldId?: string }[][] }
-export type ReviewDocument = { kind: 'pdf'; url: string } | { kind: 'synthetic'; pages: SyntheticPage[] };
+export type ReviewDocument = { kind: 'pdf'; url: string } | { kind: 'synthetic'; pages: SyntheticPage[] }
+  /** Page images with the PDF they were made from; fields carry their own `box`. */
+  | { kind: 'images'; pdfUrl: string; pages: { page: number; src: string }[] };
+
+// ── K-1 tracker (Demo Mode only for now) ──
+export const K1_STATUSES = ['Expected', 'Estimate received', 'Final received', 'In review', 'Approved', 'Sent to accountant'] as const;
+export type K1Status = typeof K1_STATUSES[number];
+export interface K1TrackerRow {
+  id: string; investment: string; entity: string; type: string; status: K1Status;
+  expected: string; received: string | null;
+  /** Days past the expected date, for a K-1 that has not arrived; otherwise 0. */
+  daysLate: number;
+  openFlags: number; lastAction: string; lastActionOn: string;
+  /** The review item to open, when the K-1 has been read. */
+  reviewId: string | null;
+}
+export interface K1Tracker { office: string; taxYear: number; today: string; rows: K1TrackerRow[] }
+export type K1Export = 'figures' | 'exceptions' | 'outstanding';

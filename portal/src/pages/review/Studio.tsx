@@ -30,6 +30,8 @@ const TRAIL: Record<string, (m: Record<string, unknown>) => string> = {
   'review.approved': (m) => (m.reason ? `Approved over a failing check: ${m.reason}` : 'Approved'),
   'review.rejected': (m) => `Rejected: ${m.reason}`,
   'review.exported': (m) => `Exported as ${String(m.format).toUpperCase()}`,
+  'review.fields_approved': (m) => `Approved ${m.fields}`,
+  'review.check_noted': (m) => `Note on "${m.check}": ${m.note}`,
 };
 
 function DocumentPane({ doc, item, field, onPick }: { doc: ReviewDocument | null; item: ReviewItem; field: ReviewField | null; onPick: (id: string) => void }) {
@@ -47,6 +49,29 @@ function DocumentPane({ doc, item, field, onPick }: { doc: ReviewDocument | null
     const page = field?.page ?? 1;
     // Re-created per page: the built-in viewer only reads #page when it loads.
     return <iframe key={page} src={`${doc.url}#page=${page}&navpanes=0`} title={`Source document: ${item.documentName ?? item.title}`} />;
+  }
+  if (doc.kind === 'images') {
+    const pct = (n: number) => `${n * 100}%`;
+    return (
+      <div className="pages">
+        <a className="pdf-link" href={doc.pdfUrl} target="_blank" rel="noreferrer">Open the PDF</a>
+        {doc.pages.map((p) => (
+          <div key={p.page} className="sheet-img" data-page={p.page}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              const [x, y] = [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
+              const hit = item.fields.find((f) => f.page === p.page && f.box && x >= f.box[0] && x <= f.box[0] + f.box[2] && y >= f.box[1] && y <= f.box[1] + f.box[3]);
+              if (hit) onPick(hit.id);
+            }}>
+            <img src={p.src} alt={`Page ${p.page} of ${item.title}`} />
+            {field?.page === p.page && field.box && (
+              <span className="hl" data-field={field.id} ref={(el) => el?.scrollIntoView({ block: 'nearest' })}
+                style={{ left: pct(field.box[0]), top: pct(field.box[1]), width: pct(field.box[2]), height: pct(field.box[3]) }} />
+            )}
+          </div>
+        ))}
+      </div>
+    );
   }
   return (
     <div className="pages">
@@ -106,6 +131,8 @@ export function Studio() {
   const [dialog, setDialog] = useState<'approve' | 'reject' | null>(null);
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
+  const [compare, setCompare] = useState(false);
+  const [notes, setNotes] = useState<Record<string, string>>({});
 
   const q = useQuery({
     queryKey: ['review-item', orgId, id], queryFn: () => data.getReviewItem(id),
@@ -148,8 +175,26 @@ export function Studio() {
     onError: (err) => setError(errorMessage(err)),
   });
 
+  const approveFields = useMutation({
+    mutationFn: (fieldIds: string[]) => data.approveReviewFields!(id, fieldIds),
+    onSuccess: (item) => { setError(''); adopt(item); },
+    onError: (err) => setError(errorMessage(err)),
+  });
+  const note = useMutation({
+    mutationFn: (n: { checkId: string; text: string }) => data.noteReviewCheck!(id, n.checkId, n.text),
+    onSuccess: (item) => { setError(''); adopt(item); },
+    onError: (err) => setError(errorMessage(err)),
+  });
+
   if (q.error instanceof ApiError && q.error.status === 404) return <NotFound />;
   const item = q.data;
+  // Per-field approval: set by the document type, and only where the data source can record it.
+  const perField = !!item?.fieldApproval && !!data.approveReviewFields && !!data.noteReviewCheck;
+  const reference = item?.groups.filter((g) => g.reference).map((g) => g.key) ?? [];
+  const unapproved = perField ? item!.fields.filter((f) => !reference.includes(f.group) && !f.approvedAt) : [];
+  const openFlags = perField ? item!.checks.filter((c) => c.status === 'fail' && !c.note) : [];
+  const prior = (f: ReviewField) => item?.fields.find((x) => x.group === 'prior' && x.key === f.key);
+  const working = edit.isPending || approveFields.isPending || note.isPending;
   const field = item?.fields.find((f) => f.id === picked) ?? null;
   const failing = item?.checks.filter((c) => c.status === 'fail') ?? [];
   const blocking = failing.filter((c) => c.blocking);
@@ -157,7 +202,7 @@ export function Studio() {
   const go = (to: string | undefined) => { if (to) { setPicked(null); navigate(`${data.base}/review/${to}`); } };
 
   const value = (f: ReviewField) => (
-    <Value key={f.id + f.value} field={f} on={f.id === picked} editable={!!item?.canDecide} busy={edit.isPending}
+    <Value key={f.id + f.value} field={f} on={f.id === picked} editable={!!item?.canDecide && !reference.includes(f.group)} busy={working}
       onPick={() => setPicked(f.id)} onSave={(v) => edit.mutate({ id: f.id, value: v })} />
   );
 
@@ -182,6 +227,44 @@ export function Studio() {
               <div>{item.status === 'approved' ? 'Approved' : 'Rejected'} by {item.decidedByName}{item.decidedAt ? ` on ${dateTime(item.decidedAt)}` : ''}.{item.decisionReason ? ` Reason given: ${item.decisionReason}` : ''}</div>
             </div>
           )}
+          {perField && (
+            <section className="card flags" aria-label="Checks">
+              <div className="flags-head">
+                <strong>{item.checks.filter((c) => c.status === 'fail').length === 0 ? 'Every check passes' : `${item.checks.filter((c) => c.status === 'fail').length} flagged`}</strong>
+                <span className="muted">{item.checksPassed} of {item.checksTotal} checks pass</span>
+                <span className="grow" />
+                {item.fields.some((f) => f.group === 'prior') && (
+                  <label className="compare"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} /> Compare with last year</label>
+                )}
+              </div>
+              <ul className="checks">
+                {item.checks.filter((c) => c.status === 'fail').map((c) => (
+                  <li key={c.id} data-check={c.id}>
+                    <span className={`pill ${c.blocking ? 'pill-bad' : 'pill-warn'}`}>{c.blocking ? 'Hard check' : 'Soft check'}</span>
+                    <div style={{ flex: 1 }}>
+                      <strong>{c.label}</strong><span className="detail">{c.detail}</span>
+                      {c.note
+                        ? <span className="detail">Note: {c.note.text} <span className="muted">({c.note.by}, {dateTime(c.note.at)})</span>{item.canDecide && <> <button type="button" className="link-btn" onClick={() => note.mutate({ checkId: c.id, text: '' })}>Remove</button></>}</span>
+                        : item.canDecide && (
+                          <form className="note-form" onSubmit={(e) => { e.preventDefault(); note.mutate({ checkId: c.id, text: notes[c.id] ?? '' }); }}>
+                            <input className="input" aria-label={`Note for: ${c.label}`} placeholder="Fix the field, or say why this is accepted" value={notes[c.id] ?? ''} onChange={(e) => setNotes({ ...notes, [c.id]: e.target.value })} />
+                            <button type="submit" className="btn" disabled={note.isPending || (notes[c.id] ?? '').trim().length < 3}>Save note</button>
+                          </form>
+                        )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <details className="passing">
+                <summary>Show the checks that pass or were not run</summary>
+                <ul className="checks">
+                  {item.checks.filter((c) => c.status !== 'fail').map((c) => (
+                    <li key={c.id}><span className={`pill ${c.status === 'pass' ? 'pill-ok' : ''}`}>{c.status === 'pass' ? 'Pass' : 'Not run'}</span><div><strong>{c.label}</strong><span className="detail">{c.detail}</span></div></li>
+                  ))}
+                </ul>
+              </details>
+            </section>
+          )}
           <div className="studio">
             <section className="card studio-doc" aria-label="Source document">
               <DocumentPane doc={data.reviewDocument(item)} item={item} field={field} onPick={(fid) => { setTab('fields'); setPicked(fid); }} />
@@ -190,13 +273,15 @@ export function Studio() {
             <section className="card" aria-label="Extracted data">
               <div className="tabs" role="tablist">
                 <button type="button" role="tab" aria-selected={tab === 'fields'} onClick={() => setTab('fields')}>Fields{item.flagged > 0 && <span className="muted num"> · {item.flagged} to check</span>}</button>
+                {!perField && (
                 <button type="button" role="tab" aria-selected={tab === 'checks'} onClick={() => setTab('checks')}>
                   Checks <span className={`num ${failing.length ? 'bad' : 'muted'}`}>{item.checksPassed}/{item.checksTotal}</span>
                 </button>
+                )}
                 <button type="button" role="tab" aria-selected={tab === 'audit'} onClick={() => setTab('audit')}>Audit</button>
               </div>
 
-              {tab === 'fields' && item.groups.map((g) => {
+              {tab === 'fields' && item.groups.filter((g) => !g.hidden).map((g) => {
                 const fields = item.fields.filter((f) => f.group === g.key);
                 if (!fields.length) return null;
                 const singles = fields.filter((f) => f.row === null);
@@ -204,10 +289,25 @@ export function Studio() {
                 const cols = fields.filter((f) => f.row === rows[0]);
                 return (
                   <div key={g.key} className="fgroup">
-                    <h3>{g.label}{rows.length > 0 && <span className="num"> · {rows.length} rows</span>}</h3>
+                    <h3>{g.label}{rows.length > 0 && <span className="num"> · {rows.length} rows</span>}
+                      {perField && !g.reference && (() => {
+                        // One click for the fields read with confidence; the doubtful ones are confirmed one at a time.
+                        const ready = fields.filter((f) => !f.approvedAt && (f.confidence === null || f.confidence >= 0.8));
+                        return (
+                          <span className="group-approve">
+                            <span className="num">{fields.filter((f) => f.approvedAt).length} of {fields.length} approved</span>
+                            {item.canDecide && ready.length > 0 && <button type="button" className="link-btn" disabled={working} onClick={() => approveFields.mutate(ready.map((f) => f.id))}>Approve section</button>}
+                          </span>
+                        );
+                      })()}
+                    </h3>
                     {singles.map((f) => (
-                      <div key={f.id} className="frow" data-on={f.id === picked}>
-                        <span>{f.label}</span>{value(f)}<ConfidenceChip value={f.editedAt ? null : f.confidence} /><span className="pgno">{f.page !== null ? `p.${f.page}` : ''}</span>
+                      <div key={f.id} className={`frow${perField ? ' frow-approve' : ''}`} data-on={f.id === picked} data-key={`${f.group}.${f.key}`}>
+                        <span>{f.label}{compare && prior(f) && !g.reference && <span className="prior">Last year: {prior(f)!.value || 'none'}</span>}</span>
+                        {value(f)}<ConfidenceChip value={f.editedAt ? null : f.confidence} /><span className="pgno">{f.page !== null ? `p.${f.page}` : ''}</span>
+                        {perField && (g.reference ? <span />
+                          : f.approvedAt ? <span className="approved" title={`Approved by ${f.approvedByName} on ${dateTime(f.approvedAt)}`}>✓ Approved</span>
+                            : item.canDecide ? <button type="button" className="link-btn" disabled={working} aria-label={`Approve ${f.label}`} onClick={() => approveFields.mutate([f.id])}>Approve</button> : <span />)}
                       </div>
                     ))}
                     {rows.length > 0 && (
@@ -258,10 +358,15 @@ export function Studio() {
             <button type="button" className="btn" disabled={download.isPending} onClick={() => download.mutate('csv')}>Export CSV</button>
             <button type="button" className="btn" disabled={download.isPending} onClick={() => download.mutate('json')}>Export JSON</button>
             {item.canDecide && (
-              <button type="button" className="btn btn-primary" disabled={decide.isPending}
-                onClick={() => { setReason(''); setError(''); if (blocking.length) setDialog('approve'); else decide.mutate('approve'); }}>
-                {decide.isPending ? 'Saving…' : 'Approve'}
-              </button>
+              <>
+                {perField && (unapproved.length > 0 || openFlags.length > 0) && (
+                  <span className="muted num" role="status">{[unapproved.length ? `${unapproved.length} fields to approve` : '', openFlags.length ? `${openFlags.length} flags to clear or note` : ''].filter(Boolean).join(' · ')}</span>
+                )}
+                <button type="button" className="btn btn-primary" disabled={decide.isPending || (perField && (unapproved.length > 0 || openFlags.length > 0))}
+                  onClick={() => { setReason(''); setError(''); if (blocking.length && !perField) setDialog('approve'); else decide.mutate('approve'); }}>
+                  {decide.isPending ? 'Saving…' : perField && item.template === 'k1' ? 'Approve K-1' : 'Approve'}
+                </button>
+              </>
             )}
           </div>
 
