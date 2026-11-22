@@ -3,6 +3,7 @@
 // ever shown under the "Demo workspace · synthetic data" banner.
 import type { ActionItem, Engagement, ReviewField, SyntheticPage, Vertical } from '../lib/types';
 import { MONTHS, TEMPLATES } from './checks';
+import { K1, k1Documents } from './k1';
 
 /** Small seeded generator so a demo looks the same on every visit. */
 export function rng(seed: number) {
@@ -25,6 +26,8 @@ type Misreads = Record<string, { value?: string; confidence: number }>;
 export interface ExampleDocument {
   template: string; title: string; subject: string; period: string; hoursAgo: number;
   fields: ReviewField[]; pages: SyntheticPage[];
+  /** K-1s: page images of the sample PDF, shown instead of `pages`, and the tracker row it belongs to. */
+  images?: { pdfUrl: string; pages: { page: number; src: string }[] }; slug?: string;
   decided?: { status: 'approved'; by: string };
 }
 
@@ -163,10 +166,12 @@ export interface ExampleWorkspace {
   request: Pick<ActionItem, 'kind' | 'title' | 'detail'>;
   signoff: string;
   documents: ExampleDocument[];
+  /** A fixed "today" (YYYY-MM-DD) for a demo whose dates must not move. */
+  today?: string;
 }
 
 // The firm names say "Demo" so nobody mistakes one for a client.
-export const EXAMPLE_WORKSPACES: Record<'cre' | 'bank' | 'investment', () => ExampleWorkspace> = {
+export const EXAMPLE_WORKSPACES: Record<'cre' | 'bank' | 'investment' | 'family-office', () => ExampleWorkspace> = {
   cre: () => ({
     vertical: 'CRE', name: 'Demo Property Group', engagement: 'Rent roll and T-12 intake',
     workflows: [
@@ -208,6 +213,15 @@ export const EXAMPLE_WORKSPACES: Record<'cre' | 'bank' | 'investment', () => Exa
       subscription(33, 'E. Novak', 'Fund II', 28, true),
       { ...subscription(34, 'Jansen Ventures LLC', 'Fund II', 160, false), decided: { status: 'approved', by: 'Priya Raman' } },
     ],
+  }),
+  'family-office': () => ({
+  vertical: 'INVESTMENT_FIRM', name: K1.office, engagement: 'K-1 collection and review', today: K1.today,
+  workflows: [
+    { name: 'K-1 intake', description: 'Reads each K-1 as it arrives, extracts every box, and checks it against the capital account, last year and the office ledger.', baselineMinutes: 25, basis: 'Example baseline: 25 minutes to key and tie out one K-1 by hand', perDay: 1 },
+  ],
+  request: { kind: 'documents', title: "Send last year's K-1s for both entities", detail: 'They supply the opening balances the checks compare against.' },
+  signoff: "UAT on last year's K-1s",
+  documents: k1Documents(),
   }),
 };
 

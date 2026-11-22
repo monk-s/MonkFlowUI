@@ -8,7 +8,7 @@
 // would leak requests to the real API.
 import { createContext, useContext } from 'react';
 import type {
-  ActionItem, ActivityEntry, Engagement, PeriodDays, ReviewDocument, ReviewItem, ReviewList, ReviewStatus, Role, RunDetail, SsoProvider, Team, Telemetry, Vertical,
+  ActionItem, ActivityEntry, Engagement, K1Export, K1Tracker, PeriodDays, ReviewDocument, ReviewItem, ReviewList, ReviewStatus, Role, RunDetail, SsoProvider, Team, Telemetry, Vertical,
   WorkflowDetail, WorkflowRow, AuditFilter, AuditPage, Connection, Requests, VaultDocument,
 } from '../lib/types';
 
@@ -70,6 +70,18 @@ export interface PortalDataSource {
   rejectReview(id: string, reason: string): Promise<ReviewItem>;
   /** The reviewed fields as a file. Every export is logged. */
   exportReview(id: string, format: 'csv' | 'json'): Promise<{ filename: string; blob: Blob }>;
+
+  // Per-field approval and the K-1 tracker. Optional: only Demo Mode has them
+  // so far, and screens show these features only where the methods exist.
+  approveReviewFields?(id: string, fieldIds: string[]): Promise<ReviewItem>;
+  /** Record why a failing check is accepted; an empty note removes it. */
+  noteReviewCheck?(id: string, checkId: string, text: string): Promise<ReviewItem>;
+  getK1Tracker?(): Promise<K1Tracker>;
+  /** A K-1 that arrived outside the usual route. Nothing reads the file in the demo. */
+  uploadK1?(filename: string): Promise<void>;
+  /** Mark every approved K-1 as sent to the accountant. */
+  sendK1sToAccountant?(): Promise<void>;
+  exportK1s?(kind: K1Export): Promise<{ filename: string; blob: Blob }>;
 
   // Requests, Vault, Integrations
   getRequests(): Promise<Requests>;

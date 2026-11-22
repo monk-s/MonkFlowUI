@@ -28,6 +28,7 @@ import { WorkflowDetail } from './pages/workflows/WorkflowDetail';
 import { RunDetail } from './pages/workflows/RunDetail';
 import { Queue } from './pages/review/Queue';
 import { Studio } from './pages/review/Studio';
+import { K1Handoff, K1Tracker } from './pages/k1/K1';
 
 // Loaded on demand: it is the only screen that needs the QR-code library.
 const MfaSetup = lazy(() => import('./auth/MfaSetup').then((m) => ({ default: m.MfaSetup })));
@@ -56,6 +57,8 @@ const pages: RouteObject[] = [
   { index: true, element: <Overview />, handle: { title: 'Overview' } },
   { path: 'review', element: <Queue />, handle: { title: 'Review' } },
   { path: 'review/:id', element: <Studio />, handle: { title: 'Review' } },
+  { path: 'k1', element: <K1Tracker />, handle: { title: 'K-1 tracker' } },
+  { path: 'k1/export', element: <K1Handoff />, handle: { title: 'Accountant export' } },
   { path: 'workflows', element: <Workflows />, handle: { title: 'Workflows' } },
   { path: 'workflows/:id', element: <WorkflowDetail />, handle: { title: 'Workflows' } },
   { path: 'workflows/:id/runs/:runId', element: <RunDetail />, handle: { title: 'Workflows' } },

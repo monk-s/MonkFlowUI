@@ -464,6 +464,12 @@ CLIENT PORTAL    /sign-in  /invite/*  /auth/*  /select-workspace  /dashboard/*  
     src/demo/             — fixtures.ts (EXAMPLE_DATA: invented firms and documents) and
                             checks.ts (a copy of the server's check evaluator, plus the
                             bank and investment templates that exist only in the demo)
+    src/pages/k1/         — K-1 tracker and accountant export. Shown only where the data
+                            source has getK1Tracker (today: /demo/family-office). K-1 data is
+                            demo/k1-data.json; `node portal/scripts/k1-pdfs.mjs` redraws the
+                            sample PDFs, page images and field positions after it changes.
+                            The `k1` document type (templates.json) has per-field approval;
+                            the server knows its checks but not per-field approval yet
     src/verticals/        — wording per client type (CRE / BANK / INVESTMENT_FIRM)
     src/styles/tokens.css — the portal's design tokens (single source)
     tests/                — Playwright, screen level, against the Vite dev server

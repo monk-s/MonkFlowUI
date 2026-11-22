@@ -30,6 +30,11 @@ export const NAV: NavItem[] = [
   { to: '/vault', label: 'Vault', icon: FolderLock, permission: 'vault.view' },
   { to: '/requests', label: 'Requests', icon: MessagesSquare, permission: 'requests.create' },
 ];
+// Shown only where the data source has a K-1 tracker (the family-office demo).
+const K1_NAV: NavItem[] = [
+  { to: '/k1', label: 'K-1 tracker', icon: ClipboardCheck, permission: 'review.view', end: true },
+  { to: '/k1/export', label: 'Accountant export', icon: FolderLock, permission: 'data.export' },
+];
 export const NAV_FOOT: NavItem[] = [{ to: '/settings', label: 'Settings', icon: Settings }];
 
 function PageSkeleton() {
@@ -84,7 +89,7 @@ export function AppShell() {
   const org = session.org;
   const pack = verticalPack(org.vertical);
   const at = (i: NavItem): NavItem => ({ ...i, to: base + i.to });
-  const nav = NAV.filter((i) => !i.permission || can(i.permission)).map(at);
+  const nav = [...(data.getK1Tracker ? K1_NAV : []), ...NAV].filter((i) => !i.permission || can(i.permission)).map(at);
   const foot = NAV_FOOT.map(at);
   const waiting = queue.data?.counts.queued ?? 0;
   const name = `${session.user.firstName} ${session.user.lastName}`.trim() || session.user.email;

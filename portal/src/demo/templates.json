@@ -203,5 +203,293 @@
         "blocking": true
       }
     ]
+  },
+  "k1": {
+    "label": "Schedule K-1",
+    "fieldApproval": true,
+    "groups": [
+      {
+        "key": "part1",
+        "label": "Part I: the partnership (A to D)"
+      },
+      {
+        "key": "part2",
+        "label": "Part II: the partner (E to N)"
+      },
+      {
+        "key": "capital",
+        "label": "Part II, Item L: capital account"
+      },
+      {
+        "key": "part3",
+        "label": "Part III: boxes 1 to 23"
+      },
+      {
+        "key": "coded",
+        "label": "Part III: coded items (11, 13, 18, 19, 20)"
+      },
+      {
+        "key": "records",
+        "label": "Office records",
+        "reference": true
+      },
+      {
+        "key": "prior",
+        "label": "Last year's K-1",
+        "reference": true,
+        "hidden": true
+      },
+      {
+        "key": "estimate",
+        "label": "Estimate received earlier",
+        "reference": true,
+        "hidden": true
+      }
+    ],
+    "checks": [
+      {
+        "id": "roll_forward",
+        "kind": "formula",
+        "label": "Item L rolls forward: beginning + contributed + net income + other - distributions = ending",
+        "blocking": true,
+        "terms": [
+          "+capital.beginning",
+          "+capital.contributed",
+          "+capital.net_income",
+          "+capital.other",
+          "-capital.distributions"
+        ],
+        "equals": "capital.ending"
+      },
+      {
+        "id": "opening",
+        "kind": "formula",
+        "label": "Beginning capital equals last year's ending capital",
+        "blocking": true,
+        "terms": [
+          "+prior.ending"
+        ],
+        "needs": [
+          "prior.ending"
+        ],
+        "equals": "capital.beginning"
+      },
+      {
+        "id": "dist_box19",
+        "kind": "formula",
+        "label": "Item L distributions equal Box 19",
+        "blocking": true,
+        "terms": [
+          "+coded.19*"
+        ],
+        "equals": "capital.distributions"
+      },
+      {
+        "id": "dist_ledger",
+        "kind": "formula",
+        "label": "Item L distributions equal the office ledger",
+        "blocking": true,
+        "terms": [
+          "+records.ledger_distributions"
+        ],
+        "needs": [
+          "records.ledger_distributions"
+        ],
+        "equals": "capital.distributions"
+      },
+      {
+        "id": "identity",
+        "kind": "match",
+        "label": "Partner name, partner TIN and partnership EIN match the office's records",
+        "blocking": true,
+        "pairs": [
+          [
+            "part2.partner_name",
+            "records.partner_name"
+          ],
+          [
+            "part2.partner_tin",
+            "records.partner_tin"
+          ],
+          [
+            "part1.ein",
+            "records.partnership_ein"
+          ]
+        ]
+      },
+      {
+        "id": "box4",
+        "kind": "formula",
+        "label": "Box 4c equals 4a plus 4b",
+        "blocking": true,
+        "terms": [
+          "+part3.4a",
+          "+part3.4b"
+        ],
+        "equals": "part3.4c"
+      },
+      {
+        "id": "box6",
+        "kind": "formula",
+        "label": "Box 6b is not more than Box 6a",
+        "blocking": true,
+        "terms": [
+          "+part3.6b"
+        ],
+        "op": "lte",
+        "equals": "part3.6a"
+      },
+      {
+        "id": "box9b",
+        "kind": "formula",
+        "label": "Box 9b is not more than Box 9a when 9a is a gain",
+        "blocking": true,
+        "terms": [
+          "+part3.9b"
+        ],
+        "op": "lte",
+        "equals": "part3.9a",
+        "whenPositive": "part3.9a"
+      },
+      {
+        "id": "box9c",
+        "kind": "formula",
+        "label": "Box 9c is not more than Box 9a when 9a is a gain",
+        "blocking": true,
+        "terms": [
+          "+part3.9c"
+        ],
+        "op": "lte",
+        "equals": "part3.9a",
+        "whenPositive": "part3.9a"
+      },
+      {
+        "id": "income_tieout",
+        "kind": "formula",
+        "label": "Income boxes, adjusted for 18A, 18C and 21, are close to Item L net income",
+        "blocking": false,
+        "terms": [
+          "+part3.1",
+          "+part3.2",
+          "+part3.3",
+          "+part3.4c",
+          "+part3.5",
+          "+part3.6a",
+          "+part3.7",
+          "+part3.8",
+          "+part3.9a",
+          "+part3.10",
+          "+coded.11*",
+          "-part3.12",
+          "+coded.13*",
+          "+coded.18A",
+          "+coded.18C",
+          "-part3.21"
+        ],
+        "equals": "capital.net_income",
+        "tolerance": 500
+      },
+      {
+        "id": "swing",
+        "kind": "compare",
+        "label": "No box moved more than 25% and $10,000 from last year",
+        "blocking": false,
+        "groups": [
+          "part3",
+          "coded"
+        ],
+        "against": "prior",
+        "pct": 25,
+        "abs": 10000
+      },
+      {
+        "id": "j_change",
+        "kind": "flag",
+        "test": "changed",
+        "label": "Item J share of capital is unchanged, or a transfer is on record",
+        "blocking": false,
+        "field": "part2.j_capital",
+        "against": "prior.j_capital",
+        "unless": "records.transfer"
+      },
+      {
+        "id": "estimate",
+        "kind": "compare",
+        "label": "Final figures agree with the estimate received earlier",
+        "blocking": false,
+        "groups": [
+          "part3",
+          "coded"
+        ],
+        "against": "estimate",
+        "pct": 0,
+        "abs": 0
+      },
+      {
+        "id": "k3",
+        "kind": "flag",
+        "test": "truthy",
+        "label": "Routing: no Schedule K-3 to pass on",
+        "blocking": false,
+        "field": "part3.16",
+        "detail": "Box 16 is checked: a Schedule K-3 is attached and goes to the accountant with this K-1."
+      },
+      {
+        "id": "final_k1",
+        "kind": "flag",
+        "test": "truthy",
+        "label": "Routing: not a final K-1",
+        "blocking": false,
+        "field": "part1.final",
+        "detail": "Marked as a final K-1: the investment has ended or been disposed of."
+      },
+      {
+        "id": "amended",
+        "kind": "flag",
+        "test": "truthy",
+        "label": "Routing: not an amended K-1",
+        "blocking": false,
+        "field": "part1.amended",
+        "detail": "Marked as amended: it replaces a K-1 already received."
+      },
+      {
+        "id": "codes",
+        "kind": "flag",
+        "test": "codes",
+        "label": "Routing: codes in boxes 11, 13 and 20 are ones the office has seen before",
+        "blocking": false,
+        "group": "coded",
+        "prefixes": [
+          "11",
+          "13",
+          "20"
+        ],
+        "known": [
+          "11A",
+          "13H",
+          "20A",
+          "20B",
+          "20Z"
+        ]
+      },
+      {
+        "id": "needs_20z",
+        "kind": "flag",
+        "test": "requires",
+        "label": "Routing: Box 20 code Z is present when Box 1 shows income",
+        "blocking": false,
+        "if": "part3.1",
+        "need": "coded.20Z",
+        "detail": "Box 1 shows income but there is no Box 20 code Z statement."
+      },
+      {
+        "id": "confidence",
+        "kind": "flag",
+        "test": "confidence",
+        "label": "Low-confidence fields have been confirmed by hand",
+        "blocking": false,
+        "below": 0.8
+      }
+    ]
   }
 }

@@ -281,3 +281,24 @@ test('the portal role can edit and decide, and nothing more', async () => {
   }));
   expect(seen).toEqual({ items: 0, docs: 0, touched: 0 });
 });
+
+test('a K-1 is checked: roll-forward, last year, the ledger, box rules and routing flags', () => {
+  const f = (group, key, value, more = {}) => ({ group, row: null, key, label: `${group}.${key}`, value, confidence: 0.99, ...more });
+  // EXAMPLE_DATA: an invented K-1 whose ending capital is overstated by 2,000.
+  const fields = [
+    f('capital', 'beginning', '512,300'), f('capital', 'contributed', '0'), f('capital', 'net_income', '(41,700)'), f('capital', 'other', '0'),
+    f('capital', 'distributions', '36,000'), f('capital', 'ending', '436,600'),
+    f('part3', '1', ''), f('part3', '2', '(38,900)'), f('part3', '5', '1,150'), f('part3', '6a', '18,400'), f('part3', '6b', '21,000', { confidence: 0.58 }), f('part3', '16', 'Yes'),
+    f('coded', '13H', '(3,950)'), f('coded', '19A', '36,000'), f('coded', '11ZZ', '18,400'),
+    f('prior', 'ending', '498,800'), f('prior', '2', '(35,200)'), f('records', 'ledger_distributions', '48,000'),
+  ];
+  const status = Object.fromEntries(runChecks('k1', fields).map((c) => [c.id, c.status]));
+  expect(status).toMatchObject({
+    roll_forward: 'fail', opening: 'fail', dist_box19: 'pass', dist_ledger: 'fail', identity: 'na', box4: 'na', box6: 'fail', box9b: 'na',
+    swing: 'pass', estimate: 'na', k3: 'fail', final_k1: 'pass', codes: 'fail', needs_20z: 'pass', confidence: 'fail',
+  });
+  const fixed = fields.map((x) => (x.key === 'ending' && x.group === 'capital' ? { ...x, value: '434,600' } : x.key === '6b' ? { ...x, value: '12,100', editedAt: 'now' } : x));
+  expect(Object.fromEntries(runChecks('k1', fixed).map((c) => [c.id, c.status]))).toMatchObject({ roll_forward: 'pass', box6: 'pass', confidence: 'pass' });
+  // The document types that existed before are untouched by the new kinds.
+  expect(runChecks('rent_roll', []).every((c) => c.status === 'na')).toBe(true);
+});

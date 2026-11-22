@@ -1,0 +1,85 @@
+{
+  "office": "Cedar Ridge Family Office",
+  "taxYear": 2026,
+  "today": "2027-03-20",
+  "entities": {
+    "holdings": { "name": "Cedar Ridge Holdings LLC", "tin": "XX-XXX4821", "type": "Partnership" },
+    "trust": { "name": "Hartley Family Trust", "tin": "XX-XXX9056", "type": "Trust" }
+  },
+  "k1s": [
+    {
+      "slug": "bluebonnet", "investment": "Bluebonnet Growth Equity Fund III", "type": "Private equity", "entity": "holdings",
+      "status": "Final received", "expected": "2027-03-15", "received": "2027-03-11", "lastAction": "Final K-1 received from the fund portal", "lastActionOn": "2027-03-11",
+      "doc": {
+        "layout": "standard", "ein": "XX-XXX7310", "city": "Austin, TX", "j": "0.85%",
+        "capital": { "beginning": "1,240,000", "contributed": "150,000", "net_income": "86,420", "other": "0", "distributions": "210,000", "ending": "1,266,420" },
+        "boxes": { "1": "(3,150)", "5": "4,870", "6a": "12,300", "6b": "9,840", "8": "1,200", "9a": "72,960" },
+        "coded": { "13H": "(2,150)", "18A": "640", "18C": "(250)", "19A": "210,000" },
+        "prior": { "ending": "1,240,000", "1": "(2,900)", "5": "4,410", "6a": "11,900", "6b": "9,300", "8": "1,050", "9a": "64,100", "13H": "(1,980)", "18A": "610", "18C": "(240)", "19A": "185,000" },
+        "ledger": "210,000"
+      }
+    },
+    {
+      "slug": "mesquite", "investment": "Mesquite Multifamily Fund IV", "type": "Real estate", "entity": "holdings",
+      "status": "Final received", "expected": "2027-03-15", "received": "2027-03-13", "lastAction": "Final K-1 received by email", "lastActionOn": "2027-03-13",
+      "doc": {
+        "layout": "standard", "ein": "XX-XXX2264", "city": "San Antonio, TX", "j": "2.40%", "k_qualified": "184,500",
+        "capital": { "beginning": "512,300", "contributed": "0", "net_income": "(41,700)", "other": "0", "distributions": "36,000", "ending": "436,600" },
+        "boxes": { "2": "(38,900)", "5": "1,150" },
+        "coded": { "13H": "(3,950)", "19A": "36,000" },
+        "prior": { "ending": "498,800", "2": "(35,200)", "5": "1,020", "13H": "(3,600)", "19A": "36,000" },
+        "ledger": "48,000"
+      }
+    },
+    {
+      "slug": "brazos", "investment": "Brazos Hedge Strategies", "type": "Hedge fund", "entity": "trust",
+      "status": "Final received", "expected": "2027-03-15", "received": "2027-03-16", "lastAction": "Final K-1 received from the fund portal", "lastActionOn": "2027-03-16",
+      "doc": {
+        "layout": "standard", "ein": "XX-XXX5518", "city": "Houston, TX", "j": "1.10%", "k3": true,
+        "capital": { "beginning": "800,000", "contributed": "0", "net_income": "67,850", "other": "0", "distributions": "0", "ending": "867,850" },
+        "boxes": { "5": "9,200", "6a": "18,400", "6b": "12,100", "8": "14,650", "9a": "31,900" },
+        "coded": { "13H": "(6,300)", "20A": "27,600", "20B": "4,100" },
+        "prior": { "ending": "800,000", "5": "8,700", "6a": "17,200", "6b": "11,600", "8": "12,900", "9a": "27,400", "13H": "(5,900)" },
+        "ledger": "0",
+        "misreads": { "part3.6b": { "value": "21,000", "confidence": 0.58 } }
+      }
+    },
+    {
+      "slug": "permian", "investment": "Permian Royalty Partners II", "type": "Royalty", "entity": "trust",
+      "status": "Approved", "expected": "2027-03-15", "received": "2027-03-08", "lastAction": "Approved by Priya Raman", "lastActionOn": "2027-03-12",
+      "doc": {
+        "layout": "standard", "ein": "XX-XXX8841", "city": "Midland, TX", "j": "3.25%",
+        "capital": { "beginning": "610,000", "contributed": "0", "net_income": "73,470", "other": "0", "distributions": "61,800", "ending": "621,670" },
+        "boxes": { "5": "420", "7": "74,200" },
+        "coded": { "13H": "(1,150)", "19A": "61,800" },
+        "prior": { "ending": "610,000", "5": "390", "7": "69,800", "13H": "(1,080)", "19A": "58,000" },
+        "ledger": "61,800"
+      }
+    },
+    {
+      "slug": "lone-star", "investment": "Lone Star Credit Opportunities", "type": "Private credit", "entity": "holdings",
+      "status": "Estimate received", "expected": "2027-04-15", "received": null, "lastAction": "Estimate received; final due Apr 15", "lastActionOn": "2027-03-09"
+    },
+    {
+      "slug": "red-river", "investment": "Red River Infrastructure Partners", "type": "Infrastructure", "entity": "trust",
+      "status": "Expected", "expected": "2027-03-15", "received": null, "lastAction": "Reminder sent to the fund administrator", "lastActionOn": "2027-03-18"
+    },
+    {
+      "slug": "caprock", "investment": "Caprock Venture Partners VI", "type": "Venture capital", "entity": "holdings",
+      "status": "Expected", "expected": "2027-09-15", "received": null, "lastAction": "Fund gave notice of an extension to Sep 15", "lastActionOn": "2027-03-02"
+    },
+    {
+      "slug": "pecan-street", "investment": "Pecan Street Retail Holdings", "type": "Real estate", "entity": "holdings",
+      "status": "In review", "expected": "2027-03-15", "received": "2027-03-17", "lastAction": "Review started by Priya Raman", "lastActionOn": "2027-03-18",
+      "doc": {
+        "layout": "statement", "ein": "XX-XXX3097", "city": "Dallas, TX", "j": "5.00%",
+        "capital": { "beginning": "300,000", "contributed": "0", "net_income": "24,610", "other": "0", "distributions": "18,000", "ending": "306,610" },
+        "boxes": { "2": "22,400", "5": "310" },
+        "coded": { "11ZZ": "1,900", "19A": "18,000" },
+        "prior": { "ending": "300,000", "2": "20,900", "5": "280", "19A": "18,000" },
+        "estimate": { "2": "19,800", "5": "310", "19A": "18,000" },
+        "started": ["part1", "part2"]
+      }
+    }
+  ]
+}

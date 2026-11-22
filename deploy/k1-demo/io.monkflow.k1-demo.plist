@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.monkflow.k1-demo</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/natelinder/monkflow-cresa-pilot/.venv/bin/python</string>
+    <string>-I</string>
+    <string>/Users/natelinder/monkflow-demos/k1-site/serve.py</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/natelinder/Library/Logs/k1-demo.log</string>
+  <key>StandardErrorPath</key><string>/Users/natelinder/Library/Logs/k1-demo.log</string>
+</dict>
+</plist>
