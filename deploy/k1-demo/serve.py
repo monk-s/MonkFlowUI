@@ -49,6 +49,8 @@ class Handler(BaseHTTPRequestHandler):
             cache = "public, max-age=31536000, immutable" if "/assets/" in path else "no-cache"
         elif path == "/demo/family-office" or path.startswith("/demo/family-office/"):
             full, cache = os.path.join(ROOT, "portal", "index.html"), "no-cache"
+        elif path == "/book":  # the demo banner's link; the booking page lives on the main site
+            return self._send(302, "text/plain; charset=utf-8", b"", {"Location": "https://monkflow.io/book"}, head)
         else:  # every other address, including the other demos and the sign-in pages, lands on the tracker
             return self._send(302, "text/plain; charset=utf-8", b"", {"Location": HOME}, head)
         with open(full, "rb") as f:
