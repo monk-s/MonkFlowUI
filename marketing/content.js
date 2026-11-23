@@ -104,7 +104,7 @@ MK.tfs = {
   metrics: [
     { value: '45 → under 5 min', label: 'Staff time per new-client onboarding' },
     { value: '2 weeks', label: 'From kickoff to live' },
-    { value: '2 days', label: 'For new accounts to fund, down from 5 to 7' },
+    { value: '2 business days', label: 'For new accounts to fund, down from 5 to 7' },
     { value: 'Under 30 sec', label: 'To pull a complete audit trail for any client' },
   ],
 };

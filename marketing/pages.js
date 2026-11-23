@@ -221,7 +221,7 @@ MK.demoCard = function (d) {
     '<span class="mk-demo-label">' + d.label + '</span>' +
     '<h3>' + d.title + '</h3>' +
     '<p>' + d.body + '</p>' +
-    '<p class="mk-small">Built by MonkFlow. Synthetic data, not a client deployment.</p>' +
+    '<p class="mk-small">Built by MonkFlow. Made-up data, not a client deployment.</p>' +
     '<span class="mk-arrow">' + d.cta + '</span>' +
   '</a>';
 };
@@ -479,7 +479,7 @@ MK.pages.caseStudies = function () {
   '<section class="mk-section" style="border-top:0;padding-top:0"><div class="mk-wrap">' +
     MK.tfsProof() +
     '<div class="mk-section-head" style="margin:72px 0 0"><span class="mk-eyebrow">Working demos</span><h2>Software you can try.</h2>' +
-    '<p class="mk-lede">Built by MonkFlow to show the pattern in other industries. They run on synthetic data and are not client deployments.</p></div>' +
+    '<p class="mk-lede">Built by MonkFlow to show the pattern in other industries. They run on made-up data and are not client deployments.</p></div>' +
     MK.demos() +
   '</div></section>' +
   MK.cta();
@@ -565,7 +565,7 @@ MK.pages.advisors = function () {
     '<h1>Make your Wealthbox or Redtail fit your practice.</h1>' +
     '<p class="mk-lede">Your CRM does what it was built to do. We build the layer above it: digital intake, signed-PDF generation, custodian paperwork automation and client portals that turn your CRM into the onboarding system your firm actually needs.</p>' +
     '<div class="mk-actions">' + MK.bookBtn('Book a call', { vertical: 'RIA / advisory firm' }) +
-      MK.link(MK.tfs.path, 'Read the TFS case study', 'mk-arrow') + '</div>' +
+      MK.link(MK.tfs.path, 'Read the case study', 'mk-arrow') + '</div>' +
   '</div></div></section>' +
 
   '<section class="mk-section"><div class="mk-wrap mk-split">' +
@@ -626,7 +626,7 @@ MK.pages.howWeWork = function () {
     MK.head('The workflow audit', 'What you get from an audit.', 'A contained first step for firms that want facts before committing to a build.') +
     '<div><ol class="mk-list mk-list-1">' +
       '<li><h3>A map of the workflow as it really runs</h3><p>Who touches it, in which systems, and where the re-keying and waiting are.</p></li>' +
-      '<li><h3>A systems and data-flow inventory</h3><p>What can be reached by API, what needs an export, and where the records of truth live.</p></li>' +
+      '<li><h3>A systems and data-flow inventory</h3><p>What can be reached by API, what needs an export, and where the systems of record are.</p></li>' +
       '<li><h3>Ranked automation opportunities</h3><p>The few changes worth making, in order, each with a scope you can act on.</p></li>' +
       '<li><h3>A data-handling note for your compliance or security team</h3><p>How data would move, where it would live and who could see it.</p></li>' +
     '</ol>' + MK.audit() + '</div>' +
@@ -821,7 +821,7 @@ MK.pages.security = function () {
       ]) +
     '</ul>' +
   '</div></section>' +
-  MK.cta({ title: 'Have a security questionnaire?', body: 'Send it over or book a session. We would rather answer the hard questions before the build than after.' });
+  MK.cta({ title: 'Have a security questionnaire?', body: 'Send it over or book a call. We would rather answer the hard questions before the build than after.' });
 };
 
 MK.pages.contact = function () {

@@ -109,7 +109,7 @@ MK.routes = [
   },
   {
     path: '/case-studies/team-financial-strategies',
-    title: 'Case Study: Team Financial Strategies Cut Onboarding from 45 Minutes to 5 | MonkFlow',
+    title: 'Case Study: Team Financial Strategies Cut Onboarding from 45 Minutes to Under 5 | MonkFlow',
     description: 'A custom intake form, Redtail sync and signed-PDF generation took new-client onboarding at a four-advisor firm from 45 minutes to under 5. Built in two weeks.',
     ogType: 'article',
     render: function () { return MK.pages.tfs(); },
@@ -322,7 +322,7 @@ MK.bench.show = function (b) {
   var out = document.querySelector('[data-bench-out]');
   if (!out) return;
   out.innerHTML = MK.bench.render(MK.bench.data, b);
-  if (!MK.bench.tracked) { MK.bench.tracked = true; MK.track('Bench Lookup', { band: MK.bench.data.bands[b.band] }); }
+  if (!MK.bench.tracked) { MK.bench.tracked = true; MK.track('Bench Lookup'); }
 };
 
 MK.track = function (name, props) {

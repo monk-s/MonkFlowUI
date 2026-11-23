@@ -4890,7 +4890,7 @@ function showSchedulingModal(opts) {
           <textarea id="sched-notes" required maxlength="1800" rows="2" style="resize:vertical;width:100%;">${escapeHtml(draft.notes)}</textarea>
         </div>
         <div class="modal-footer">
-          <button type="submit" class="btn btn-primary" id="sched-submit-btn" ${sending ? 'disabled' : ''}>${sending ? 'Booking...' : 'Book call'}</button>
+          <button type="submit" class="btn btn-primary" id="sched-submit-btn" ${sending ? 'disabled' : ''}>${sending ? 'Booking...' : 'Book a call'}</button>
         </div>
       </form>` : ''}
     `);
