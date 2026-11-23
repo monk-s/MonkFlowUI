@@ -4,6 +4,11 @@
   "outputDirectory": "dist",
   "redirects": [
     {
+      "source": "/demo/(.*)/",
+      "destination": "/demo/$1",
+      "permanent": false
+    },
+    {
       "source": "/sprint",
       "destination": "/",
       "permanent": true

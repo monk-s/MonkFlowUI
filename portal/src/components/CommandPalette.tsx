@@ -5,6 +5,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useNavigate } from 'react-router-dom';
 import { Building2, LogOut } from 'lucide-react';
 import { useSession } from '../auth/session';
+import { useData } from '../data/PortalDataSource';
 import type { NavItem } from './AppShell';
 
 export function CommandPalette({ open, onOpenChange, items }: { open: boolean; onOpenChange: (v: boolean) => void; items: NavItem[] }) {
@@ -38,7 +39,7 @@ export function CommandPalette({ open, onOpenChange, items }: { open: boolean; o
                 </Command.Group>
               )}
               <Command.Group heading="Account">
-                <Command.Item value="sign out" onSelect={() => run(() => void signOut())}><LogOut aria-hidden />Sign out</Command.Item>
+                <Command.Item value="sign out" onSelect={() => run(() => void signOut())}><LogOut aria-hidden />{useData().demo ? 'Leave the demo' : 'Sign out'}</Command.Item>
               </Command.Group>
             </Command.List>
           </Command>

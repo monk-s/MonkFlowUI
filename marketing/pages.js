@@ -108,7 +108,7 @@ MK.footer = function () {
         '<div><h4>Get started</h4><ul>' +
           '<li><button type="button" data-book>Book a call</button></li>' +
           '<li><button type="button" data-book data-intent="audit">Start with a workflow audit</button></li>' +
-          '<li>' + MK.link('/contact', 'Send a message') + '</li>' +
+          '<li>' + MK.link('/contact', 'Contact') + '</li>' +
           '<li><a href="/sign-in">Client sign in</a></li>' +
         '</ul></div>' +
       '</div>' +
@@ -150,7 +150,8 @@ MK.frame = function (inner, caption, style) {
 
 // Homepage hero: the document-review demo playing in a window frame.
 MK.heroShots = function () {
-  return MK.frame(MK.media(MK.demoList[0], true), 'A working demo with made-up data.');
+  var d = MK.demoList[0];
+  return MK.frame('<a href="' + d.url + '" target="_blank" rel="noopener" aria-label="' + d.cta + ': ' + MK.esc(d.title) + '">' + MK.media(d, true) + '</a>', 'A working demo with made-up data.');
 };
 
 // Homepage: one short card per demo, the whole card a link.
@@ -215,14 +216,14 @@ MK.tfsProof = function () {
 };
 
 MK.demoCard = function (d) {
-  return '<div class="mk-demo">' +
+  return '<a class="mk-demo" href="' + d.url + '" target="_blank" rel="noopener">' +
     (d.shot ? '<span class="mk-shot">' + MK.media(d) + '</span>' : '') +
     '<span class="mk-demo-label">' + d.label + '</span>' +
     '<h3>' + d.title + '</h3>' +
     '<p>' + d.body + '</p>' +
-    '<p class="mk-small">Built by MonkFlow. Synthetic data, not a client deployment.</p>' +
-    '<div class="mk-actions"><a class="mk-arrow" href="' + d.url + '" target="_blank" rel="noopener">' + d.cta + '</a></div>' +
-  '</div>';
+    '<p class="mk-small">Built by MonkFlow. Made-up data, not a client deployment.</p>' +
+    '<span class="mk-arrow">' + d.cta + '</span>' +
+  '</a>';
 };
 
 MK.demos = function (keys) {
@@ -251,7 +252,7 @@ MK.cta = function (opts) {
     '<div><h2>' + (opts.title || 'Bring us your worst manual workflow.') + '</h2>' +
     '<p class="mk-lede">' + (opts.body || 'A call is 30 minutes with the engineer who would build it. Walk through the process, and leave with a straight answer on whether it is worth automating.') + '</p></div>' +
     '<div class="mk-actions">' + MK.bookBtn('Book a call', { vertical: opts.vertical }) +
-      MK.link('/how-we-work', 'See how we work', 'mk-arrow') + '</div>' +
+      (opts.noHow ? '' : MK.link('/how-we-work', 'See how we work', 'mk-arrow')) + '</div>' +
   '</div></section>';
 };
 
@@ -261,7 +262,7 @@ MK.integrationRows = function (keys) {
   keys.forEach(function (k) {
     MK.verticals[k].integrations.forEach(function (it) {
       if (seen[it.name]) { seen[it.name].verticals.push(k); return; }
-      var row = { name: it.name, role: it.role, how: it.how, live: !!it.live, verticals: [k] };
+      var row = { name: it.name, role: it.role, how: it.how, verticals: [k] };
       seen[it.name] = row;
       rows.push(row);
     });
@@ -276,9 +277,9 @@ MK.integrations = function (keys) {
     keys.map(function (k) { return '<button type="button" class="mk-chip" data-filter="' + k + '" aria-pressed="false">' + MK.verticals[k].nav + '</button>'; }).join('') +
   '</div>';
   return '<div data-filter-group>' + chips +
-    '<div class="mk-table-wrap"><table class="mk-table mk-table-stack"><thead><tr><th>System</th><th>What it does for you</th><th>How we connect</th></tr></thead><tbody>' +
+    '<div class="mk-table-wrap"><table class="mk-table mk-table-stack"><thead><tr><th>System</th><th>What it does for you</th><th>How we would connect</th></tr></thead><tbody>' +
     MK.integrationRows(keys).map(function (r) {
-      return '<tr data-verticals="' + r.verticals.join(' ') + '"><td>' + r.name + (r.live ? '<span class="mk-tag">In production</span>' : '') + '</td><td class="mk-muted">' + r.role + '</td><td class="mk-muted">' + r.how + '</td></tr>';
+      return '<tr data-verticals="' + r.verticals.join(' ') + '"><td>' + r.name + '</td><td class="mk-muted">' + r.role + '</td><td class="mk-muted">' + r.how + '</td></tr>';
     }).join('') + '</tbody></table></div>' +
     '<p class="mk-small" style="margin-top:16px;max-width:76ch;">These are the systems we design around. Access depends on your license and each vendor\'s API program, and where there is no API we work from scheduled exports. Do not see yours? If it has an API or an export, we can build to it.</p>' +
   '</div>';
@@ -332,7 +333,7 @@ MK.pages.home = function () {
   '<section class="mk-hero"><div class="mk-wrap mk-hero-grid">' +
     '<div class="mk-hero-copy">' +
       '<h1>We build software that takes manual data work off your team.</h1>' +
-      '<p class="mk-lede">It reads your documents, pulls out the numbers and puts them in the systems you already use. A person checks every figure before it is saved.</p>' +
+      '<p class="mk-lede">It reads your documents, pulls out the numbers and puts them in the systems you already use. A person approves the result before anything is saved.</p>' +
       '<p class="mk-small">For commercial real estate firms, banks and investment firms.</p>' +
       '<div class="mk-actions">' + MK.bookBtn('Book a call') +
         '<a href="#examples" class="mk-arrow">See examples</a></div>' +
@@ -341,12 +342,12 @@ MK.pages.home = function () {
   '</div></section>' +
 
   '<section class="mk-section" id="examples"><div class="mk-wrap">' +
-    MK.head('Examples', 'Three things we have built.', 'Each one is a working demo you can open.') +
+    MK.head('Examples', 'Three things we have built.', 'Two working demos you can open, and one walkthrough.') +
     MK.examples() +
   '</div></section>' +
 
   '<section class="mk-section"><div class="mk-wrap">' +
-    MK.head('Client result', 'One named client, with numbers they confirmed.') +
+    MK.head('Client result', 'Our first client, with numbers they confirmed.') +
     MK.tfsProof() +
   '</div></section>' +
 
@@ -369,7 +370,7 @@ MK.pages.solutions = function () {
         '<div class="mk-actions" style="margin-top:18px">' + MK.link(v.path, v.name + ' solutions', 'mk-arrow') + '</div></div></li>';
     }).join('') +
     '<li><div><h3>Advisory firms (RIAs)</h3><p class="mk-small" style="margin-top:8px">Independent registered investment advisors.</p></div>' +
-      '<div><p class="mk-muted">Digital intake, CRM sync and signed-PDF generation on top of Redtail, Wealthbox or Salesforce. Where our first client work began.</p></div>' +
+      '<div><p class="mk-muted">Digital intake, CRM sync and signed-PDF generation Built on Redtail for our first client. The same approach works with Wealthbox and Salesforce.</p></div>' +
       '<div><div class="mk-actions">' + MK.link('/for-advisors', 'For advisory firms', 'mk-arrow') + '</div></div></li>' +
     '</ul>' +
   '</div></section>' +
@@ -398,11 +399,11 @@ MK.pages.vertical = function (key) {
   '</div></section>' +
 
   '<section class="mk-section" id="workflows"><div class="mk-wrap">' +
-    MK.head('Workflows we build', 'What changes, workflow by workflow.') +
+    MK.head('Workflows we can build', 'What changes, workflow by workflow.') +
     '<ul class="mk-work">' + v.workflows.map(function (w) {
       return '<li><div><h3>' + w.title + '</h3><span class="mk-mono">' + w.systems + '</span></div>' +
         '<dl><dt>Today</dt><dd>' + w.today + '</dd></dl>' +
-        '<dl><dt>What we build</dt><dd>' + w.build + '</dd>' +
+        '<dl><dt>What we would build</dt><dd>' + w.build + '</dd>' +
         (w.link ? '<dd style="margin-top:12px">' + MK.link(w.link.href, w.link.label, 'mk-arrow') + '</dd>' : '') + '</dl></li>';
     }).join('') + '</ul>' +
   '</div></section>' +
@@ -434,7 +435,7 @@ MK.pages.vertical = function (key) {
   '</div></section>' +
 
   '<section class="mk-section" style="border-top:0"><div class="mk-wrap mk-split">' +
-    MK.head('Questions', 'What firms ask us first.') +
+    MK.head('Questions', 'Common questions.') +
     MK.faq(v.faq) +
   '</div><div class="mk-wrap">' + MK.audit(v.bookAs) + '</div></section>' +
 
@@ -446,7 +447,7 @@ MK.pages.capabilities = function () {
   '<section class="mk-hero-simple"><div class="mk-wrap"><div class="mk-hero-copy">' +
     MK.crumbs([{ href: '/', label: 'Home' }, { label: 'Capabilities' }]) +
     '<h1>What we build, and how it connects to what you already run.</h1>' +
-    '<p class="mk-lede">Four capabilities, one engineer accountable for all of them. Most engagements combine two or three around a single workflow.</p>' +
+    '<p class="mk-lede">Four capabilities, one engineer accountable for all of them. A project usually needs two or three of them around a single workflow.</p>' +
   '</div></div></section>' +
   '<section class="mk-section" style="border-top:0;padding-top:0"><div class="mk-wrap">' +
     MK.frame(MK.shot(MK.verticalShots.cre), 'A review queue from our demo workspace. Made-up data.', 'margin-bottom:56px') +
@@ -473,12 +474,12 @@ MK.pages.caseStudies = function () {
   '<section class="mk-hero-simple"><div class="mk-wrap"><div class="mk-hero-copy">' +
     MK.crumbs([{ href: '/', label: 'Home' }, { label: 'Case studies' }]) +
     '<h1>Real work, labelled honestly.</h1>' +
-    '<p class="mk-lede">One named client with confirmed results, and working demos you can open yourself. Demos are marked as demos.</p>' +
+    '<p class="mk-lede">One client with confirmed results, and working demos you can open yourself. Demos are marked as demos.</p>' +
   '</div></div></section>' +
   '<section class="mk-section" style="border-top:0;padding-top:0"><div class="mk-wrap">' +
     MK.tfsProof() +
-    '<div class="mk-section-head" style="margin:72px 0 0"><span class="mk-eyebrow">Working demos</span><h2>Software you can try.</h2>' +
-    '<p class="mk-lede">Built by MonkFlow to show the pattern in other industries. They run on synthetic data and are not client deployments.</p></div>' +
+    '<div class="mk-section-head" style="margin:72px 0 0"><span class="mk-eyebrow">Working demos</span><h2>Software you can see.</h2>' +
+    '<p class="mk-lede">Built by MonkFlow to show the pattern in other industries. They run on made-up data and are not client deployments.</p></div>' +
     MK.demos() +
   '</div></section>' +
   MK.cta();
@@ -548,7 +549,7 @@ MK.pages.tfs = function () {
 
     '<div class="mk-aside">' +
       '<h3>Want this for your firm?</h3>' +
-      '<p>Advisory firms can see exactly what we build on top of Redtail, Wealthbox and Salesforce. Everyone else usually starts with a short call.</p>' +
+      '<p>Advisory firms can see what we built on Redtail, and how the same approach works with Wealthbox and Salesforce. Everyone else: start with a short call.</p>' +
       '<div class="mk-actions">' + MK.bookBtn('Book a call') + MK.link('/for-advisors', 'For advisory firms', 'mk-arrow') + '</div>' +
     '</div>' +
     '<p class="mk-byline">Jody Team, Founding Partner · Team Financial Strategies · Abilene, Texas</p>' +
@@ -561,14 +562,14 @@ MK.pages.advisors = function () {
   '<section class="mk-hero-simple"><div class="mk-wrap"><div class="mk-hero-copy">' +
     MK.crumbs([{ href: '/', label: 'Home' }, { href: '/solutions/investment-firms', label: 'Investment firms' }, { label: 'Advisory firms' }]) +
     '<span class="mk-eyebrow">Custom CRM extensions for independent advisors</span>' +
-    '<h1>Make your Wealthbox or Redtail fit your practice.</h1>' +
+    '<h1>Make your CRM fit your practice.</h1>' +
     '<p class="mk-lede">Your CRM does what it was built to do. We build the layer above it: digital intake, signed-PDF generation, custodian paperwork automation and client portals that turn your CRM into the onboarding system your firm actually needs.</p>' +
     '<div class="mk-actions">' + MK.bookBtn('Book a call', { vertical: 'RIA / advisory firm' }) +
-      MK.link(MK.tfs.path, 'Read the TFS case study', 'mk-arrow') + '</div>' +
+      MK.link(MK.tfs.path, 'Read the case study', 'mk-arrow') + '</div>' +
   '</div></div></section>' +
 
   '<section class="mk-section"><div class="mk-wrap mk-split">' +
-    MK.head('What we build', 'Forms, portals, automations, deployments.', 'Four buckets. Everything we ship for advisory firms sits inside one of them.') +
+    MK.head('What we build', 'Forms, portals, automations, deployments.', 'Four kinds of work.') +
     '<ol class="mk-list">' + a.buckets.map(function (b) {
       return '<li><span class="mk-num">' + b.label.toUpperCase() + '</span><h3>' + b.title + '</h3><p>' + b.body + '</p></li>';
     }).join('') + '</ol>' +
@@ -586,7 +587,7 @@ MK.pages.advisors = function () {
   '</div></section>' +
 
   '<section class="mk-section"><div class="mk-wrap">' +
-    MK.head('Scope', 'Three ways firms work with us.', 'Each is scoped to your firm and your CRM. You get a written scope and quote before any build starts.') +
+    MK.head('Scope', 'Three ways to start.', 'Each is scoped to your firm and your CRM. You get a written scope and quote before any build starts.') +
     '<ol class="mk-steps" style="grid-template-columns:repeat(3,minmax(0,1fr))">' + a.scopes.map(function (s, i) {
       return '<li>' + MK.num(i) + '<h3>' + s.title + '</h3><p>' + s.body + '</p></li>';
     }).join('') + '</ol>' +
@@ -595,11 +596,11 @@ MK.pages.advisors = function () {
   '<section class="mk-band"><div class="mk-wrap mk-split">' +
     '<div class="mk-section-head"><span class="mk-eyebrow">Security posture</span><h2>What happens to client PII?</h2>' +
       '<div class="mk-actions">' + MK.link('/security', 'Security and data handling', 'mk-arrow') + '</div></div>' +
-    '<div><p style="color:#dbe3ec">MonkFlow is a workflow layer, not a data store. Client information moves directly into your CRM, and we do not persist PII or financial data on our infrastructure. Data is protected with TLS in transit and AES-256 encryption at rest.</p>' +
+    '<div><p style="color:#dbe3ec">MonkFlow is a workflow layer, not a data store. Client information moves directly into your CRM. Where a signed document or upload is kept, it is stored encrypted for as long as you set. Data is protected with TLS in transit and AES-256 encryption at rest.</p>' +
     '<p style="color:#b9c5d3;margin-top:16px;font-size:15.5px">We will walk your chief compliance officer through the architecture on request.</p></div>' +
   '</div></section>' +
 
-  MK.cta({ title: 'Ready to extend your CRM?', body: 'Start with a 30-minute call. If it is a fit, an onboarding audit is the usual first step.', vertical: 'RIA / advisory firm' });
+  MK.cta({ title: 'Ready to extend your CRM?', body: 'Start with a 30-minute call. If it is a fit, the first step is a workflow audit.', vertical: 'RIA / advisory firm' });
 };
 
 MK.pages.howWeWork = function () {
@@ -611,7 +612,7 @@ MK.pages.howWeWork = function () {
   '</div></div></section>' +
 
   '<section class="mk-section"><div class="mk-wrap">' +
-    MK.head('Process', 'Four steps, every project.') + MK.steps() +
+    MK.head('Process', 'Four steps.') + MK.steps() +
   '</div></section>' +
 
   '<section class="mk-section mk-section-sunk" id="engagements"><div class="mk-wrap mk-split">' +
@@ -625,7 +626,7 @@ MK.pages.howWeWork = function () {
     MK.head('The workflow audit', 'What you get from an audit.', 'A contained first step for firms that want facts before committing to a build.') +
     '<div><ol class="mk-list mk-list-1">' +
       '<li><h3>A map of the workflow as it really runs</h3><p>Who touches it, in which systems, and where the re-keying and waiting are.</p></li>' +
-      '<li><h3>A systems and data-flow inventory</h3><p>What can be reached by API, what needs an export, and where the records of truth live.</p></li>' +
+      '<li><h3>A systems and data-flow inventory</h3><p>What can be reached by API, what needs an export, and where the systems of record are.</p></li>' +
       '<li><h3>Ranked automation opportunities</h3><p>The few changes worth making, in order, each with a scope you can act on.</p></li>' +
       '<li><h3>A data-handling note for your compliance or security team</h3><p>How data would move, where it would live and who could see it.</p></li>' +
     '</ol>' + MK.audit() + '</div>' +
@@ -640,7 +641,7 @@ MK.pages.howWeWork = function () {
     '</div>' +
   '</div></section>' +
 
-  MK.cta();
+  MK.cta({ noHow: true });
 };
 
 /* ---------- free tools ---------- */
@@ -795,8 +796,8 @@ MK.pages.security = function () {
     '<ul class="mk-work">' +
       block('Where your data lives', [
         'MonkFlow builds the workflow layer, not a data store. Records land in your system of record: your CRM, core, property-management or fund-admin system.',
-        'We do not persist client PII on MonkFlow infrastructure.',
-        'What we build can be deployed inside your own cloud environment, so data never leaves your perimeter.',
+        'By default, records go straight into your systems. Where you use our review portal, source files are stored encrypted and deleted on the date you set.',
+        'What we build can be deployed inside your own cloud environment, so data stays inside it.',
       ]) +
       block('Encryption', [
         'AES-256 encryption at rest for stored files and data.',
@@ -805,7 +806,7 @@ MK.pages.security = function () {
       block('Access and audit', [
         'Role-based access in everything we build, so each person sees only what their role requires.',
         'An audit trail of submissions, uploads, downloads, edits, approvals and signatures, with who and when.',
-        'On our side, access is limited to the engineer working on your system.',
+        'On our side, one engineer has access: the one who built your system.',
       ]) +
       block('How AI is used', [
         'AI is used for reading and drafting. Calculations and system updates are deterministic code.',
@@ -820,7 +821,7 @@ MK.pages.security = function () {
       ]) +
     '</ul>' +
   '</div></section>' +
-  MK.cta({ title: 'Have a security questionnaire?', body: 'Send it over or book a session. We would rather answer the hard questions before the build than after.' });
+  MK.cta({ title: 'Have a security questionnaire?', body: 'Send it over or book a call. We would rather answer the hard questions before the build than after.' });
 };
 
 MK.pages.contact = function () {
@@ -830,7 +831,7 @@ MK.pages.contact = function () {
   return '' +
   '<section class="mk-hero-simple"><div class="mk-wrap"><div class="mk-hero-copy">' +
     MK.crumbs([{ href: '/', label: 'Home' }, { label: 'Contact' }]) +
-    '<h1>Send us a message.</h1>' +
+    '<h1>Contact us.</h1>' +
     '<p class="mk-lede">We reply within one business day. If you would rather talk, ' + MK.bookBtn('book a call', { cls: 'mk-arrow' }) + '</p>' +
     '<form class="mk-form" data-contact>' +
       field('name', 'Full name', 'text', 'maxlength="200" autocomplete="name"') +
@@ -839,7 +840,7 @@ MK.pages.contact = function () {
       '<label>Message<textarea name="message" rows="5" required maxlength="5000"></textarea></label>' +
       // Left empty by people; filled in by form-spam bots.
       '<label class="mk-form-trap" aria-hidden="true">Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>' +
-      '<div class="mk-actions"><button type="submit" class="mk-btn mk-btn-primary">Send message</button>' +
+      '<div class="mk-actions"><button type="submit" class="mk-btn mk-btn-primary">Send</button>' +
         '<span class="mk-small" data-contact-status role="status"></span></div>' +
     '</form>' +
   '</div></div></section>';

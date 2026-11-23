@@ -88,7 +88,7 @@ MK.routes = [
   {
     path: '/for-advisors',
     title: 'Digital Intake & CRM Sync for Advisory Firms (RIAs) | MonkFlow',
-    description: 'Digital intake forms, CRM sync for Redtail, Wealthbox and Salesforce, and signed-PDF generation for independent advisory firms. Built by a founder-led engineering shop.',
+    description: 'Digital intake forms, CRM sync and signed-PDF generation for independent advisory firms. Built on Redtail for our first client; the same approach works with Wealthbox and Salesforce.',
     og: '/assets/og/investment-firms.png',
     render: function () { return MK.pages.advisors(); },
     jsonLd: function () { return [MK.ld.org(), MK.ld.crumbs([['Home', '/'], ['Investment firms', '/solutions/investment-firms'], ['Advisory firms', '/for-advisors']])]; },
@@ -109,7 +109,7 @@ MK.routes = [
   },
   {
     path: '/case-studies/team-financial-strategies',
-    title: 'Case Study: Team Financial Strategies Cut Onboarding from 45 Minutes to 5 | MonkFlow',
+    title: 'Case Study: Team Financial Strategies Cut Onboarding from 45 Minutes to Under 5 | MonkFlow',
     description: 'A custom intake form, Redtail sync and signed-PDF generation took new-client onboarding at a four-advisor firm from 45 minutes to under 5. Built in two weeks.',
     ogType: 'article',
     render: function () { return MK.pages.tfs(); },
@@ -135,13 +135,13 @@ MK.routes = [
   {
     path: '/security',
     title: 'Security & Data Handling | MonkFlow',
-    description: 'AES-256 encryption at rest, TLS in transit, no client PII persisted on MonkFlow infrastructure, role-based access, audit trails, and private or zero-retention AI deployment.',
+    description: 'AES-256 encryption at rest, TLS in transit, records kept in your own systems, role-based access, audit trails, and private or zero-retention AI deployment.',
     render: function () { return MK.pages.security(); },
     jsonLd: function () { return [MK.ld.org(), MK.ld.crumbs([['Home', '/'], ['Security', '/security']])]; },
   },
   {
     path: '/tools',
-    title: 'Free Tools for Banks, CRE and Investment Firms | MonkFlow',
+    title: 'Free Tools | MonkFlow',
     description: 'Free tools built from public data, starting with a bank efficiency benchmark from FDIC Call Reports. No sign-up.',
     render: function () { return MK.pages.tools(); },
     jsonLd: function () { return [MK.ld.org(), MK.ld.crumbs([['Home', '/'], ['Tools', '/tools']])]; },
@@ -163,7 +163,7 @@ MK.routes = [
   {
     path: '/contact',
     title: 'Contact | MonkFlow',
-    description: 'Send MonkFlow a message, or book a call with the engineer who would build your system.',
+    description: 'Contact MonkFlow, or book a call with the engineer who would build your system.',
     render: function () { return MK.pages.contact(); },
     jsonLd: function () { return [MK.ld.org(), MK.ld.crumbs([['Home', '/'], ['Contact', '/contact']])]; },
   },
@@ -322,7 +322,7 @@ MK.bench.show = function (b) {
   var out = document.querySelector('[data-bench-out]');
   if (!out) return;
   out.innerHTML = MK.bench.render(MK.bench.data, b);
-  if (!MK.bench.tracked) { MK.bench.tracked = true; MK.track('Bench Lookup', { band: MK.bench.data.bands[b.band] }); }
+  if (!MK.bench.tracked) { MK.bench.tracked = true; MK.track('Bench Lookup'); }
 };
 
 MK.track = function (name, props) {

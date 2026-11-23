@@ -711,6 +711,7 @@ window.addEventListener('popstate', () => {
   if (!document.getElementById('app-container').classList.contains('hidden')) return;
   // Back from the public site to /admin, or forward to it: load it properly.
   if (onAdminPath()) { window.location.reload(); return; }
+  closeModal(); // Back with the booking window open must not leave it over the previous page
   showLanding();
 });
 
@@ -836,6 +837,12 @@ function showModal(content) {
 function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
 }
+// Escape closes the booking window and the privacy / terms windows.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  closeModal();
+  document.querySelectorAll('.modal-overlay:not(#modal-overlay)').forEach((o) => o.remove());
+});
 
 // ── Sidebar (Client Dashboard — no marketing pages) ──────
 function renderSidebar() {
@@ -1717,7 +1724,7 @@ function renderDashboard() {
             ${icons.analytics} See how they are running
           </button>
           <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="navigateTo('help')">
-            ${icons.send} Send us a message
+            ${icons.send} Contact us
           </button>
           <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="showSchedulingModal()">
             ${icons.clock} Schedule a check-in
@@ -4762,33 +4769,37 @@ function showLegalPage(type) {
   const titles = { privacy: 'Privacy Policy', terms: 'Terms of Service' };
   const content = type === 'privacy'
     ? `<h2>Privacy Policy</h2>
-       <p><strong>Effective Date:</strong> January 1, 2026</p>
-       <p>MonkFlow ("we", "us", "our") operates the getmonkflow.com platform. This policy describes how we collect, use, and protect your information.</p>
-       <h3>Information We Collect</h3>
-       <p>We collect information you provide directly: name, email, company name, and usage data when you interact with our platform. We use cookies for authentication and preferences.</p>
-       <h3>How We Use Your Information</h3>
-       <p>We use your information to provide and improve our services, communicate with you about your account, and send service-related notifications. We do not sell your personal data to third parties.</p>
-       <h3>Data Security</h3>
-       <p>We implement industry-standard security measures including encryption in transit (TLS), encrypted database connections, and secure authentication tokens.</p>
-       <h3>Data Retention</h3>
-       <p>We retain your data for as long as your account is active. You may request deletion of your data by contacting us at nathan@getmonkflow.com.</p>
+       <p><strong>Effective Date:</strong> November 23, 2026</p>
+       <p>MonkFlow ("we", "us", "our") runs the monkflow.io website and the client portal. This policy says what we collect and what we do with it.</p>
+       <h3>What We Collect</h3>
+       <p>When you send the contact form or book a call, we collect what you enter: your name, email address, company and message. If you are a client with a portal account, we hold your name, email address and sign-in details. The site counts page visits with Plausible Analytics, which uses no cookies and does not identify you. The portal uses a cookie to keep you signed in.</p>
+       <h3>How We Use It</h3>
+       <p>We use it to reply to you, to hold the call you booked, and to provide the services in a client agreement. We do not sell personal data.</p>
+       <h3>Client Documents and Records</h3>
+       <p>Documents and records handled for a client are covered by that client's agreement. Files held in the review portal are stored encrypted and deleted on the retention date the client sets.</p>
+       <h3>Security</h3>
+       <p>Data is encrypted in transit (TLS) and at rest (AES-256).</p>
+       <h3>Retention and Deletion</h3>
+       <p>Contact and booking details are kept until you ask us to delete them. To ask, email nathan@monkflow.io.</p>
        <h3>Contact</h3>
-       <p>For privacy inquiries, contact nathan@getmonkflow.com.</p>`
+       <p>For privacy questions, email nathan@monkflow.io.</p>`
     : `<h2>Terms of Service</h2>
-       <p><strong>Effective Date:</strong> January 1, 2026</p>
-       <p>By accessing or using MonkFlow ("the Service"), you agree to these terms.</p>
-       <h3>Account Terms</h3>
-       <p>You must provide accurate information when creating an account. You are responsible for maintaining the security of your credentials. You must be 18 or older to use the Service.</p>
+       <p><strong>Effective Date:</strong> November 23, 2026</p>
+       <p>By using the monkflow.io website, its demos or the client portal ("the Service"), you agree to these terms.</p>
+       <h3>Demos</h3>
+       <p>The demos on this site run on made-up data and are provided for evaluation only. Do not enter real client or personal data into them.</p>
+       <h3>Portal Accounts</h3>
+       <p>Portal accounts are created by invitation for clients. You are responsible for keeping your sign-in details secure.</p>
        <h3>Acceptable Use</h3>
        <p>You may not use the Service for illegal purposes, to transmit malware, to abuse or overload our infrastructure, or to access other users' data without authorization.</p>
-       <h3>Payment Terms</h3>
-       <p>Clients are invoiced based on actual usage and project build costs. Payment terms and refund policies are outlined in your service agreement. Questions about billing can be directed to your account manager.</p>
+       <h3>Fees</h3>
+       <p>Fees and payment terms are set out in your written scope and service agreement. Send billing questions to nathan@monkflow.io.</p>
        <h3>Intellectual Property</h3>
-       <p>You retain ownership of your data and workflows. MonkFlow retains ownership of the platform, code, and service infrastructure.</p>
+       <p>You retain ownership of your data. Ownership of what we build for you is set out in your service agreement. MonkFlow retains ownership of this website and its demos.</p>
        <h3>Limitation of Liability</h3>
-       <p>MonkFlow is provided "as is." We are not liable for indirect, incidental, or consequential damages arising from your use of the Service.</p>
+       <p>This website and its demos are provided "as is." We are not liable for indirect, incidental, or consequential damages arising from your use of them. Client work is governed by the service agreement.</p>
        <h3>Contact</h3>
-       <p>For questions about these terms, contact nathan@getmonkflow.com.</p>`;
+       <p>For questions about these terms, email nathan@monkflow.io.</p>`;
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -4814,7 +4825,7 @@ function showSchedulingModal(opts) {
   const schedIntent = (opts && opts.intent) || '';
   const schedVertical = (opts && opts.vertical) || '';
   // Clients open this from inside the portal; prospects from the public site.
-  const schedTitle = isAuthenticated ? 'Schedule a check-in' : 'Book a call';
+  const schedTitle = isAuthenticated ? 'Schedule a check-in' : schedIntent === 'audit' ? 'Book a call about a workflow audit' : 'Book a call';
   // Analytics: the highest-intent action on the site. Safe if Plausible is not loaded.
   try { window.plausible && window.plausible('Schedule Modal Opened', { props: { intent: schedIntent || 'call', vertical: schedVertical || 'unspecified' } }); } catch (_) {}
 
@@ -4890,7 +4901,7 @@ function showSchedulingModal(opts) {
           <textarea id="sched-notes" required maxlength="1800" rows="2" style="resize:vertical;width:100%;">${escapeHtml(draft.notes)}</textarea>
         </div>
         <div class="modal-footer">
-          <button type="submit" class="btn btn-primary" id="sched-submit-btn" ${sending ? 'disabled' : ''}>${sending ? 'Booking...' : 'Book call'}</button>
+          <button type="submit" class="btn btn-primary" id="sched-submit-btn" ${sending ? 'disabled' : ''}>${sending ? 'Booking...' : 'Book a call'}</button>
         </div>
       </form>` : ''}
     `);
@@ -4901,7 +4912,7 @@ function showSchedulingModal(opts) {
     slot = null;
     render();
     return fetch(`${API_BASE}/appointments/availability?userId=${OWNER_USER_ID}`)
-      .then(res => res.json())
+      .then(res => { if (!res.ok) throw new Error(res.status); return res.json(); })
       .then(data => { days = (data.data || []).filter(d => d.slots && d.slots.length); dayIdx = 0; render(); })
       .catch(() => { days = []; render(); showToast('Failed to load open times', 'error'); });
   }
@@ -4945,8 +4956,8 @@ function showSchedulingModal(opts) {
           timezone: zone,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data.error && data.error.message) || data.error || 'Booking failed');
+      const data = await res.json().catch(() => ({})); // an error page is not JSON
+      if (!res.ok) throw new Error((data.error && data.error.message) || data.error || 'Booking failed. Please try again.');
 
       showModal(`
         <div style="text-align:center;padding:20px 0;">

@@ -13,8 +13,8 @@
      TLS in transit, client documents kept only as long as the client
      sets (encrypted, then deleted), private deployment and zero-retention model options. Do NOT claim
      cyber liability insurance, a DPA on file, or any certification.
-   - Listing a vendor system means "we build around it". Only mark a system
-     `live: true` when it is running in production for a real client.
+   - Listing a vendor system means "we build around it". Do not mark any
+     system as live or in production in the table.
 
    Loaded in the browser as a classic script and in Node by
    scripts/prerender.mjs, so keep it free of DOM access.
@@ -87,8 +87,8 @@ MK.process = [
 ];
 
 MK.engagements = [
-  { title: 'Workflow audit', body: 'A short, contained first step. We map one workflow and its systems, rank the automation opportunities, and write up scope and data handling so your team can decide with facts.', note: 'Where most firms start' },
-  { title: 'Targeted build', body: 'One workflow, automated end to end. For example: rent roll to model, a borrower document portal, or LP onboarding.', note: 'Typically live in weeks' },
+  { title: 'Workflow audit', body: 'A short, contained first step. We map one workflow and its systems, rank the automation opportunities, and write up scope and data handling so your team can decide with facts.', note: 'The first step' },
+  { title: 'Targeted build', body: 'One workflow, automated end to end. For example: rent roll to model, a borrower document portal, or LP onboarding.', note: 'Our first build was live in two weeks' },
   { title: 'Operating system', body: 'Several connected workflows, the integrations between your systems, a portal and a review queue, delivered in stages.', note: 'Staged delivery' },
   { title: 'Operate and iterate', body: 'Ongoing support for what we built: fixes, changes, monitoring of extraction quality, and new workflows as you find them.', note: 'After launch' },
 ];
@@ -104,7 +104,7 @@ MK.tfs = {
   metrics: [
     { value: '45 → under 5 min', label: 'Staff time per new-client onboarding' },
     { value: '2 weeks', label: 'From kickoff to live' },
-    { value: '2 days', label: 'For new accounts to fund, down from 5 to 7' },
+    { value: '2 business days', label: 'For new accounts to fund, down from 5 to 7' },
     { value: 'Under 30 sec', label: 'To pull a complete audit trail for any client' },
   ],
 };
@@ -145,7 +145,7 @@ MK.demoList = [
   {
     key: 'land',
     vertical: 'cre',
-    label: 'Working demo · Commercial real estate',
+    label: 'Walkthrough · Commercial real estate',
     title: 'Land search for brokers',
     shortTitle: 'Finds land that fits a client request',
     short: 'Type the request the way the client wrote it. Every parcel in the county is checked against public records and sorted into a shortlist.',
@@ -214,21 +214,21 @@ MK.verticals = {
       { name: 'Excel models', role: 'Underwriting', how: 'Reads and writes your workbook directly' },
     ],
     roi: { unit: 'Deals screened per month', volume: 20, minutes: 180, minutesLabel: 'Minutes of data entry and assembly per deal', rate: 85 },
-    proof: { demo: 'land', note: 'Our named client work is in wealth management. For commercial real estate, here is working software you can look at, and the same intake-to-system-of-record pattern running in production at a financial firm.' },
+    proof: { demo: 'land', note: 'Our one client so far is a wealth management firm. For commercial real estate, here is working software you can look at, and the same intake-to-system-of-record pattern running in production at that firm.' },
     security: [
       'Deal documents stay in your systems wherever you want them to. Where our review portal is used, source files are encrypted at rest and deleted on a retention date you set.',
       'Role-based access, so a broker, an analyst and an LP each see only what they should.',
       'Every extraction, edit and approval is logged with who and when.',
     ],
     faq: [
-      { q: 'Will this work with our existing Excel model?', a: 'Yes. We build to your workbook as it is: your tabs, your input cells, your naming. You do not have to move to a new modeling tool.' },
+      { q: 'Will this work with our existing Excel model?', a: 'Yes. We would build to your workbook as it is: your tabs, your input cells, your naming. You do not have to move to a new modeling tool.' },
       { q: 'How do you keep extracted numbers accurate?', a: 'Three ways. Validation rules catch what should reconcile and does not, such as rent roll totals or T-12 subtotals. Every value links to its source page. And a person reviews flagged items before anything is accepted into the model.' },
-      { q: 'Have you worked with commercial real estate firms before?', a: 'Our named client work so far is in wealth management, with Team Financial Strategies. For commercial real estate we have built a working land search tool for brokers, which you can see today. We would rather show you working software on your own documents than a wall of logos.' },
+      { q: 'Have you worked with commercial real estate firms before?', a: 'Not yet. Our one client so far is Team Financial Strategies, a wealth management firm. For commercial real estate we have built a working land search tool for brokers, which you can see today.' },
       { q: 'What does an engagement cost?', a: 'It depends on the workflow, the systems involved and how much review tooling your team needs. Every engagement is scoped individually, and you see a written scope and quote before any build work starts.' },
     ],
     meta: {
       title: 'Custom Software & AI for Commercial Real Estate Firms | MonkFlow',
-      description: 'Rent roll, T-12 and OM extraction into your model, IC memo drafts, lease abstraction and LP onboarding portals. Custom-built for CRE firms by a founder-led engineering shop.',
+      description: 'Rent roll, T-12 and OM extraction into your model, IC memo drafts, lease abstraction and LP onboarding portals. Custom-built for CRE firms by one engineer.',
       serviceType: 'Custom software and workflow automation for commercial real estate firms',
       audience: 'Commercial real estate firms',
       og: '/assets/og/commercial-real-estate.png',
@@ -284,10 +284,10 @@ MK.verticals = {
       { name: 'Internal core APIs', role: 'Your own services', how: 'API' },
     ],
     roi: { unit: 'Commercial loan files per month', volume: 30, minutes: 240, minutesLabel: 'Minutes of document chasing, spreading and memo assembly per file', rate: 95 },
-    proof: { demo: 'lending', note: 'Our named client work is in wealth management. For banking, we built a working commercial loan document portal you can open right now.' },
+    proof: { demo: 'lending', note: 'Our one client so far is a wealth management firm. For banking, we built a working commercial loan document portal you can open right now.' },
     security: [
       'Borrower and customer data stays in your systems wherever you want it to. Where our review portal is used, source files are encrypted at rest and deleted on a retention date you set.',
-      'Deployment inside your own cloud environment is available, so data never leaves your perimeter.',
+      'We can deploy inside your own cloud environment, so data stays inside it.',
       'AES-256 encryption at rest and TLS in transit, role-based access for lenders, credit and operations, and an event log of every upload, download and decision.',
       'We complete your vendor due-diligence questionnaire and walk your information security team through the architecture before any data moves.',
     ],
@@ -295,7 +295,7 @@ MK.verticals = {
       { q: 'Do you replace our core or loan origination system?', a: 'No. We build the layer around them: the borrower-facing portal, the extraction and review step, and the integration that puts approved data where it belongs.' },
       { q: 'Where does borrower data live?', a: 'In your systems. What we build can be deployed inside your own cloud environment. If you use our review portal, source files are encrypted at rest with AES-256 and deleted on a retention date you set; the figures you reviewed stay in the portal as part of your audit trail.' },
       { q: 'How is AI used in credit work?', a: 'For reading and drafting only: pulling figures out of returns and statements, and producing a first draft of a memo in your format. Calculations are deterministic, every figure links to its source page, and a credit analyst reviews and approves the result. Models can run in your own cloud or under zero-retention configurations.' },
-      { q: 'Have you worked with banks before?', a: 'Our named client work so far is in wealth management, with Team Financial Strategies. For banking we have built a working commercial loan document portal with encrypted uploads, online financial forms and a banker dashboard, which you can try today.' },
+      { q: 'Have you worked with banks before?', a: 'Not yet. Our one client so far is Team Financial Strategies, a wealth management firm. For banking we have built a working commercial loan document portal with encrypted uploads, online financial forms and a banker dashboard, which you can try today.' },
       { q: 'What does an engagement cost?', a: 'It depends on the workflow, the systems involved and your deployment requirements. Every engagement is scoped individually, and you see a written scope and quote before any build work starts.' },
     ],
     meta: {
@@ -353,12 +353,12 @@ MK.verticals = {
       { name: 'Allvue', role: 'Fund accounting', how: 'API and exports' },
       { name: 'Addepar', role: 'Portfolio reporting', how: 'API' },
       { name: 'Orion', role: 'Portfolio accounting', how: 'API' },
-      { name: 'Redtail', role: 'Advisor CRM', how: 'API', live: true },
+      { name: 'Redtail', role: 'Advisor CRM', how: 'API' },
       { name: 'Wealthbox', role: 'Advisor CRM', how: 'API' },
       { name: 'Salesforce Financial Services Cloud', role: 'CRM', how: 'API' },
     ],
     roi: { unit: 'Investor onboardings and reports per month', volume: 15, minutes: 120, minutesLabel: 'Minutes of collection, re-typing and assembly for each', rate: 90 },
-    proof: { demo: null, note: 'This is the vertical where our named client work sits.' },
+    proof: { demo: null, note: 'Our one client so far, Team Financial Strategies, is in this group.' },
     security: [
       'Investor and client records stay in your systems wherever you want them to. Where our review portal is used, source files are encrypted at rest and deleted on a retention date you set.',
       'Role-based access for investor relations, finance, compliance and outside investors.',
@@ -368,7 +368,7 @@ MK.verticals = {
     faq: [
       { q: 'Do we have to change fund administrators or CRMs?', a: 'No. We build around what you run today and hand data to your administrator in the format they already accept.' },
       { q: 'Who reviews AI-drafted letters and summaries?', a: 'Your team. Drafts are generated from approved numbers and go through your normal review before anything is released to an investor.' },
-      { q: 'Do you work with RIAs as well as funds?', a: 'Yes. Our named client, Team Financial Strategies, is a four-advisor wealth management firm. There is a separate page for advisory firms with more detail.' },
+      { q: 'Do you work with RIAs as well as funds?', a: 'Yes. Our client, Team Financial Strategies, is a four-advisor wealth management firm. The Advisory firms (RIAs) page has more detail.' },
       { q: 'What does an engagement cost?', a: 'It depends on the workflow, the systems involved and how much review tooling your team needs. Every engagement is scoped individually, and you see a written scope and quote before any build work starts.' },
     ],
     meta: {
@@ -401,7 +401,7 @@ MK.advisors = {
   ],
   stack: ['Wealthbox', 'Redtail', 'Salesforce Financial Services Cloud', 'eMoney', 'RightCapital', 'MoneyGuidePro', 'Schwab Advisor Center', 'Fidelity'],
   scopes: [
-    { title: 'Onboarding audit', body: 'A recorded walkthrough of your current new-client onboarding and a written report on the highest-value fixes for your firm\'s stack.' },
+    { title: 'Workflow audit', body: 'A recorded walkthrough of your current new-client onboarding and a written report on the highest-value fixes for your firm\'s stack.' },
     { title: 'Intake build', body: 'A digital intake form and one CRM sync: document upload, e-signature, conditional logic, automatic CRM record creation and custodian form pre-fill.' },
     { title: 'Full onboarding system', body: 'The full Team Financial Strategies scope: intake, CRM sync, contract auto-population, signed-PDF generation, reminder sequences and financial-profile sync.' },
   ],

@@ -107,3 +107,22 @@ test('requests, vault and integrations are live: ask, withdraw, open a stored do
   await page.getByRole('table').getByRole('link').first().click();
   await expect(page).toHaveURL(/\/demo\/bank\/review\/doc-\d+$/);
 });
+
+test('Back from a deep demo page goes to that demo\'s home, not out of the demo', async ({ page }) => {
+  await page.goto('/demo/bank/review');
+  await expect(page.getByRole('tab', { name: /Needs review/ })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/demo\/bank$/);
+  await expect(page.getByRole('status').filter({ hasText: 'Demo workspace' })).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(/\/demo\/bank\/review$/);
+
+  await page.goto('/demo/family-office/k1/export');
+  await expect(page.getByRole('status').filter({ hasText: 'Demo workspace' })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/demo\/family-office$/);
+
+  // K-1 screens belong to the family-office demo only.
+  await page.goto('/demo/bank');
+  await expect(page.getByRole('link', { name: /K-1 tracker/ })).toHaveCount(0);
+});
