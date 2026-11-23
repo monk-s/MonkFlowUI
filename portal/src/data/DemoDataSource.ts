@@ -76,6 +76,8 @@ export class DemoDataSource implements PortalDataSource {
     this.example = EXAMPLE_WORKSPACES[which]();
     shift = this.example.today ? Date.parse(`${this.example.today}T15:00:00Z`) - Date.now() : 0;
     this.session = this.makeSession();
+    // Only the family-office demo has K-1 screens; the shell shows them where this method exists.
+    if (which !== 'family-office') (this as { getK1Tracker?: unknown }).getK1Tracker = undefined;
     this.state = this.load() ?? this.fresh();
   }
 

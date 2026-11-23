@@ -53,7 +53,7 @@ function Demo() {
   // nothing behind it, so Back would leave the demo. Put the demo's home underneath.
   useEffect(() => {
     if (!which || window.history.state?.idx) return;
-    const home = which === 'family-office' ? '/demo/family-office/k1' : `/demo/${which}`;
+    const home = `/demo/${which}`;
     const here = window.location.pathname.replace(/\/$/, '');
     if (here === home) return;
     navigate(home, { replace: true });
