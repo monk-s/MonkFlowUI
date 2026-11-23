@@ -4912,7 +4912,7 @@ function showSchedulingModal(opts) {
     slot = null;
     render();
     return fetch(`${API_BASE}/appointments/availability?userId=${OWNER_USER_ID}`)
-      .then(res => res.json())
+      .then(res => { if (!res.ok) throw new Error(res.status); return res.json(); })
       .then(data => { days = (data.data || []).filter(d => d.slots && d.slots.length); dayIdx = 0; render(); })
       .catch(() => { days = []; render(); showToast('Failed to load open times', 'error'); });
   }
@@ -4956,8 +4956,8 @@ function showSchedulingModal(opts) {
           timezone: zone,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data.error && data.error.message) || data.error || 'Booking failed');
+      const data = await res.json().catch(() => ({})); // an error page is not JSON
+      if (!res.ok) throw new Error((data.error && data.error.message) || data.error || 'Booking failed. Please try again.');
 
       showModal(`
         <div style="text-align:center;padding:20px 0;">

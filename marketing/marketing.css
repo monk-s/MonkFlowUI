@@ -234,7 +234,7 @@ html.has-session #landing-container { display: none; }
 }
 .mk-roi input:focus { outline: 2px solid var(--mk-accent); outline-offset: 1px; border-color: var(--mk-accent); box-shadow: none; }
 .mk-roi-out { padding: 32px; background: var(--mk-navy); color: #b9c5d3; display: grid; gap: 24px; align-content: center; }
-.mk-roi-out strong { display: block; font-family: var(--mk-serif); font-size: 44px; line-height: 1; color: #fff; letter-spacing: -0.02em; }
+.mk-roi-out strong { overflow-wrap: anywhere; display: block; font-family: var(--mk-serif); font-size: 44px; line-height: 1; color: #fff; letter-spacing: -0.02em; }
 .mk-roi-out span { display: block; font-size: 14.5px; margin-top: 8px; }
 .mk-roi-out p { font-size: 13px; color: #8fa0b4; border-top: 1px solid rgba(255, 255, 255, 0.16); padding-top: 16px; }
 
@@ -424,4 +424,10 @@ html.has-session #landing-container { display: none; }
   .mk-bench-card { padding: 20px; }
   .mk-bench-lower { grid-template-columns: 1fr; }
   .mk-bench-title h2 { font-size: 22px; }
+}
+/* Phone: links big enough to tap */
+@media (max-width: 680px) {
+  .mk-footer li a, .mk-footer li button, .mk-crumbs a { display: inline-block; padding: 8px 0; }
+  .mk-footer li { margin-bottom: 0; }
+  a.mk-arrow, button.mk-arrow { padding-top: 8px; padding-bottom: 8px; }
 }
