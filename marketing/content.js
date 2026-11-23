@@ -13,8 +13,8 @@
      TLS in transit, client documents kept only as long as the client
      sets (encrypted, then deleted), private deployment and zero-retention model options. Do NOT claim
      cyber liability insurance, a DPA on file, or any certification.
-   - Listing a vendor system means "we build around it". Only mark a system
-     `live: true` when it is running in production for a real client.
+   - Listing a vendor system means "we build around it". Do not mark any
+     system as live or in production in the table.
 
    Loaded in the browser as a classic script and in Node by
    scripts/prerender.mjs, so keep it free of DOM access.
@@ -353,7 +353,7 @@ MK.verticals = {
       { name: 'Allvue', role: 'Fund accounting', how: 'API and exports' },
       { name: 'Addepar', role: 'Portfolio reporting', how: 'API' },
       { name: 'Orion', role: 'Portfolio accounting', how: 'API' },
-      { name: 'Redtail', role: 'Advisor CRM', how: 'API', live: true },
+      { name: 'Redtail', role: 'Advisor CRM', how: 'API' },
       { name: 'Wealthbox', role: 'Advisor CRM', how: 'API' },
       { name: 'Salesforce Financial Services Cloud', role: 'CRM', how: 'API' },
     ],

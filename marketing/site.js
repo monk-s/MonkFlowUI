@@ -163,7 +163,7 @@ MK.routes = [
   {
     path: '/contact',
     title: 'Contact | MonkFlow',
-    description: 'Send MonkFlow a message, or book a call with the engineer who would build your system.',
+    description: 'Contact MonkFlow, or book a call with the engineer who would build your system.',
     render: function () { return MK.pages.contact(); },
     jsonLd: function () { return [MK.ld.org(), MK.ld.crumbs([['Home', '/'], ['Contact', '/contact']])]; },
   },

@@ -1717,7 +1717,7 @@ function renderDashboard() {
             ${icons.analytics} See how they are running
           </button>
           <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="navigateTo('help')">
-            ${icons.send} Send us a message
+            ${icons.send} Contact us
           </button>
           <button class="btn btn-secondary" style="width:100%;justify-content:flex-start;gap:12px;" onclick="showSchedulingModal()">
             ${icons.clock} Schedule a check-in

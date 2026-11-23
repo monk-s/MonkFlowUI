@@ -1,8 +1,8 @@
 // Route table. Page paths are at the site root; vercel.json rewrites each
 // group listed here to /portal/index.html. When a new top-level path is
 // added, add it to vercel.json and scripts/dev-server.mjs too.
-import { lazy, Suspense, useMemo } from 'react';
-import { createBrowserRouter, Navigate, Outlet, useParams, type RouteObject } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { createBrowserRouter, Navigate, Outlet, useNavigate, useParams, type RouteObject } from 'react-router-dom';
 import { DemoSessionProvider, SessionProvider } from './auth/session';
 import { SignIn } from './auth/SignIn';
 import { Invite } from './auth/Invite';
@@ -48,6 +48,17 @@ function Demo() {
   const { vertical } = useParams();
   const which = isDemoKey(vertical) ? vertical : null;
   const source = useMemo(() => (which ? new DemoDataSource(which) : null), [which]);
+  const navigate = useNavigate();
+  // A visitor who lands on a deep demo page (the site links to /demo/bank/review) has
+  // nothing behind it, so Back would leave the demo. Put the demo's home underneath.
+  useEffect(() => {
+    if (!which || window.history.state?.idx) return;
+    const home = which === 'family-office' ? '/demo/family-office/k1' : `/demo/${which}`;
+    const here = window.location.pathname.replace(/\/$/, '');
+    if (here === home) return;
+    navigate(home, { replace: true });
+    navigate(here + window.location.search + window.location.hash);
+  }, []); // once, on arrival
   if (!source) return <Navigate to="/demo/cre" replace />;
   return <DemoSessionProvider session={source.session}><DataSourceProvider value={source}><AppShell /></DataSourceProvider></DemoSessionProvider>;
 }

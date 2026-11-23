@@ -108,7 +108,7 @@ MK.footer = function () {
         '<div><h4>Get started</h4><ul>' +
           '<li><button type="button" data-book>Book a call</button></li>' +
           '<li><button type="button" data-book data-intent="audit">Start with a workflow audit</button></li>' +
-          '<li>' + MK.link('/contact', 'Send a message') + '</li>' +
+          '<li>' + MK.link('/contact', 'Contact') + '</li>' +
           '<li><a href="/sign-in">Client sign in</a></li>' +
         '</ul></div>' +
       '</div>' +
@@ -150,7 +150,8 @@ MK.frame = function (inner, caption, style) {
 
 // Homepage hero: the document-review demo playing in a window frame.
 MK.heroShots = function () {
-  return MK.frame(MK.media(MK.demoList[0], true), 'A working demo with made-up data.');
+  var d = MK.demoList[0];
+  return MK.frame('<a href="' + d.url + '" target="_blank" rel="noopener" aria-label="' + d.cta + ': ' + MK.esc(d.title) + '">' + MK.media(d, true) + '</a>', 'A working demo with made-up data.');
 };
 
 // Homepage: one short card per demo, the whole card a link.
@@ -215,14 +216,14 @@ MK.tfsProof = function () {
 };
 
 MK.demoCard = function (d) {
-  return '<div class="mk-demo">' +
+  return '<a class="mk-demo" href="' + d.url + '" target="_blank" rel="noopener">' +
     (d.shot ? '<span class="mk-shot">' + MK.media(d) + '</span>' : '') +
     '<span class="mk-demo-label">' + d.label + '</span>' +
     '<h3>' + d.title + '</h3>' +
     '<p>' + d.body + '</p>' +
     '<p class="mk-small">Built by MonkFlow. Synthetic data, not a client deployment.</p>' +
-    '<div class="mk-actions"><a class="mk-arrow" href="' + d.url + '" target="_blank" rel="noopener">' + d.cta + '</a></div>' +
-  '</div>';
+    '<span class="mk-arrow">' + d.cta + '</span>' +
+  '</a>';
 };
 
 MK.demos = function (keys) {
@@ -261,7 +262,7 @@ MK.integrationRows = function (keys) {
   keys.forEach(function (k) {
     MK.verticals[k].integrations.forEach(function (it) {
       if (seen[it.name]) { seen[it.name].verticals.push(k); return; }
-      var row = { name: it.name, role: it.role, how: it.how, live: !!it.live, verticals: [k] };
+      var row = { name: it.name, role: it.role, how: it.how, verticals: [k] };
       seen[it.name] = row;
       rows.push(row);
     });
@@ -278,7 +279,7 @@ MK.integrations = function (keys) {
   return '<div data-filter-group>' + chips +
     '<div class="mk-table-wrap"><table class="mk-table mk-table-stack"><thead><tr><th>System</th><th>What it does for you</th><th>How we connect</th></tr></thead><tbody>' +
     MK.integrationRows(keys).map(function (r) {
-      return '<tr data-verticals="' + r.verticals.join(' ') + '"><td>' + r.name + (r.live ? '<span class="mk-tag">In production</span>' : '') + '</td><td class="mk-muted">' + r.role + '</td><td class="mk-muted">' + r.how + '</td></tr>';
+      return '<tr data-verticals="' + r.verticals.join(' ') + '"><td>' + r.name + '</td><td class="mk-muted">' + r.role + '</td><td class="mk-muted">' + r.how + '</td></tr>';
     }).join('') + '</tbody></table></div>' +
     '<p class="mk-small" style="margin-top:16px;max-width:76ch;">These are the systems we design around. Access depends on your license and each vendor\'s API program, and where there is no API we work from scheduled exports. Do not see yours? If it has an API or an export, we can build to it.</p>' +
   '</div>';
@@ -830,7 +831,7 @@ MK.pages.contact = function () {
   return '' +
   '<section class="mk-hero-simple"><div class="mk-wrap"><div class="mk-hero-copy">' +
     MK.crumbs([{ href: '/', label: 'Home' }, { label: 'Contact' }]) +
-    '<h1>Send us a message.</h1>' +
+    '<h1>Contact us.</h1>' +
     '<p class="mk-lede">We reply within one business day. If you would rather talk, ' + MK.bookBtn('book a call', { cls: 'mk-arrow' }) + '</p>' +
     '<form class="mk-form" data-contact>' +
       field('name', 'Full name', 'text', 'maxlength="200" autocomplete="name"') +
@@ -839,7 +840,7 @@ MK.pages.contact = function () {
       '<label>Message<textarea name="message" rows="5" required maxlength="5000"></textarea></label>' +
       // Left empty by people; filled in by form-spam bots.
       '<label class="mk-form-trap" aria-hidden="true">Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>' +
-      '<div class="mk-actions"><button type="submit" class="mk-btn mk-btn-primary">Send message</button>' +
+      '<div class="mk-actions"><button type="submit" class="mk-btn mk-btn-primary">Send</button>' +
         '<span class="mk-small" data-contact-status role="status"></span></div>' +
     '</form>' +
   '</div></div></section>';
